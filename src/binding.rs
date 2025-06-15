@@ -10,8 +10,10 @@ use alloc::{boxed::Box, rc::Rc, vec::Vec};
 
 use crate::{
     Compute, Computed,
+    map::Map,
     utils::add,
     watcher::{Metadata, Watcher, WatcherGuard, WatcherManager},
+    zip::Zip,
 };
 
 /// The `CustomBinding` trait represents a computable value that can also be set.
@@ -93,12 +95,10 @@ where
     C2: Compute,
     T: Add<C2::Output> + 'static,
 {
-    type Output = crate::map::Map<
-        crate::zip::Zip<Self, C2>,
-        fn(
-            (T, <C2 as crate::compute::Compute>::Output),
-        ) -> <T as std::ops::Add<<C2 as crate::compute::Compute>::Output>>::Output,
-        <T as std::ops::Add<<C2 as crate::Compute>::Output>>::Output,
+    type Output = Map<
+        Zip<Self, C2>,
+        fn((T, <C2 as Compute>::Output)) -> <T as Add<<C2 as Compute>::Output>>::Output,
+        <T as Add<<C2 as Compute>::Output>>::Output,
     >;
 
     fn add(self, rhs: C2) -> Self::Output {
@@ -267,6 +267,17 @@ impl Binding<i32> {
     /// Decrements the value by the specified amount.
     pub fn decrement(&self, n: i32) {
         self.handle(|v| *v -= n);
+    }
+}
+
+impl<T: Clone> Binding<T> {
+    pub fn append<Ele>(&self, ele: Ele)
+    where
+        T: Extend<Ele>,
+    {
+        self.handle(|v| {
+            v.extend([ele]);
+        });
     }
 }
 

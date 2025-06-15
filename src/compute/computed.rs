@@ -4,8 +4,10 @@ use alloc::boxed::Box;
 
 use crate::{
     ComputeExt, constant,
+    map::Map,
     utils::add,
     watcher::{BoxWatcher, Watcher, WatcherGuard},
+    zip::Zip,
 };
 
 use super::Compute;
@@ -57,12 +59,10 @@ where
     C2: Compute,
     T: Add<C2::Output> + 'static,
 {
-    type Output = crate::map::Map<
-        crate::zip::Zip<crate::compute::Computed<T>, C2>,
-        fn(
-            (T, <C2 as crate::compute::Compute>::Output),
-        ) -> <T as std::ops::Add<<C2 as crate::compute::Compute>::Output>>::Output,
-        <T as std::ops::Add<<C2 as crate::Compute>::Output>>::Output,
+    type Output = Map<
+        Zip<Self, C2>,
+        fn((T, <C2 as Compute>::Output)) -> <T as Add<<C2 as Compute>::Output>>::Output,
+        <T as Add<<C2 as Compute>::Output>>::Output,
     >;
 
     fn add(self, rhs: C2) -> Self::Output {

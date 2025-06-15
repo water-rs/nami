@@ -1,3 +1,4 @@
+#![no_std]
 #![doc = include_str!("../README.md")]
 extern crate alloc;
 
@@ -76,6 +77,8 @@ mod impl_constant {
 
     use crate::Compute;
     use crate::watcher::WatcherGuard;
+    use alloc::string::String;
+    use alloc::vec::Vec;
     impl_constant!(
         &'static str,
         u8,

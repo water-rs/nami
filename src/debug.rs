@@ -1,5 +1,5 @@
+use alloc::rc::Rc;
 use core::any::type_name;
-use std::rc::Rc;
 
 use crate::{
     Compute,
