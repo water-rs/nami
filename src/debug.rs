@@ -1,9 +1,9 @@
 use alloc::{boxed::Box, rc::Rc};
-use core::any::{Any, type_name};
+use core::any::type_name;
 
 use crate::{
-    Compute,
-    watcher::{BoxWatcherGuard, Metadata, Watcher, WatcherGuard},
+    Signal,
+    watcher::{BoxWatcherGuard, Context, Watcher, WatcherGuard},
 };
 
 #[derive(Debug, Clone)]
@@ -29,13 +29,14 @@ impl core::fmt::Debug for DebugInner {
 
 impl<C> Debug<C>
 where
-    C: Compute,
+    C: Signal,
     C::Output: core::fmt::Debug,
 {
     pub fn with_config(source: C, config: Config) -> Self {
         let name = type_name::<C>();
         let guard: BoxWatcherGuard = if config.flags.contains(ConfigFlags::CHANGE) {
-            Box::new(source.add_watcher(move |value, metadata: Metadata| {
+            Box::new(source.watch(move |context: Context<_>| {
+                let Context { value, metadata } = context;
                 if metadata.is_empty() {
                     log::info!("`{name}` changed to {value:?}");
                 } else {
@@ -78,21 +79,21 @@ pub struct Config {
     pub flags: ConfigFlags,
 }
 
-impl<C> Compute for Debug<C>
+impl<C> Signal for Debug<C>
 where
-    C: Compute,
+    C: Signal,
     C::Output: core::fmt::Debug,
 {
     type Output = C::Output;
-    fn compute(&self) -> Self::Output {
+    fn get(&self) -> Self::Output {
         let name = type_name::<C>();
-        let value = self.source.compute();
+        let value = self.source.get();
         if self.inner.config.flags.contains(ConfigFlags::COMPUTE) {
             log::debug!("`{name}` computed value {value:?}");
         }
         value
     }
-    fn add_watcher(&self, watcher: impl Watcher<C::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Watcher<C::Output>) -> impl WatcherGuard {
         enum Or<A, B> {
             A(A),
             B(B),
@@ -100,7 +101,7 @@ where
 
         impl<A: 'static, B: 'static> WatcherGuard for Or<A, B> {}
 
-        let mut guard = Or::A(self.source.add_watcher(watcher));
+        let mut guard = Or::A(self.source.watch(watcher));
         if self.inner.config.flags.contains(ConfigFlags::WATCH) {
             log::debug!("Added watcher");
         }

@@ -41,23 +41,41 @@ impl MetadataInner {
 }
 
 pub trait Watcher<T: 'static>: 'static {
-    fn notify(&self, value: T, metadata: Metadata);
+    fn notify(&self, context: Context<T>);
 }
 
 impl<F, T: 'static> Watcher<T> for F
 where
-    F: Fn(T, Metadata) + 'static,
+    F: Fn(Context<T>) + 'static,
 {
-    fn notify(&self, value: T, metadata: Metadata) {
-        (self)(value, metadata);
+    fn notify(&self, context: Context<T>) {
+        (self)(context);
     }
 }
 
 pub type BoxWatcher<T> = Box<dyn Watcher<T>>;
 
 impl<T: 'static> Watcher<T> for Box<dyn Watcher<T>> {
-    fn notify(&self, value: T, metadata: Metadata) {
-        (**self).notify(value, metadata);
+    fn notify(&self, context: Context<T>) {
+        (**self).notify(context);
+    }
+}
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Context<T> {
+    pub value: T,
+    pub metadata: Metadata,
+}
+
+impl<T> Context<T> {
+    pub const fn new(value: T, metadata: Metadata) -> Self {
+        Self { value, metadata }
+    }
+    #[must_use]
+    pub fn with<V: Clone + 'static>(mut self, value: V) -> Self {
+        self.metadata = self.metadata.with(value);
+        self
     }
 }
 
@@ -262,7 +280,7 @@ impl<T: 'static> WatcherManagerInner<T> {
     /// Notifies all registered watchers with a value and metadata.
     pub fn notify(&self, value: impl Fn() -> T, metadata: &Metadata) {
         for watcher in self.map.values() {
-            watcher.notify(value(), metadata.clone());
+            watcher.notify(Context::new(value(), metadata.clone()));
         }
     }
 

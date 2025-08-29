@@ -3,14 +3,14 @@ use core::{any::Any, ops::Add};
 use alloc::boxed::Box;
 
 use crate::{
-    ComputeExt, constant,
+    SignalExt, constant,
     map::Map,
     utils::add,
     watcher::{BoxWatcher, BoxWatcherGuard, Watcher, WatcherGuard},
     zip::Zip,
 };
 
-use super::Compute;
+use super::Signal;
 
 /// A wrapper around a boxed implementation of the `ComputedImpl` trait.
 ///
@@ -40,15 +40,15 @@ pub(crate) trait ComputedImpl: Any {
 ///
 /// This allows any `Compute` type to be used as a `ComputedImpl`, providing
 /// a bridge between the public and internal interfaces.
-impl<C: Compute + 'static> ComputedImpl for C {
+impl<C: Signal + 'static> ComputedImpl for C {
     type Output = C::Output;
 
     fn compute(&self) -> Self::Output {
-        <Self as Compute>::compute(self)
+        <Self as Signal>::get(self)
     }
 
     fn add_watcher(&self, watcher: BoxWatcher<Self::Output>) -> BoxWatcherGuard {
-        Box::new(<Self as Compute>::add_watcher(self, watcher))
+        Box::new(<Self as Signal>::watch(self, watcher))
     }
     fn cloned(&self) -> Computed<Self::Output> {
         self.clone().computed()
@@ -57,13 +57,13 @@ impl<C: Compute + 'static> ComputedImpl for C {
 
 impl<T, C2> Add<C2> for Computed<T>
 where
-    C2: Compute,
+    C2: Signal,
     T: Add<C2::Output> + 'static,
 {
     type Output = Map<
         Zip<Self, C2>,
-        fn((T, <C2 as Compute>::Output)) -> <T as Add<<C2 as Compute>::Output>>::Output,
-        <T as Add<<C2 as Compute>::Output>>::Output,
+        fn((T, <C2 as Signal>::Output)) -> <T as Add<<C2 as Signal>::Output>>::Output,
+        <T as Add<<C2 as Signal>::Output>>::Output,
     >;
 
     fn add(self, rhs: C2) -> Self::Output {
@@ -92,14 +92,14 @@ impl<T> core::fmt::Debug for Computed<T> {
 /// Implements `Compute` for `Computed<T>`.
 ///
 /// This delegates to the internal boxed implementation.
-impl<T: 'static> Compute for Computed<T> {
+impl<T: 'static> Signal for Computed<T> {
     type Output = T;
 
-    fn compute(&self) -> Self::Output {
+    fn get(&self) -> Self::Output {
         self.0.compute()
     }
 
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         self.0.add_watcher(Box::new(watcher))
     }
 }
@@ -116,7 +116,7 @@ impl<T> Computed<T> {
     /// The provided value is boxed and stored internally.
     pub fn new<C>(value: C) -> Self
     where
-        C: Compute<Output = T> + Clone + 'static,
+        C: Signal<Output = T> + Clone + 'static,
     {
         Self(Box::new(value))
     }

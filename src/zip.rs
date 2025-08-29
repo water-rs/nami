@@ -12,9 +12,9 @@
 use alloc::rc::Rc;
 
 use crate::{
-    Compute,
+    Signal,
     map::{Map, map},
-    watcher::{Watcher, WatcherGuard},
+    watcher::{Context, Watcher, WatcherGuard},
 };
 
 /// A structure that combines two `Compute` instances into a single computation
@@ -43,7 +43,7 @@ impl<A, B> Zip<A, B> {
 
 /// A/ This trait provides a way to apply a function to the individual elements
 /// of a nested tuple structure, flattening the structure in the process.
-pub trait FlattenMap<F, T, Output>: Sized + Compute {
+pub trait FlattenMap<F, T, Output>: Sized + Signal {
     /// Maps a function over the flattened elements of a nested tuple.
     ///
     /// # Parameters
@@ -58,7 +58,7 @@ pub trait FlattenMap<F, T, Output>: Sized + Compute {
 /// Implementation for flattening and mapping a tuple of two elements.
 impl<C, F, T1, T2, Output> FlattenMap<F, (T1, T2), Output> for C
 where
-    C: Compute<Output = (T1, T2)> + 'static,
+    C: Signal<Output = (T1, T2)> + 'static,
     F: 'static + Fn(T1, T2) -> Output,
     T1: 'static,
     T2: 'static,
@@ -72,7 +72,7 @@ where
 /// Implementation for flattening and mapping a tuple of three elements.
 impl<C, F, T1, T2, T3, Output> FlattenMap<F, (T1, T2, T3), Output> for C
 where
-    C: Compute<Output = ((T1, T2), T3)> + 'static,
+    C: Signal<Output = ((T1, T2), T3)> + 'static,
     F: 'static + Fn(T1, T2, T3) -> Output,
 {
     fn flatten_map(self, f: F) -> Map<C, impl Fn(((T1, T2), T3)) -> Output, Output> {
@@ -92,14 +92,14 @@ where
 /// A new `Zip` instance that computes both values and returns them as a tuple.
 pub const fn zip<A, B>(a: A, b: B) -> Zip<A, B>
 where
-    A: Compute,
-    B: Compute,
+    A: Signal,
+    B: Signal,
 {
     Zip::new(a, b)
 }
 
-/// Implementation of the `Compute` trait for `Zip`.
-impl<A: Compute, B: Compute> Compute for Zip<A, B> {
+/// Implementation of the `Signal` trait for `Zip`.
+impl<A: Signal, B: Signal> Signal for Zip<A, B> {
     /// The output type of the zipped computation is a tuple of the outputs of the individual computations.
     type Output = (A::Output, B::Output);
 
@@ -107,9 +107,9 @@ impl<A: Compute, B: Compute> Compute for Zip<A, B> {
     ///
     /// # Returns
     /// A tuple containing the results of computing `a` and `b`.
-    fn compute(&self) -> Self::Output {
+    fn get(&self) -> Self::Output {
         let Self { a, b } = self;
-        (a.compute(), b.compute())
+        (a.get(), b.get())
     }
 
     /// Adds a watcher to the zipped computation.
@@ -122,23 +122,25 @@ impl<A: Compute, B: Compute> Compute for Zip<A, B> {
     ///
     /// # Returns
     /// A `WatcherGuard` that, when dropped, will remove the watchers from both computations.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         let watcher = Rc::new(watcher);
         let Self { a, b } = self;
         let guard_a = {
             let watcher = watcher.clone();
             let b = b.clone();
-            self.a.add_watcher(move |value: A::Output, metadata| {
-                let result = (value, b.compute());
-                watcher.notify(result, metadata);
+            self.a.watch(move |context: Context<A::Output>| {
+                let Context { value, metadata } = context;
+                let result = (value, b.get());
+                watcher.notify(Context::new(result, metadata));
             })
         };
 
         let guard_b = {
             let a = a.clone();
-            self.b.add_watcher(move |value: B::Output, metadata| {
-                let result = (a.compute(), value);
-                watcher.notify(result, metadata);
+            self.b.watch(move |context: Context<B::Output>| {
+                let Context { value, metadata } = context;
+                let result = (a.get(), value);
+                watcher.notify(Context::new(result, metadata));
             })
         };
 

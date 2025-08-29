@@ -28,8 +28,12 @@
 //! assert_eq!(total.compute(), 108.0);
 //! ```
 
+use core::cell::RefCell;
+
+use alloc::rc::Rc;
+
 use crate::{
-    Compute,
+    Signal,
     watcher::{Watcher, WatcherGuard},
 };
 
@@ -69,7 +73,7 @@ impl<T> From<T> for Constant<T> {
     }
 }
 
-impl<T: Clone + 'static> Compute for Constant<T> {
+impl<T: Clone + 'static> Signal for Constant<T> {
     type Output = T;
 
     /// Computes the constant value.
@@ -79,7 +83,7 @@ impl<T: Clone + 'static> Compute for Constant<T> {
     /// # Returns
     ///
     /// A clone of the constant value.
-    fn compute(&self) -> Self::Output {
+    fn get(&self) -> Self::Output {
         self.0.clone()
     }
 
@@ -96,7 +100,7 @@ impl<T: Clone + 'static> Compute for Constant<T> {
     /// # Returns
     ///
     /// A `WatcherGuard` with an empty cleanup function.
-    fn add_watcher(&self, _watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {}
+    fn watch(&self, _watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {}
 }
 
 /// Creates a new constant reactive value.
@@ -121,4 +125,55 @@ impl<T: Clone + 'static> Compute for Constant<T> {
 /// ```
 pub fn constant<T>(value: T) -> Constant<T> {
     Constant::from(value)
+}
+
+struct LazyInner<F, T> {
+    f: F,
+    value: RefCell<Option<T>>,
+}
+
+pub struct Lazy<F, T> {
+    inner: Rc<LazyInner<F, T>>,
+}
+
+impl<F, T> Lazy<F, T>
+where
+    F: Fn() -> T,
+    T: Clone + 'static,
+{
+    pub fn new(f: F) -> Self {
+        Self {
+            inner: Rc::new(LazyInner {
+                f,
+                value: RefCell::default(),
+            }),
+        }
+    }
+}
+
+impl<F, T> Clone for Lazy<F, T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<F, T> Signal for Lazy<F, T>
+where
+    F: 'static + Fn() -> T,
+    T: Clone + 'static,
+{
+    type Output = T;
+    fn get(&self) -> Self::Output {
+        self.inner.value.borrow().as_ref().map_or_else(
+            || {
+                let value = (self.inner.f)();
+                *self.inner.value.borrow_mut() = Some(value.clone());
+                value
+            },
+            Clone::clone,
+        )
+    }
+    fn watch(&self, _watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {}
 }

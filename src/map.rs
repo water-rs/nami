@@ -6,13 +6,6 @@
 //! the reactive nature of the computation. It automatically caches the result of the transformation
 //! for better performance, invalidating the cache only when the source value changes.
 //!
-//! ## Key Components
-//!
-//! - `Map<C, F, Output>`: A reactive value that applies transformation `F` to source `C`
-//! - `map()`: Helper function for creating `Map` instances
-//! - Automatic caching of transformation results
-//! - Reactive propagation of changes from source to transformed value
-//!
 //! ## Usage Example
 //!
 //! ```rust
@@ -33,8 +26,8 @@ use core::marker::PhantomData;
 use alloc::rc::Rc;
 
 use crate::{
-    Compute,
-    watcher::{Watcher, WatcherGuard},
+    Signal,
+    watcher::{Context, Watcher, WatcherGuard},
 };
 
 /// A reactive computation that transforms values from a source computation.
@@ -48,7 +41,7 @@ pub struct Map<C, F, Output> {
     _marker: PhantomData<Output>,
 }
 
-impl<C: Compute + 'static, F: 'static, Output> Map<C, F, Output> {
+impl<C: Signal + 'static, F: 'static, Output> Map<C, F, Output> {
     /// Creates a new `Map` that transforms values from `source` using function `f`.
     ///
     /// # Parameters
@@ -93,7 +86,7 @@ impl<C: Compute + 'static, F: 'static, Output> Map<C, F, Output> {
 /// ```
 pub fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
 where
-    C: Compute + 'static,
+    C: Signal + 'static,
     F: 'static + Fn(C::Output) -> Output,
 {
     Map::new(source, f)
@@ -109,24 +102,26 @@ impl<C: Clone, F, Output> Clone for Map<C, F, Output> {
     }
 }
 
-impl<C, F, Output> Compute for Map<C, F, Output>
+impl<C, F, Output> Signal for Map<C, F, Output>
 where
-    C: Compute,
+    C: Signal,
     F: 'static + Fn(C::Output) -> Output,
     Output: 'static,
 {
     type Output = Output;
 
     /// Computes the transformed value, using the cache when available.
-    fn compute(&self) -> Output {
-        (self.f)(self.source.compute())
+    fn get(&self) -> Output {
+        (self.f)(self.source.get())
     }
 
     /// Registers a watcher to be notified when the transformed value changes.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         let this = self.clone();
 
-        self.source
-            .add_watcher(move |_value, metadata| watcher.notify(this.compute(), metadata))
+        self.source.watch(move |context| {
+            let Context { value, metadata } = context;
+            watcher.notify(Context::new((this.f)(value), metadata));
+        })
     }
 }

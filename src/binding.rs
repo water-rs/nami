@@ -9,10 +9,10 @@ use core::{
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 
 use crate::{
-    Compute, Computed,
+    Computed, Signal,
     map::Map,
     utils::add,
-    watcher::{Metadata, Watcher, WatcherGuard, WatcherManager},
+    watcher::{Context, Metadata, Watcher, WatcherGuard, WatcherManager},
     zip::Zip,
 };
 
@@ -20,7 +20,7 @@ use crate::{
 ///
 /// Any type implementing this trait must also implement `Compute` to provide the
 /// ability to retrieve its current value, and adds the ability to mutate the value.
-pub trait CustomBinding: Compute {
+pub trait CustomBinding: Signal {
     /// Sets a new value for this binding.
     ///
     /// This will typically trigger notifications to any watchers.
@@ -37,7 +37,7 @@ pub struct Binding<T: 'static>(Box<dyn BindingImpl<Output = T>>);
 ///
 /// This trait is used to erase the specific type of binding while still preserving
 /// the operations that can be performed on it.
-trait BindingImpl: crate::compute::ComputedImpl {
+trait BindingImpl: crate::signal::ComputedImpl {
     /// Sets a new value
     fn set(&self, value: Self::Output);
 
@@ -92,13 +92,13 @@ impl<T> Binding<Vec<T>> {
 
 impl<T, C2> Add<C2> for Binding<T>
 where
-    C2: Compute,
+    C2: Signal,
     T: Add<C2::Output> + 'static,
 {
     type Output = Map<
         Zip<Self, C2>,
-        fn((T, <C2 as Compute>::Output)) -> <T as Add<<C2 as Compute>::Output>>::Output,
-        <T as Add<<C2 as Compute>::Output>>::Output,
+        fn((T, <C2 as Signal>::Output)) -> <T as Add<<C2 as Signal>::Output>>::Output,
+        <T as Add<<C2 as Signal>::Output>>::Output,
     >;
 
     fn add(self, rhs: C2) -> Self::Output {
@@ -343,16 +343,16 @@ impl<T: 'static + Clone> Container<T> {
     }
 }
 
-impl<T: 'static + Clone> Compute for Container<T> {
+impl<T: 'static + Clone> Signal for Container<T> {
     type Output = T;
 
     /// Retrieves the current value.
-    fn compute(&self) -> Self::Output {
+    fn get(&self) -> Self::Output {
         self.value.borrow().deref().clone()
     }
 
     /// Registers a watcher to be notified when the value changes.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         self.watchers.register_as_guard(watcher)
     }
 }
@@ -366,16 +366,16 @@ impl<T: 'static + Clone> CustomBinding for Container<T> {
     }
 }
 
-impl<T: 'static> Compute for Binding<T> {
+impl<T: 'static> Signal for Binding<T> {
     type Output = T;
 
     /// Computes the current value of the binding.
-    fn compute(&self) -> Self::Output {
+    fn get(&self) -> Self::Output {
         self.get()
     }
 
     /// Registers a watcher to be notified when the binding's value changes.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         self.0.add_watcher(Box::new(watcher))
     }
 }
@@ -406,7 +406,7 @@ impl<Input, Output, Getter, Setter> Clone for Mapping<Input, Output, Getter, Set
     }
 }
 
-impl<Input, Output, Getter, Setter> Compute for Mapping<Input, Output, Getter, Setter>
+impl<Input, Output, Getter, Setter> Signal for Mapping<Input, Output, Getter, Setter>
 where
     Input: 'static,
     Output: 'static,
@@ -416,17 +416,19 @@ where
     type Output = Output;
 
     /// Computes the output value by applying the getter to the input value.
-    fn compute(&self) -> Self::Output {
-        (self.getter)(self.binding.compute())
+    fn get(&self) -> Self::Output {
+        (self.getter)(self.binding.get())
     }
 
     /// Registers a watcher that will be notified when the input binding changes.
     ///
     /// The watcher receives the transformed value.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         let getter = self.getter.clone();
-        self.binding
-            .add_watcher(move |value, metadata| watcher.notify(getter(value), metadata))
+        self.binding.watch(move |context| {
+            let Context { value, metadata } = context;
+            watcher.notify(Context::new(getter(value), metadata));
+        })
     }
 }
 

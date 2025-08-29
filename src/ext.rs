@@ -1,9 +1,6 @@
-use crate::{
-    Compute, Computed, cache::Cached, compute::WithMetadata, map::Map, watcher::WatcherGuard,
-    zip::Zip,
-};
+use crate::{Computed, Signal, cache::Cached, map::Map, signal::WithMetadata, zip::Zip};
 
-pub trait ComputeExt: Compute + Sized {
+pub trait SignalExt: Signal + Sized {
     fn map<F, Output>(self, f: F) -> Map<Self, F, Output>
     where
         F: 'static + Fn(Self::Output) -> Output,
@@ -12,12 +9,8 @@ pub trait ComputeExt: Compute + Sized {
         Map::new(self, f)
     }
 
-    fn zip<B: Compute>(self, b: B) -> Zip<Self, B> {
+    fn zip<B: Signal>(self, b: B) -> Zip<Self, B> {
         Zip::new(self, b)
-    }
-
-    fn watch(&self, watcher: impl Fn(Self::Output) + 'static) -> impl WatcherGuard {
-        self.add_watcher(move |value, _| watcher(value))
     }
 
     fn cached(self) -> Cached<Self>
@@ -39,4 +32,4 @@ pub trait ComputeExt: Compute + Sized {
     }
 }
 
-impl<C: Compute + Sized> ComputeExt for C {}
+impl<C: Signal + Sized> SignalExt for C {}

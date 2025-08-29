@@ -17,9 +17,9 @@ pub use binding::{Binding, binding};
 pub mod constant;
 #[doc(inline)]
 pub use constant::constant;
-pub mod compute;
+pub mod signal;
 #[doc(inline)]
-pub use compute::{Compute, Computed};
+pub use signal::{Computed, Signal};
 pub mod cache;
 pub mod debug;
 mod ext;
@@ -28,20 +28,20 @@ pub mod utils;
 pub mod watcher;
 pub mod zip;
 #[doc(inline)]
-pub use ext::ComputeExt;
+pub use ext::SignalExt;
 
 #[macro_export]
 macro_rules! impl_constant {
     ($($ty:ty),*) => {
          $(
-            impl $crate::Compute for $ty {
+            impl $crate::Signal for $ty {
                 type Output = Self;
 
-                fn compute(&self) -> Self::Output {
+                fn get(&self) -> Self::Output {
                     self.clone()
                 }
 
-                fn add_watcher(
+                fn watch(
                     &self,
                     _watcher: impl $crate::watcher::Watcher<Self::Output>,
                 ) -> impl WatcherGuard {
@@ -53,18 +53,18 @@ macro_rules! impl_constant {
 
 }
 
-macro_rules! impl_genetic_constant {
+macro_rules! impl_generic_constant {
 
     ( $($ty:ident < $($param:ident),* >),* $(,)? ) => {
         $(
-            impl<$($param: Clone + 'static),*> $crate::Compute for $ty<$($param),*> {
+            impl<$($param: Clone + 'static),*> $crate::Signal for $ty<$($param),*> {
                 type Output = Self;
 
-                fn compute(&self) -> Self::Output {
+                fn get(&self) -> Self::Output {
                     self.clone()
                 }
 
-                fn add_watcher(
+                fn watch(
                     &self,
                     _watcher: impl $crate::watcher::Watcher<Self::Output>,
                 ) -> impl WatcherGuard {
@@ -84,7 +84,7 @@ mod impl_constant {
     use alloc::collections::BTreeMap;
     use core::time::Duration;
 
-    use crate::Compute;
+    use crate::Signal;
     use crate::watcher::WatcherGuard;
     use alloc::string::String;
     use alloc::vec::Vec;
@@ -107,17 +107,14 @@ mod impl_constant {
         Cow<'static, str>
     );
 
-    impl_genetic_constant!(Vec<T>,BTreeMap<K,V>,Option<T>,Result<T,E>);
+    impl_generic_constant!(Vec<T>,BTreeMap<K,V>,Option<T>,Result<T,E>);
 
-    impl<T: 'static> Compute for &'static [T] {
+    impl<T: 'static> Signal for &'static [T] {
         type Output = &'static [T];
-        fn compute(&self) -> Self::Output {
+        fn get(&self) -> Self::Output {
             self
         }
-        fn add_watcher(
-            &self,
-            _watcher: impl crate::watcher::Watcher<Self::Output>,
-        ) -> impl WatcherGuard {
+        fn watch(&self, _watcher: impl crate::watcher::Watcher<Self::Output>) -> impl WatcherGuard {
         }
     }
 }

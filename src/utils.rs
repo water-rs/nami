@@ -10,7 +10,7 @@
 use core::ops::Add;
 
 use crate::{
-    Compute,
+    Signal,
     map::{Map, map},
     zip::{Zip, zip},
 };
@@ -57,8 +57,8 @@ pub fn add<A, B>(
     <A::Output as Add<B::Output>>::Output,
 >
 where
-    A: Compute + 'static,
-    B: Compute + 'static,
+    A: Signal + 'static,
+    B: Signal + 'static,
     A::Output: Add<B::Output>,
 {
     let zip = zip(a, b);
