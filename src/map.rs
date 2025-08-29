@@ -123,7 +123,7 @@ where
     }
 
     /// Registers a watcher to be notified when the transformed value changes.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> WatcherGuard {
+    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         let this = self.clone();
 
         self.source

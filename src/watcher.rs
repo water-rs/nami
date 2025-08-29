@@ -3,7 +3,6 @@ use core::{
     any::{Any, TypeId, type_name},
     cell::RefCell,
     fmt::Debug,
-    mem::forget,
     num::NonZeroUsize,
 };
 
@@ -24,7 +23,9 @@ impl MetadataInner {
     /// Attempts to retrieve a value of type `T` from the metadata store.
     ///
     /// Returns `None` if no value of the requested type is present.
+    #[allow(clippy::unwrap_used)]
     pub fn try_get<T: 'static + Clone>(&self) -> Option<T> {
+        // Once `downcast_ref_unchecked` stablized, we will use it here.
         self.0
             .get(&TypeId::of::<T>())
             .map(|v| v.downcast_ref::<T>().unwrap())
@@ -39,11 +40,11 @@ impl MetadataInner {
     }
 }
 
-pub trait Watcher<T>: 'static {
+pub trait Watcher<T: 'static>: 'static {
     fn notify(&self, value: T, metadata: Metadata);
 }
 
-impl<F, T> Watcher<T> for F
+impl<F, T: 'static> Watcher<T> for F
 where
     F: Fn(T, Metadata) + 'static,
 {
@@ -60,8 +61,54 @@ impl<T: 'static> Watcher<T> for Box<dyn Watcher<T>> {
     }
 }
 
+pub trait WatcherGuard: 'static {}
+
+impl WatcherGuard for () {}
+
+impl<T1: WatcherGuard, T2: WatcherGuard> WatcherGuard for (T1, T2) {}
+
+pub struct OnDrop<F>(Option<F>)
+where
+    F: FnOnce();
+
+impl<F> OnDrop<F>
+where
+    F: FnOnce() + 'static,
+{
+    pub const fn new(f: F) -> Self {
+        Self(Some(f))
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn attach(guard: impl WatcherGuard, f: F) -> impl WatcherGuard {
+        OnDrop::new(move || {
+            let _ = guard;
+            f();
+        })
+    }
+}
+
+#[allow(clippy::unwrap_used)]
+impl<F> Drop for OnDrop<F>
+where
+    F: FnOnce(),
+{
+    fn drop(&mut self) {
+        (self.0.take().unwrap())();
+    }
+}
+
+pub type BoxWatcherGuard = Box<dyn WatcherGuard>;
+
+impl WatcherGuard for Box<dyn WatcherGuard> {}
+
+impl WatcherGuard for Rc<dyn WatcherGuard> {}
+
+impl<F: FnOnce() + 'static> WatcherGuard for OnDrop<F> {}
+
 impl Metadata {
     /// Creates a new, empty metadata container.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -71,13 +118,17 @@ impl Metadata {
     /// # Panics
     ///
     /// Panics if no value of type `T` is present in the metadata.
+    #[must_use]
+    #[allow(clippy::expect_used)]
     pub fn get<T: 'static + Clone>(&self) -> T {
-        self.try_get().unwrap()
+        self.try_get()
+            .expect("Value of requested type should be present in metadata")
     }
 
     /// Attempts to get a value of type `T` from the metadata.
     ///
     /// Returns `None` if no value of the requested type is present.
+    #[must_use]
     pub fn try_get<T: 'static + Clone>(&self) -> Option<T> {
         self.0.try_get()
     }
@@ -85,11 +136,13 @@ impl Metadata {
     /// Adds a value to the metadata and returns the updated metadata.
     ///
     /// This method is chainable for fluent API usage.
+    #[must_use]
     pub fn with<T: 'static + Clone>(mut self, value: T) -> Self {
         self.0.insert(value);
         self
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.0.is_empty()
     }
@@ -101,9 +154,17 @@ pub(crate) type WatcherId = NonZeroUsize;
 /// Manages a collection of watchers for a specific computation type.
 ///
 /// Provides functionality to register, notify, and cancel watchers.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WatcherManager<T> {
     inner: Rc<RefCell<WatcherManagerInner<T>>>,
+}
+
+impl<T> Clone for WatcherManager<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl<T> Default for WatcherManager<T> {
@@ -116,11 +177,13 @@ impl<T> Default for WatcherManager<T> {
 
 impl<T: 'static> WatcherManager<T> {
     /// Creates a new, empty watcher manager.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Checks if the manager has any registered watchers.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.borrow().is_empty()
     }
@@ -130,8 +193,14 @@ impl<T: 'static> WatcherManager<T> {
         self.inner.borrow_mut().register(watcher)
     }
 
+    pub fn register_as_guard(&self, watcher: impl Watcher<T>) -> impl WatcherGuard {
+        let id = self.register(watcher);
+        let this = self.clone();
+        OnDrop::new(move || this.cancel(id))
+    }
+
     /// Notifies all registered watchers with a value and specific metadata.
-    pub fn notify(&self, value: impl Fn() -> T, metadata: Metadata) {
+    pub fn notify(&self, value: impl Fn() -> T, metadata: &Metadata) {
         let this = Rc::downgrade(&self.inner);
         if let Some(this) = this.upgrade() {
             this.borrow().notify(value, metadata);
@@ -140,57 +209,7 @@ impl<T: 'static> WatcherManager<T> {
 
     /// Cancels a previously registered watcher by its identifier.
     pub fn cancel(&self, id: WatcherId) {
-        self.inner.borrow_mut().cancel(id)
-    }
-}
-
-/// A RAII guard that automatically cancels a watcher registration when dropped.
-///
-/// This makes it easy to tie the lifetime of a watcher to a specific scope.
-#[must_use]
-pub struct WatcherGuard(Option<Box<dyn FnOnce()>>);
-
-impl Debug for WatcherGuard {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(type_name::<Self>())
-    }
-}
-
-impl WatcherGuard {
-    /// Creates a new guard that will execute the given function when dropped.
-    pub fn new(f: impl FnOnce() + 'static) -> Self {
-        Self(Some(Box::new(f)))
-    }
-
-    /// Creates a guard that will cancel a watcher registration when dropped.
-    pub fn from_id<T: 'static>(watchers: &WatcherManager<T>, id: WatcherId) -> Self {
-        let weak = Rc::downgrade(&watchers.inner);
-        Self::new(move || {
-            if let Some(rc) = weak.upgrade() {
-                rc.borrow_mut().cancel(id)
-            }
-        })
-    }
-
-    /// Prevents the guard from executing its cleanup function when dropped.
-    ///
-    /// This method is useful when you want to transfer responsibility for cleanup
-    /// to another entity.
-    pub fn leak(self) {
-        forget(self);
-    }
-
-    pub fn on_drop(self, f: impl FnOnce() + 'static) -> Self {
-        Self::new(move || {
-            f();
-            let _ = self;
-        })
-    }
-}
-
-impl Drop for WatcherGuard {
-    fn drop(&mut self) {
-        self.0.take().unwrap()();
+        self.inner.borrow_mut().cancel(id);
     }
 }
 
@@ -224,12 +243,12 @@ impl<T: 'static> WatcherManagerInner<T> {
     }
 
     /// Assigns a new unique identifier for a watcher.
-    fn assign(&mut self) -> WatcherId {
+    const fn assign(&mut self) -> WatcherId {
         let id = self.id;
-        self.id = self
-            .id
-            .checked_add(1)
-            .expect("`id` grows beyond `usize::MAX`");
+        self.id = match self.id.checked_add(1) {
+            Some(id) => id,
+            None => panic!("`id` grows beyond `usize::MAX`"),
+        };
         id
     }
 
@@ -241,7 +260,7 @@ impl<T: 'static> WatcherManagerInner<T> {
     }
 
     /// Notifies all registered watchers with a value and metadata.
-    pub fn notify(&self, value: impl Fn() -> T, metadata: Metadata) {
+    pub fn notify(&self, value: impl Fn() -> T, metadata: &Metadata) {
         for watcher in self.map.values() {
             watcher.notify(value(), metadata.clone());
         }

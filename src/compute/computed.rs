@@ -1,4 +1,4 @@
-use core::ops::Add;
+use core::{any::Any, ops::Add};
 
 use alloc::boxed::Box;
 
@@ -6,7 +6,7 @@ use crate::{
     ComputeExt, constant,
     map::Map,
     utils::add,
-    watcher::{BoxWatcher, Watcher, WatcherGuard},
+    watcher::{BoxWatcher, BoxWatcherGuard, Watcher, WatcherGuard},
     zip::Zip,
 };
 
@@ -22,7 +22,8 @@ pub struct Computed<T>(pub(crate) Box<dyn ComputedImpl<Output = T>>);
 ///
 /// This trait is implemented by types that can compute a value, register watchers,
 /// and provide a cloned version of themselves.
-pub(crate) trait ComputedImpl {
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) trait ComputedImpl: Any {
     /// The result type of the computation
     type Output;
 
@@ -30,7 +31,7 @@ pub(crate) trait ComputedImpl {
     fn compute(&self) -> Self::Output;
 
     /// Registers a watcher that will be notified when the computed value changes
-    fn add_watcher(&self, watcher: BoxWatcher<Self::Output>) -> WatcherGuard;
+    fn add_watcher(&self, watcher: BoxWatcher<Self::Output>) -> BoxWatcherGuard;
 
     fn cloned(&self) -> Computed<Self::Output>;
 }
@@ -46,8 +47,8 @@ impl<C: Compute + 'static> ComputedImpl for C {
         <Self as Compute>::compute(self)
     }
 
-    fn add_watcher(&self, watcher: BoxWatcher<Self::Output>) -> WatcherGuard {
-        <Self as Compute>::add_watcher(self, watcher)
+    fn add_watcher(&self, watcher: BoxWatcher<Self::Output>) -> BoxWatcherGuard {
+        Box::new(<Self as Compute>::add_watcher(self, watcher))
     }
     fn cloned(&self) -> Computed<Self::Output> {
         self.clone().computed()
@@ -98,7 +99,7 @@ impl<T: 'static> Compute for Computed<T> {
         self.0.compute()
     }
 
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> WatcherGuard {
+    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         self.0.add_watcher(Box::new(watcher))
     }
 }

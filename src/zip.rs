@@ -36,7 +36,7 @@ impl<A, B> Zip<A, B> {
     ///
     /// # Returns
     /// A new `Zip` instance containing both computations.
-    pub fn new(a: A, b: B) -> Self {
+    pub const fn new(a: A, b: B) -> Self {
         Self { a, b }
     }
 }
@@ -90,7 +90,7 @@ where
 ///
 /// # Returns
 /// A new `Zip` instance that computes both values and returns them as a tuple.
-pub fn zip<A, B>(a: A, b: B) -> Zip<A, B>
+pub const fn zip<A, B>(a: A, b: B) -> Zip<A, B>
 where
     A: Compute,
     B: Compute,
@@ -122,7 +122,7 @@ impl<A: Compute, B: Compute> Compute for Zip<A, B> {
     ///
     /// # Returns
     /// A `WatcherGuard` that, when dropped, will remove the watchers from both computations.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> WatcherGuard {
+    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         let watcher = Rc::new(watcher);
         let Self { a, b } = self;
         let guard_a = {
@@ -130,7 +130,7 @@ impl<A: Compute, B: Compute> Compute for Zip<A, B> {
             let b = b.clone();
             self.a.add_watcher(move |value: A::Output, metadata| {
                 let result = (value, b.compute());
-                watcher.notify(result, metadata)
+                watcher.notify(result, metadata);
             })
         };
 
@@ -138,12 +138,10 @@ impl<A: Compute, B: Compute> Compute for Zip<A, B> {
             let a = a.clone();
             self.b.add_watcher(move |value: B::Output, metadata| {
                 let result = (a.compute(), value);
-                watcher.notify(result, metadata)
+                watcher.notify(result, metadata);
             })
         };
 
-        WatcherGuard::new(move || {
-            let _ = (guard_a, guard_b);
-        })
+        (guard_a, guard_b)
     }
 }

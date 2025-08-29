@@ -96,9 +96,7 @@ impl<T: Clone + 'static> Compute for Constant<T> {
     /// # Returns
     ///
     /// A `WatcherGuard` with an empty cleanup function.
-    fn add_watcher(&self, _watcher: impl Watcher<Self::Output>) -> WatcherGuard {
-        WatcherGuard::new(|| {})
-    }
+    fn add_watcher(&self, _watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {}
 }
 
 /// Creates a new constant reactive value.

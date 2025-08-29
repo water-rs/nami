@@ -32,7 +32,7 @@ pub trait Compute: Clone + 'static {
     /// Register a watcher to be notified when the computed value changes.
     ///
     /// Returns a guard that, when dropped, will unregister the watcher.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> WatcherGuard;
+    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard;
 }
 
 /// A trait for converting a value into a computation.
@@ -113,7 +113,7 @@ impl<C: Compute, T: Clone + 'static> Compute for WithMetadata<C, T> {
     }
 
     /// Register a watcher, enriching notifications with the metadata.
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> WatcherGuard {
+    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
         let with = self.metadata.clone();
         self.compute
             .add_watcher(move |value, metadata: crate::watcher::Metadata| {

@@ -1,5 +1,14 @@
 #![no_std]
 #![doc = include_str!("../README.md")]
+#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![warn(clippy::cargo)]
+#![warn(clippy::unwrap_used)]
+#![warn(clippy::expect_used)]
+#![warn(clippy::dbg_macro)]
+#![deny(clippy::todo)]
+#![deny(clippy::unimplemented)]
 extern crate alloc;
 
 pub mod binding;
@@ -35,8 +44,8 @@ macro_rules! impl_constant {
                 fn add_watcher(
                     &self,
                     _watcher: impl $crate::watcher::Watcher<Self::Output>,
-                ) -> $crate::watcher::WatcherGuard {
-                    $crate::watcher::WatcherGuard::new(|| {})
+                ) -> impl WatcherGuard {
+
                 }
             }
         )*
@@ -58,8 +67,8 @@ macro_rules! impl_genetic_constant {
                 fn add_watcher(
                     &self,
                     _watcher: impl $crate::watcher::Watcher<Self::Output>,
-                ) -> $crate::watcher::WatcherGuard {
-                    $crate::watcher::WatcherGuard::new(|| {})
+                ) -> impl WatcherGuard {
+
                 }
             }
         )*
@@ -100,7 +109,7 @@ mod impl_constant {
 
     impl_genetic_constant!(Vec<T>,BTreeMap<K,V>,Option<T>,Result<T,E>);
 
-    impl<T> Compute for &'static [T] {
+    impl<T: 'static> Compute for &'static [T] {
         type Output = &'static [T];
         fn compute(&self) -> Self::Output {
             self
@@ -108,8 +117,7 @@ mod impl_constant {
         fn add_watcher(
             &self,
             _watcher: impl crate::watcher::Watcher<Self::Output>,
-        ) -> crate::watcher::WatcherGuard {
-            WatcherGuard::new(|| {})
+        ) -> impl WatcherGuard {
         }
     }
 }

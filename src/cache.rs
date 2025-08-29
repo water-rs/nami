@@ -1,4 +1,4 @@
-use core::cell::RefCell;
+use core::{any::Any, cell::RefCell};
 
 use alloc::rc::Rc;
 
@@ -12,7 +12,7 @@ where
 {
     source: C,
     cache: Rc<RefCell<Option<C::Output>>>,
-    _guard: Rc<WatcherGuard>,
+    _guard: Rc<dyn Any>,
 }
 
 impl<C> Cached<C>
@@ -45,8 +45,8 @@ where
     type Output = C::Output;
     fn compute(&self) -> Self::Output {
         let mut cache = self.cache.borrow_mut();
-        if let Some(cache) = &*cache {
-            cache.clone()
+        if let Some(ref cached_value) = *cache {
+            cached_value.clone()
         } else {
             let value = self.source.compute();
             *cache = Some(value.clone());
@@ -54,7 +54,10 @@ where
         }
     }
 
-    fn add_watcher(&self, watcher: impl crate::watcher::Watcher<Self::Output>) -> WatcherGuard {
+    fn add_watcher(
+        &self,
+        watcher: impl crate::watcher::Watcher<Self::Output>,
+    ) -> impl WatcherGuard {
         self.source.add_watcher(watcher)
     }
 }

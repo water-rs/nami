@@ -16,7 +16,7 @@ pub trait ComputeExt: Compute + Sized {
         Zip::new(self, b)
     }
 
-    fn watch(&self, watcher: impl Fn(Self::Output) + 'static) -> WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Self::Output) + 'static) -> impl WatcherGuard {
         self.add_watcher(move |value, _| watcher(value))
     }
 
