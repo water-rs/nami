@@ -1,3 +1,8 @@
+//! # Watcher Management
+//!
+//! This module provides the infrastructure for managing reactive value watchers,
+//! including metadata handling and notification systems.
+
 use alloc::{boxed::Box, collections::BTreeMap, rc::Rc};
 use core::{
     any::{Any, TypeId, type_name},
@@ -40,38 +45,26 @@ impl MetadataInner {
     }
 }
 
-pub trait Watcher<T: 'static>: 'static {
-    fn notify(&self, context: Context<T>);
-}
+/// Type alias for a boxed watcher function.
+pub type BoxWatcher<T> = Box<dyn Fn(Context<T>) + 'static>;
 
-impl<F, T: 'static> Watcher<T> for F
-where
-    F: Fn(Context<T>) + 'static,
-{
-    fn notify(&self, context: Context<T>) {
-        (self)(context);
-    }
-}
-
-pub type BoxWatcher<T> = Box<dyn Watcher<T>>;
-
-impl<T: 'static> Watcher<T> for Box<dyn Watcher<T>> {
-    fn notify(&self, context: Context<T>) {
-        (**self).notify(context);
-    }
-}
-
+/// Context passed to watchers containing the value and associated metadata.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Context<T> {
+    /// The current value being watched.
     pub value: T,
+    /// Associated metadata for this value change.
     pub metadata: Metadata,
 }
 
 impl<T> Context<T> {
+    /// Creates a new context with the given value and metadata.
     pub const fn new(value: T, metadata: Metadata) -> Self {
         Self { value, metadata }
     }
+
+    /// Adds additional metadata to this context.
     #[must_use]
     pub fn with<V: Clone + 'static>(mut self, value: V) -> Self {
         self.metadata = self.metadata.with(value);
@@ -79,12 +72,14 @@ impl<T> Context<T> {
     }
 }
 
+/// A guard that ensures proper cleanup of watchers when dropped.
 pub trait WatcherGuard: 'static {}
 
 impl WatcherGuard for () {}
 
 impl<T1: WatcherGuard, T2: WatcherGuard> WatcherGuard for (T1, T2) {}
 
+/// A utility struct that runs a cleanup function when dropped.
 pub struct OnDrop<F>(Option<F>)
 where
     F: FnOnce();
@@ -93,10 +88,12 @@ impl<F> OnDrop<F>
 where
     F: FnOnce() + 'static,
 {
+    /// Creates a new `OnDrop` that will call the function when dropped.
     pub const fn new(f: F) -> Self {
         Self(Some(f))
     }
 
+    /// Attaches a cleanup function to a guard.
     #[allow(clippy::needless_pass_by_value)]
     pub fn attach(guard: impl WatcherGuard, f: F) -> impl WatcherGuard {
         OnDrop::new(move || {
@@ -116,6 +113,7 @@ where
     }
 }
 
+/// Type alias for a boxed watcher guard.
 pub type BoxWatcherGuard = Box<dyn WatcherGuard>;
 
 impl WatcherGuard for Box<dyn WatcherGuard> {}
@@ -160,6 +158,7 @@ impl Metadata {
         self
     }
 
+    /// Checks if the metadata container is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.0.is_empty()
@@ -207,11 +206,12 @@ impl<T: 'static> WatcherManager<T> {
     }
 
     /// Registers a new watcher and returns its unique identifier.
-    pub fn register(&self, watcher: impl Watcher<T>) -> WatcherId {
+    pub fn register(&self, watcher: impl Fn(Context<T>) + 'static) -> WatcherId {
         self.inner.borrow_mut().register(watcher)
     }
 
-    pub fn register_as_guard(&self, watcher: impl Watcher<T>) -> impl WatcherGuard {
+    /// Registers a watcher and returns a guard that will unregister it when dropped.
+    pub fn register_as_guard(&self, watcher: impl Fn(Context<T>) + 'static) -> impl WatcherGuard {
         let id = self.register(watcher);
         let this = self.clone();
         OnDrop::new(move || this.cancel(id))
@@ -271,7 +271,7 @@ impl<T: 'static> WatcherManagerInner<T> {
     }
 
     /// Registers a watcher and returns its unique identifier.
-    pub fn register(&mut self, watcher: impl Watcher<T>) -> WatcherId {
+    pub fn register(&mut self, watcher: impl Fn(Context<T>) + 'static) -> WatcherId {
         let id = self.assign();
         self.map.insert(id, Box::new(watcher));
         id
@@ -280,7 +280,7 @@ impl<T: 'static> WatcherManagerInner<T> {
     /// Notifies all registered watchers with a value and metadata.
     pub fn notify(&self, value: impl Fn() -> T, metadata: &Metadata) {
         for watcher in self.map.values() {
-            watcher.notify(Context::new(value(), metadata.clone()));
+            watcher(Context::new(value(), metadata.clone()));
         }
     }
 

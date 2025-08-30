@@ -8,7 +8,7 @@ repository = "https://github.com/waterui/reactive"
 documentation = "https://docs.rs/reactive"
 homepage = "https://github.com/waterui/reactive"
 license = "MIT"
-keywords = ["reactive", "computed", "binding", "observer", "state"]
+keywords = ["reactive", "binding", "observer", "state"]
 categories = ["gui", "data-structures", "embedded", "wasm", "rust-patterns"]
 readme = "README.md"
 

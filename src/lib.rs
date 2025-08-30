@@ -8,6 +8,7 @@
 #![warn(clippy::expect_used)]
 #![warn(clippy::dbg_macro)]
 #![deny(clippy::todo)]
+#![warn(missing_docs)]
 #![deny(clippy::unimplemented)]
 extern crate alloc;
 
@@ -30,6 +31,10 @@ pub mod zip;
 #[doc(inline)]
 pub use ext::SignalExt;
 
+/// Macro to implement the Signal trait for constant types.
+///
+/// This macro generates Signal implementations for types that don't change,
+/// providing them with empty watcher functionality since they never notify changes.
 #[macro_export]
 macro_rules! impl_constant {
     ($($ty:ty),*) => {
@@ -43,7 +48,7 @@ macro_rules! impl_constant {
 
                 fn watch(
                     &self,
-                    _watcher: impl $crate::watcher::Watcher<Self::Output>,
+                    _watcher: impl Fn($crate::watcher::Context<Self::Output>)+'static,
                 ) -> impl WatcherGuard {
 
                 }
@@ -66,7 +71,7 @@ macro_rules! impl_generic_constant {
 
                 fn watch(
                     &self,
-                    _watcher: impl $crate::watcher::Watcher<Self::Output>,
+                    _watcher: impl Fn($crate::watcher::Context<Self::Output>)+'static,
                 ) -> impl WatcherGuard {
 
                 }
@@ -114,7 +119,10 @@ mod impl_constant {
         fn get(&self) -> Self::Output {
             self
         }
-        fn watch(&self, _watcher: impl crate::watcher::Watcher<Self::Output>) -> impl WatcherGuard {
+        fn watch(
+            &self,
+            _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static,
+        ) -> impl WatcherGuard {
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::{
     SignalExt, constant,
     map::Map,
     utils::add,
-    watcher::{BoxWatcher, BoxWatcherGuard, Watcher, WatcherGuard},
+    watcher::{BoxWatcher, BoxWatcherGuard, Context, WatcherGuard},
     zip::Zip,
 };
 
@@ -99,7 +99,7 @@ impl<T: 'static> Signal for Computed<T> {
         self.0.compute()
     }
 
-    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
         self.0.add_watcher(Box::new(watcher))
     }
 }

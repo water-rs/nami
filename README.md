@@ -5,28 +5,28 @@ A powerful, lightweight reactive framework.
 [![Crates.io](https://img.shields.io/crates/v/reactive)](https://crates.io/crates/reactive)
 [![Docs.rs](https://docs.rs/reactive/badge.svg)](https://docs.rs/reactive)
 
-## Core of our architecture: `Compute` trait
+## Core of our architecture: `Signal` trait
 
 ```rust
-pub trait Compute: Clone + 'static {
+use reactive::watcher::{Context, WatcherGuard};
+
+pub trait Signal: Clone + 'static {
     type Output;
 
     // Get the current value
-    fn compute(&self) -> Self::Output;
+    fn get(&self) -> Self::Output;
 
     // Register a watcher to be notified of changes
-    fn add_watcher(&self, watcher: impl Watcher<Self::Output>) -> WatcherGuard;
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard;
 }
 ```
 
-`Compute` describes a reactive value that can be computed and observed. It can generate a new value by `compute()` method.
-This value implements `ComputeResult` trait, so it can be cloned cheaply and compare easily.
-It will notify watchers only when its value actually changes.
-
+`Signal` describes a reactive value that can be computed and observed. It can generate a new value by `get()` method.
+And it will notify watchers only when its value actually changes.
 
 This trait is implemented by `Binding`, `Computed`, and all other reactive types, providing a consistent interface for working with reactive values regardless of their specific implementation.
 
-`Computed<T>` is a type-erased container that can hold any implementation of the `Compute` trait, providing a uniform way to work with different kinds of computations.
+`Computed<T>` is a type-erased container that can hold any implementation of the `Signal` trait, providing a uniform way to work with different kinds of computations.
 
 ### Binding
 
@@ -58,19 +58,19 @@ Bindings serve as the source of truth for application state and notify observers
 Watchers let you react to changes in reactive values:
 
 ```rust
-use reactive::{binding, ComputeExt};
+use reactive::{binding, Signal, watcher::Context};
 
 let name = binding("World".to_string());
 
 // Watch for changes and execute a callback
-let _guard = name.watch(|value| {
-    println!("Hello, {}!", value);
+let _guard = name.watch(|ctx: Context<String>| {
+    println!("Hello, {}!", ctx.value);
 });
 
 // This will trigger the watcher
 name.set("Universe".to_string());
 ```
 
-What's more, watchers can receive a metadata by using `Watcher::new` to construct a standard watcher.It is essential for our reactive animation system.
+What's more, watchers can receive metadata through the `Context` parameter. This is essential for our reactive animation system.
 
 When working with watchers, it's important to store the returned `WatcherGuard`. This guard ensures the watcher is properly unregistered when dropped, preventing memory leaks.

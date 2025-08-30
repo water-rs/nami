@@ -1,6 +1,6 @@
-//! # Addition Operations for Compute Types
+//! # Addition Operations for Signal Types
 //!
-//! This module provides functionality for adding two `Compute` values together.
+//! This module provides functionality for adding two `Signal` values together.
 //! It leverages the `zip` and `map` operations to combine computations and apply
 //! the addition operation to their results.
 //!
@@ -15,21 +15,21 @@ use crate::{
     zip::{Zip, zip},
 };
 
-/// Adds two `Compute` values together.
+/// Adds two `Signal` values together.
 ///
-/// This function takes two values implementing the `Compute` trait and returns a new
+/// This function takes two values implementing the `Signal` trait and returns a new
 /// computation that, when executed, will produce the sum of the outputs of the two
 /// input computations.
 ///
 /// # Type Parameters
 ///
-/// * `A`: The first computation type that implements `Compute`.
-/// * `B`: The second computation type that implements `Compute`.
+/// * `A`: The first computation type that implements `Signal`.
+/// * `B`: The second computation type that implements `Signal`.
 ///
 /// # Constraints
 ///
 /// * `A::Output`: Must implement `Add<B::Output>` to allow addition between the outputs.
-/// * `<A::Output as Add<B::Output>>::Output`: The result type must implement `ComputeResult`.
+/// * `<A::Output as Add<B::Output>>::Output`: The result type must be `'static`.
 ///
 /// # Returns
 ///
@@ -38,14 +38,11 @@ use crate::{
 /// # Examples
 ///
 /// ```
-/// use reactive::{Compute, utils::add};
-///
-/// // Assuming implementations exist
-/// let computation_a = /* some computation that produces a number */;
-/// let computation_b = /* some computation that produces a number */;
-///
-/// let sum_computation = add(computation_a, computation_b);
-/// // When executed, sum_computation will produce the sum of the results
+/// # use reactive::{Signal, utils::add, binding};
+/// let a = binding(5);
+/// let b = binding(3);
+/// let sum = add(a, b);
+/// assert_eq!(sum.get(), 8);
 /// ```
 #[allow(clippy::type_complexity)]
 pub fn add<A, B>(

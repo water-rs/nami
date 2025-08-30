@@ -1,7 +1,7 @@
 //! Provides functionality for combining and transforming computations.
 //!
 //! This module contains:
-//! - `Zip`: A structure to combine two `Compute` instances into one computation
+//! - `Zip`: A structure to combine two `Signal` instances into one computation
 //!   that produces a tuple of their results.
 //! - `FlattenMap`: A trait for flattening and mapping nested tuple structures,
 //!   which simplifies working with multiple zipped computations.
@@ -14,10 +14,10 @@ use alloc::rc::Rc;
 use crate::{
     Signal,
     map::{Map, map},
-    watcher::{Context, Watcher, WatcherGuard},
+    watcher::{Context, WatcherGuard},
 };
 
-/// A structure that combines two `Compute` instances into a single computation
+/// A structure that combines two `Signal` instances into a single computation
 /// that produces a tuple of their results.
 #[derive(Clone)]
 pub struct Zip<A, B> {
@@ -36,6 +36,7 @@ impl<A, B> Zip<A, B> {
     ///
     /// # Returns
     /// A new `Zip` instance containing both computations.
+    /// Creates a new `Zip` that combines two signals.
     pub const fn new(a: A, b: B) -> Self {
         Self { a, b }
     }
@@ -122,7 +123,7 @@ impl<A: Signal, B: Signal> Signal for Zip<A, B> {
     ///
     /// # Returns
     /// A `WatcherGuard` that, when dropped, will remove the watchers from both computations.
-    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
         let watcher = Rc::new(watcher);
         let Self { a, b } = self;
         let guard_a = {
@@ -131,7 +132,7 @@ impl<A: Signal, B: Signal> Signal for Zip<A, B> {
             self.a.watch(move |context: Context<A::Output>| {
                 let Context { value, metadata } = context;
                 let result = (value, b.get());
-                watcher.notify(Context::new(result, metadata));
+                watcher(Context::new(result, metadata));
             })
         };
 
@@ -140,7 +141,7 @@ impl<A: Signal, B: Signal> Signal for Zip<A, B> {
             self.b.watch(move |context: Context<B::Output>| {
                 let Context { value, metadata } = context;
                 let result = (a.get(), value);
-                watcher.notify(Context::new(result, metadata));
+                watcher(Context::new(result, metadata));
             })
         };
 

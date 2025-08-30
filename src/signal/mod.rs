@@ -2,9 +2,9 @@
 //! and automatically update when their inputs change.
 //!
 //! The core abstractions include:
-//! - `signal` - A trait for values that can be signald and watched for changes
-//! - `signalResult` - A trait for types that can be produced by computations
-//! - `Intosignal`/`Intosignald` - Conversion traits for working with computations
+//! - `Signal` - A trait for values that can be computed and watched for changes
+//! - `IntoSignal` - Conversion trait for working with signals
+//! - `IntoComputed` - Conversion trait for creating computed values
 //!
 //! This system enables building reactive data flows where computations automatically
 //! re-execute when their dependencies change, similar to reactive programming models
@@ -15,7 +15,7 @@ pub use computed::*;
 
 use crate::{
     map::{Map, map},
-    watcher::{Context, Watcher, WatcherGuard},
+    watcher::{Context, WatcherGuard},
 };
 
 /// The core trait for reactive system.
@@ -29,10 +29,10 @@ pub trait Signal: Clone + 'static {
     /// Execute the computation and return the current value.
     fn get(&self) -> Self::Output;
 
-    /// Register a watcher to be notified when the signald value changes.
+    /// Register a watcher to be notified when the computed value changes.
     ///
     /// Returns a guard that, when dropped, will unregister the watcher.
-    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard;
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard;
 }
 
 /// A trait for converting a value into a computation.
@@ -46,13 +46,13 @@ pub trait IntoSignal<Output> {
 
 /// A trait for converting a value directly into a `Computed<Output>`.
 ///
-/// This is a convenience trait that builds on `Intosignal`.
+/// This is a convenience trait that builds on `IntoSignal`.
 pub trait IntoComputed<Output>: IntoSignal<Output> + 'static {
-    /// Convert this value into a `signald<Output>`.
+    /// Convert this value into a `Computed<Output>`.
     fn into_computed(self) -> Computed<Output>;
 }
 
-/// Blanket implementation of `Intosignal` for any type that implements `signal`.
+/// Blanket implementation of `IntoSignal` for any type that implements `Signal`.
 ///
 /// This allows for automatic conversion between compatible computation types.
 impl<C, Output> IntoSignal<Output> for C
@@ -69,13 +69,13 @@ where
     }
 }
 
-/// Blanket implementation of `IntoComputed` for any type that implements `Intosignal`.
+/// Blanket implementation of `IntoComputed` for any type that implements `IntoSignal`.
 impl<C, Output> IntoComputed<Output> for C
 where
     C: IntoSignal<Output> + 'static,
     C::Signal: Clone + 'static,
 {
-    /// Convert this value into a `signald<Output>`.
+    /// Convert this value into a `Computed<Output>`.
     fn into_computed(self) -> Computed<Output> {
         Computed::new(self.into_signal())
     }
@@ -113,11 +113,11 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
     }
 
     /// Register a watcher, enriching notifications with the metadata.
-    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
         let with = self.metadata.clone();
         self.signal
             .watch(move |context: Context<<C as Signal>::Output>| {
-                watcher.notify(context.with(with.clone()));
+                watcher(context.with(with.clone()));
             })
     }
 }

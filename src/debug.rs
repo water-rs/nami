@@ -1,11 +1,20 @@
+//! # Debug utilities for Signal tracing
+//!
+//! This module provides debugging functionality to help trace and monitor
+//! the behavior of reactive signals during development.
+
 use alloc::{boxed::Box, rc::Rc};
 use core::any::type_name;
 
 use crate::{
     Signal,
-    watcher::{BoxWatcherGuard, Context, Watcher, WatcherGuard},
+    watcher::{BoxWatcherGuard, Context, WatcherGuard},
 };
 
+/// A debug wrapper for Signal that logs computation events.
+///
+/// This struct wraps a Signal and provides configurable logging for various
+/// events like computation, watcher registration/removal, and value changes.
 #[derive(Debug, Clone)]
 pub struct Debug<C> {
     source: C,
@@ -32,6 +41,7 @@ where
     C: Signal,
     C::Output: core::fmt::Debug,
 {
+    /// Creates a new debug wrapper with the specified configuration.
     pub fn with_config(source: C, config: Config) -> Self {
         let name = type_name::<C>();
         let guard: BoxWatcherGuard = if config.flags.contains(ConfigFlags::CHANGE) {
@@ -54,28 +64,37 @@ where
     }
 }
 
+/// Configuration flags for debugging different aspects of signal behavior.
 #[derive(Debug, Clone, Copy)]
 pub struct ConfigFlags(u32);
 
 impl ConfigFlags {
+    /// Flag for logging computation events.
     pub const COMPUTE: Self = Self(1 << 0);
+    /// Flag for logging watcher registration events.
     pub const WATCH: Self = Self(1 << 1);
+    /// Flag for logging watcher removal events.
     pub const REMOVE_WATCHER: Self = Self(1 << 2);
+    /// Flag for logging value change events.
     pub const CHANGE: Self = Self(1 << 3);
 
+    /// Checks if this flag set contains all the flags in the other set.
     #[must_use]
     pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) == other.0
     }
 
+    /// Creates an empty flag set with no flags enabled.
     #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 }
 
+/// Configuration for debug logging behavior.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// The set of flags that determine which events to log.
     pub flags: ConfigFlags,
 }
 
@@ -93,7 +112,7 @@ where
         }
         value
     }
-    fn watch(&self, watcher: impl Watcher<C::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<C::Output>) + 'static) -> impl WatcherGuard {
         enum Or<A, B> {
             A(A),
             B(B),

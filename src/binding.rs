@@ -1,3 +1,8 @@
+//! # Reactive Bindings
+//!
+//! This module provides two-way reactive bindings that can both produce and consume values.
+//! Unlike read-only signals, bindings can be modified and will notify watchers of changes.
+
 use core::{
     any::{Any, type_name},
     cell::RefCell,
@@ -12,13 +17,13 @@ use crate::{
     Computed, Signal,
     map::Map,
     utils::add,
-    watcher::{Context, Metadata, Watcher, WatcherGuard, WatcherManager},
+    watcher::{Context, Metadata, WatcherGuard, WatcherManager},
     zip::Zip,
 };
 
 /// The `CustomBinding` trait represents a computable value that can also be set.
 ///
-/// Any type implementing this trait must also implement `Compute` to provide the
+/// Any type implementing this trait must also implement `Signal` to provide the
 /// ability to retrieve its current value, and adds the ability to mutate the value.
 pub trait CustomBinding: Signal {
     /// Sets a new value for this binding.
@@ -199,6 +204,7 @@ impl<T: 'static> Binding<T> {
         }
     }
 
+    /// Sets the binding to a new value.
     pub fn set(&self, value: T) {
         self.0.set(value);
     }
@@ -245,6 +251,7 @@ impl<T: 'static> Binding<T> {
 }
 
 impl<T: Ord + Clone> Binding<Vec<T>> {
+    /// Sorts the vector in-place and notifies watchers.
     pub fn sort(&self) {
         self.handle(|value| {
             value.sort();
@@ -279,6 +286,7 @@ impl Binding<i32> {
 }
 
 impl<T: Clone> Binding<T> {
+    /// Appends an element to the binding's value (which must implement `Extend`).
     pub fn append<Ele>(&self, ele: Ele)
     where
         T: Extend<Ele>,
@@ -352,7 +360,7 @@ impl<T: 'static + Clone> Signal for Container<T> {
     }
 
     /// Registers a watcher to be notified when the value changes.
-    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
         self.watchers.register_as_guard(watcher)
     }
 }
@@ -375,7 +383,7 @@ impl<T: 'static> Signal for Binding<T> {
     }
 
     /// Registers a watcher to be notified when the binding's value changes.
-    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
         self.0.add_watcher(Box::new(watcher))
     }
 }
@@ -423,11 +431,11 @@ where
     /// Registers a watcher that will be notified when the input binding changes.
     ///
     /// The watcher receives the transformed value.
-    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
         let getter = self.getter.clone();
         self.binding.watch(move |context| {
             let Context { value, metadata } = context;
-            watcher.notify(Context::new(getter(value), metadata));
+            watcher(Context::new(getter(value), metadata));
         })
     }
 }

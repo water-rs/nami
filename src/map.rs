@@ -9,16 +9,16 @@
 //! ## Usage Example
 //!
 //! ```rust
-//! use reactive::{binding, Compute};
+//! use reactive::{binding, Signal};
 //! use reactive::map::map;
 //!
 //! let number = binding(5);
 //! let doubled = map(number, |n| n * 2);
 //!
-//! assert_eq!(doubled.compute(), 10);
+//! assert_eq!(doubled.get(), 10);
 //!
 //! // The transformation is automatically cached
-//! doubled.compute(); // Uses cached value, doesn't recompute
+//! doubled.get(); // Uses cached value, doesn't recompute
 //! ```
 
 use core::marker::PhantomData;
@@ -27,7 +27,7 @@ use alloc::rc::Rc;
 
 use crate::{
     Signal,
-    watcher::{Context, Watcher, WatcherGuard},
+    watcher::{Context, WatcherGuard},
 };
 
 /// A reactive computation that transforms values from a source computation.
@@ -77,12 +77,12 @@ impl<C: Signal + 'static, F: 'static, Output> Map<C, F, Output> {
 /// # Example
 ///
 /// ```rust
-/// use reactive::{binding, Compute};
+/// use reactive::{binding, Signal};
 /// use reactive::map::map;
 ///
 /// let counter = binding(1);
 /// let doubled = map(counter, |n| n * 2);
-/// assert_eq!(doubled.compute(), 2);
+/// assert_eq!(doubled.get(), 2);
 /// ```
 pub fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
 where
@@ -116,12 +116,12 @@ where
     }
 
     /// Registers a watcher to be notified when the transformed value changes.
-    fn watch(&self, watcher: impl Watcher<Self::Output>) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
         let this = self.clone();
 
         self.source.watch(move |context| {
             let Context { value, metadata } = context;
-            watcher.notify(Context::new((this.f)(value), metadata));
+            watcher(Context::new((this.f)(value), metadata));
         })
     }
 }
