@@ -1,14 +1,14 @@
-# reactive-rs
+# Nami
 
 A powerful, lightweight reactive framework.
 
-[![Crates.io](https://img.shields.io/crates/v/reactive)](https://crates.io/crates/reactive)
-[![Docs.rs](https://docs.rs/reactive/badge.svg)](https://docs.rs/reactive)
+[![Crates.io](https://img.shields.io/crates/v/nami)](https://crates.io/crates/nami)
+[![Docs.rs](https://docs.rs/nami/badge.svg)](https://docs.rs/nami)
 
 ## Core of our architecture: `Signal` trait
 
 ```rust
-use reactive::watcher::{Context, WatcherGuard};
+use nami::watcher::{Context, WatcherGuard};
 
 pub trait Signal: Clone + 'static {
     type Output;
@@ -33,7 +33,7 @@ This trait is implemented by `Binding`, `Computed`, and all other reactive types
 `Binding<T>` is a two-way binding container.
 
 ```rust
-use reactive::binding;
+use nami::binding;
 
 // Create a binding with an initial value
 let counter = binding(0);
@@ -58,7 +58,7 @@ Bindings serve as the source of truth for application state and notify observers
 Watchers let you react to changes in reactive values:
 
 ```rust
-use reactive::{binding, Signal, watcher::Context};
+use nami::{binding, Signal, watcher::Context};
 
 let name = binding("World".to_string());
 

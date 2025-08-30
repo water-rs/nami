@@ -38,7 +38,7 @@ use crate::{
 /// # Examples
 ///
 /// ```
-/// # use reactive::{Signal, utils::add, binding};
+/// # use nami::{Signal, utils::add, binding};
 /// let a = binding(5);
 /// let b = binding(3);
 /// let sum = add(a, b);

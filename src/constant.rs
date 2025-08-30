@@ -10,7 +10,7 @@
 //! ## Examples
 //!
 //! ```
-//! use reactive::{Signal, SignalExt, constant, binding};
+//! use nami::{Signal, SignalExt, constant, binding};
 //!
 //! // Create a constant
 //! let tax_rate = constant(0.08);
@@ -45,7 +45,7 @@ use crate::{
 /// # Examples
 ///
 /// ```
-/// use reactive::{Signal, constant};
+/// use nami::{Signal, constant};
 ///
 /// let c = constant(42);
 /// assert_eq!(c.get(), 42);
@@ -113,7 +113,7 @@ impl<T: Clone + 'static> Signal for Constant<T> {
 /// # Examples
 ///
 /// ```
-/// use reactive::{Signal, constant};
+/// use nami::{Signal, constant};
 ///
 /// let c = constant("Hello, world!");
 /// assert_eq!(c.get(), "Hello, world!");

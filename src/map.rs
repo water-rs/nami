@@ -9,8 +9,8 @@
 //! ## Usage Example
 //!
 //! ```rust
-//! use reactive::{binding, Signal};
-//! use reactive::map::map;
+//! use nami::{binding, Signal};
+//! use nami::map::map;
 //!
 //! let number = binding(5);
 //! let doubled = map(number, |n| n * 2);
@@ -77,8 +77,8 @@ impl<C: Signal + 'static, F: 'static, Output> Map<C, F, Output> {
 /// # Example
 ///
 /// ```rust
-/// use reactive::{binding, Signal};
-/// use reactive::map::map;
+/// use nami::{binding, Signal};
+/// use nami::map::map;
 ///
 /// let counter = binding(1);
 /// let doubled = map(counter, |n| n * 2);
