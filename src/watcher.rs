@@ -73,6 +73,7 @@ impl<T> Context<T> {
 }
 
 /// A guard that ensures proper cleanup of watchers when dropped.
+#[must_use]
 pub trait WatcherGuard: 'static {}
 
 impl WatcherGuard for () {}

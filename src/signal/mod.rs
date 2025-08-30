@@ -32,6 +32,7 @@ pub trait Signal: Clone + 'static {
     /// Register a watcher to be notified when the computed value changes.
     ///
     /// Returns a guard that, when dropped, will unregister the watcher.
+    #[must_use]
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard;
 }
 
