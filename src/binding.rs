@@ -17,7 +17,7 @@ use crate::{
     Computed, Signal,
     map::Map,
     utils::add,
-    watcher::{Context, Metadata, WatcherGuard, WatcherManager},
+    watcher::{BoxWatcherGuard, Context, Metadata, WatcherManager},
     zip::Zip,
 };
 
@@ -353,6 +353,7 @@ impl<T: 'static + Clone> Container<T> {
 
 impl<T: 'static + Clone> Signal for Container<T> {
     type Output = T;
+    type Guard = BoxWatcherGuard;
 
     /// Retrieves the current value.
     fn get(&self) -> Self::Output {
@@ -360,8 +361,8 @@ impl<T: 'static + Clone> Signal for Container<T> {
     }
 
     /// Registers a watcher to be notified when the value changes.
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
-        self.watchers.register_as_guard(watcher)
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+        Box::new(self.watchers.register_as_guard(watcher))
     }
 }
 
@@ -376,6 +377,7 @@ impl<T: 'static + Clone> CustomBinding for Container<T> {
 
 impl<T: 'static> Signal for Binding<T> {
     type Output = T;
+    type Guard = BoxWatcherGuard;
 
     /// Computes the current value of the binding.
     fn get(&self) -> Self::Output {
@@ -383,8 +385,8 @@ impl<T: 'static> Signal for Binding<T> {
     }
 
     /// Registers a watcher to be notified when the binding's value changes.
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
-        self.0.add_watcher(Box::new(watcher))
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+        Box::new(self.0.add_watcher(Box::new(watcher)))
     }
 }
 
@@ -422,6 +424,7 @@ where
     Setter: 'static,
 {
     type Output = Output;
+    type Guard = <Binding<Input> as Signal>::Guard;
 
     /// Computes the output value by applying the getter to the input value.
     fn get(&self) -> Self::Output {
@@ -431,7 +434,7 @@ where
     /// Registers a watcher that will be notified when the input binding changes.
     ///
     /// The watcher receives the transformed value.
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let getter = self.getter.clone();
         self.binding.watch(move |context| {
             let Context { value, metadata } = context;

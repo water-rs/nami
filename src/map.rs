@@ -25,10 +25,7 @@ use core::marker::PhantomData;
 
 use alloc::rc::Rc;
 
-use crate::{
-    Signal,
-    watcher::{Context, WatcherGuard},
-};
+use crate::{Signal, watcher::Context};
 
 /// A reactive computation that transforms values from a source computation.
 ///
@@ -109,6 +106,7 @@ where
     Output: 'static,
 {
     type Output = Output;
+    type Guard = C::Guard;
 
     /// Computes the transformed value, using the cache when available.
     fn get(&self) -> Output {
@@ -116,7 +114,7 @@ where
     }
 
     /// Registers a watcher to be notified when the transformed value changes.
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let this = self.clone();
 
         self.source.watch(move |context| {

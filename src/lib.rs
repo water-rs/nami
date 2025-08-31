@@ -11,7 +11,6 @@
 #![warn(missing_docs)]
 #![deny(clippy::unimplemented)]
 extern crate alloc;
-
 pub mod binding;
 #[doc(inline)]
 pub use binding::{Binding, binding};
@@ -25,11 +24,19 @@ pub mod cache;
 pub mod debug;
 mod ext;
 pub mod map;
+/// Projection utilities for decomposing bindings into component parts.
+pub mod project;
+#[doc(inline)]
+pub use project::Project;
 pub mod utils;
 pub mod watcher;
 pub mod zip;
 #[doc(inline)]
 pub use ext::SignalExt;
+
+#[cfg(feature = "derive")]
+#[doc(inline)]
+pub use nami_derive::Project;
 
 /// Macro to implement the Signal trait for constant types.
 ///
@@ -41,6 +48,7 @@ macro_rules! impl_constant {
          $(
             impl $crate::Signal for $ty {
                 type Output = Self;
+                type Guard = ();
 
                 fn get(&self) -> Self::Output {
                     self.clone()
@@ -49,7 +57,7 @@ macro_rules! impl_constant {
                 fn watch(
                     &self,
                     _watcher: impl Fn($crate::watcher::Context<Self::Output>)+'static,
-                ) -> impl WatcherGuard {
+                )  {
 
                 }
             }
@@ -64,6 +72,7 @@ macro_rules! impl_generic_constant {
         $(
             impl<$($param: Clone + 'static),*> $crate::Signal for $ty<$($param),*> {
                 type Output = Self;
+                type Guard = ();
 
                 fn get(&self) -> Self::Output {
                     self.clone()
@@ -72,7 +81,7 @@ macro_rules! impl_generic_constant {
                 fn watch(
                     &self,
                     _watcher: impl Fn($crate::watcher::Context<Self::Output>)+'static,
-                ) -> impl WatcherGuard {
+                ) {
 
                 }
             }
@@ -90,7 +99,6 @@ mod impl_constant {
     use core::time::Duration;
 
     use crate::Signal;
-    use crate::watcher::WatcherGuard;
     use alloc::string::String;
     use alloc::vec::Vec;
     impl_constant!(
@@ -116,13 +124,10 @@ mod impl_constant {
 
     impl<T: 'static> Signal for &'static [T] {
         type Output = &'static [T];
+        type Guard = ();
         fn get(&self) -> Self::Output {
             self
         }
-        fn watch(
-            &self,
-            _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static,
-        ) -> impl WatcherGuard {
-        }
+        fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
     }
 }

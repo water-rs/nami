@@ -104,6 +104,7 @@ where
     C::Output: core::fmt::Debug,
 {
     type Output = C::Output;
+    type Guard = BoxWatcherGuard;
     fn get(&self) -> Self::Output {
         let name = type_name::<C>();
         let value = self.source.get();
@@ -112,7 +113,7 @@ where
         }
         value
     }
-    fn watch(&self, watcher: impl Fn(Context<C::Output>) + 'static) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<C::Output>) + 'static) -> Self::Guard {
         enum Or<A, B> {
             A(A),
             B(B),
@@ -135,6 +136,6 @@ where
                 log::debug!("Removed watcher");
             });
         }
-        guard
+        Box::new(guard)
     }
 }

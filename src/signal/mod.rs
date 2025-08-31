@@ -25,6 +25,8 @@ use crate::{
 pub trait Signal: Clone + 'static {
     /// The type of value produced by this computation.
     type Output: 'static;
+    /// The guard type returned by the watch method that manages watcher lifecycle.
+    type Guard: WatcherGuard;
 
     /// Execute the computation and return the current value.
     fn get(&self) -> Self::Output;
@@ -33,7 +35,7 @@ pub trait Signal: Clone + 'static {
     ///
     /// Returns a guard that, when dropped, will unregister the watcher.
     #[must_use]
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard;
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard;
 }
 
 /// A trait for converting a value into a computation.
@@ -107,6 +109,7 @@ impl<C, T> WithMetadata<C, T> {
 /// the watcher notifications with the metadata.
 impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
     type Output = C::Output;
+    type Guard = C::Guard;
 
     /// Execute the underlying computation.
     fn get(&self) -> Self::Output {
@@ -114,7 +117,7 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
     }
 
     /// Register a watcher, enriching notifications with the metadata.
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let with = self.metadata.clone();
         self.signal
             .watch(move |context: Context<<C as Signal>::Output>| {

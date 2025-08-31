@@ -6,7 +6,7 @@ use crate::{
     SignalExt, constant,
     map::Map,
     utils::add,
-    watcher::{BoxWatcher, BoxWatcherGuard, Context, WatcherGuard},
+    watcher::{BoxWatcher, BoxWatcherGuard, Context},
     zip::Zip,
 };
 
@@ -94,12 +94,13 @@ impl<T> core::fmt::Debug for Computed<T> {
 /// This delegates to the internal boxed implementation.
 impl<T: 'static> Signal for Computed<T> {
     type Output = T;
+    type Guard = BoxWatcherGuard;
 
     fn get(&self) -> Self::Output {
         self.0.compute()
     }
 
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         self.0.add_watcher(Box::new(watcher))
     }
 }

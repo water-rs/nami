@@ -27,10 +27,7 @@ use core::cell::RefCell;
 
 use alloc::rc::Rc;
 
-use crate::{
-    Signal,
-    watcher::{Context, WatcherGuard},
-};
+use crate::{Signal, watcher::Context};
 
 /// A reactive constant value that never changes.
 ///
@@ -70,6 +67,7 @@ impl<T> From<T> for Constant<T> {
 
 impl<T: Clone + 'static> Signal for Constant<T> {
     type Output = T;
+    type Guard = ();
 
     /// Computes the constant value.
     ///
@@ -95,7 +93,7 @@ impl<T: Clone + 'static> Signal for Constant<T> {
     /// # Returns
     ///
     /// A `WatcherGuard` with an empty cleanup function.
-    fn watch(&self, _watcher: impl Fn(Context<Self::Output>)) -> impl WatcherGuard {}
+    fn watch(&self, _watcher: impl Fn(Context<Self::Output>)) {}
 }
 
 /// Creates a new constant reactive value.
@@ -164,6 +162,7 @@ where
     T: Clone + 'static,
 {
     type Output = T;
+    type Guard = ();
     fn get(&self) -> Self::Output {
         self.inner.value.borrow().as_ref().map_or_else(
             || {
@@ -174,5 +173,5 @@ where
             Clone::clone,
         )
     }
-    fn watch(&self, _watcher: impl Fn(Context<Self::Output>)) -> impl WatcherGuard {}
+    fn watch(&self, _watcher: impl Fn(Context<Self::Output>)) {}
 }

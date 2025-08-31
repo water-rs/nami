@@ -7,10 +7,7 @@ use core::{any::Any, cell::RefCell};
 
 use alloc::rc::Rc;
 
-use crate::{
-    Signal,
-    watcher::{Context, WatcherGuard},
-};
+use crate::{Signal, watcher::Context};
 
 /// A cached wrapper around a Signal that stores the last computed value.
 ///
@@ -60,6 +57,7 @@ where
     C::Output: Clone,
 {
     type Output = C::Output;
+    type Guard = C::Guard;
     fn get(&self) -> Self::Output {
         let mut cache = self.cache.borrow_mut();
         if let Some(ref cached_value) = *cache {
@@ -71,7 +69,7 @@ where
         }
     }
 
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         self.source.watch(watcher)
     }
 }

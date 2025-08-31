@@ -14,7 +14,7 @@ use alloc::rc::Rc;
 use crate::{
     Signal,
     map::{Map, map},
-    watcher::{Context, WatcherGuard},
+    watcher::Context,
 };
 
 /// A structure that combines two `Signal` instances into a single computation
@@ -103,6 +103,7 @@ where
 impl<A: Signal, B: Signal> Signal for Zip<A, B> {
     /// The output type of the zipped computation is a tuple of the outputs of the individual computations.
     type Output = (A::Output, B::Output);
+    type Guard = (A::Guard, B::Guard);
 
     /// Computes both values and returns them as a tuple.
     ///
@@ -123,7 +124,7 @@ impl<A: Signal, B: Signal> Signal for Zip<A, B> {
     ///
     /// # Returns
     /// A `WatcherGuard` that, when dropped, will remove the watchers from both computations.
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let watcher = Rc::new(watcher);
         let Self { a, b } = self;
         let guard_a = {
