@@ -22,10 +22,10 @@ use crate::Binding;
 ///
 /// // Create a binding to a tuple
 /// let tuple_binding = binding((42, "hello"));
-/// 
+///
 /// // Project it into separate bindings for each element
 /// let (num_binding, str_binding) = tuple_binding.project();
-/// 
+///
 /// // Changes to individual projections update the original
 /// num_binding.set(100);
 /// assert_eq!(tuple_binding.get().0, 100);
@@ -34,7 +34,7 @@ use crate::Binding;
 /// ## Struct projection with derive macro
 /// ```rust
 /// use nami::{Binding, binding};
-/// 
+///
 /// #[cfg(feature = "derive")]
 /// # {
 /// #[derive(nami::Project)]
@@ -206,7 +206,7 @@ macro_rules! impl_project {
     ( $(($ty:ident, $idx:tt)),+ ) => {
         impl< $( $ty: 'static ),+ > Project for ( $( $ty ),+ ) {
             type Projected = ( $( Binding<$ty> ),+ );
-            
+
             fn project(source: &Binding<Self>) -> Self::Projected {
                 (
                     $(

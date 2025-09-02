@@ -93,6 +93,26 @@ macro_rules! impl_generic_constant {
 
 }
 
+/// Macro for creating formatted string signals from signal arguments.
+///
+/// This macro takes a format string and signal variables, creating a computed signal
+/// that formats the string with the current values of the provided signals.
+#[macro_export]
+macro_rules! s {
+    ($fmt:tt,$($arg:ident),*) => {
+        {
+            use $crate::SignalExt;
+            let args=($($arg.clone()),*);
+            #[allow(unused_parens)]
+            SignalExt::map(
+                args.clone(),|($($arg),*)|{
+                    alloc::format!($fmt,$($arg),*)
+                }
+            )
+        }
+    };
+}
+
 mod impl_constant {
     use alloc::borrow::Cow;
     use alloc::collections::BTreeMap;

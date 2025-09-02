@@ -83,9 +83,9 @@ impl<T: Default + Clone + 'static> Default for Binding<T> {
 
 /// A convenience function to create a new binding from a value.
 ///
-/// This is equivalent to `Binding::container(value)`.
-pub fn binding<T: 'static + Clone>(value: T) -> Binding<T> {
-    Binding::container(value)
+/// This is equivalent to `Binding::container(value.into())`.
+pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
+    Binding::container(value.into())
 }
 
 impl<T> Binding<Vec<T>> {
