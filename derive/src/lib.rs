@@ -1,6 +1,9 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
+use syn::{
+    parse::Parse, parse_macro_input, punctuated::Punctuated, Data, DeriveInput, Expr, Fields,
+    LitStr, Token, Type,
+};
 
 /// Derive macro for implementing the `Project` trait on structs.
 ///
@@ -201,3 +204,322 @@ fn derive_project_unit_struct(input: &DeriveInput) -> TokenStream {
 
     TokenStream::from(expanded)
 }
+
+/// Input structure for the `s!` macro
+struct SInput {
+    format_str: LitStr,
+    args: Punctuated<Expr, Token![,]>,
+}
+
+impl Parse for SInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let format_str: LitStr = input.parse()?;
+        let mut args = Punctuated::new();
+
+        if input.peek(Token![,]) {
+            input.parse::<Token![,]>()?;
+            args = Punctuated::parse_terminated(input)?;
+        }
+
+        Ok(SInput { format_str, args })
+    }
+}
+
+/// Function-like procedural macro for creating formatted string signals with automatic variable capture.
+///
+/// This macro automatically detects named variables in format strings and captures them from scope.
+///
+/// # Examples
+///
+/// ```rust
+/// use nami::*;
+///
+/// let name = constant("Alice");
+/// let age = constant(25);
+///
+/// // Automatic variable capture from format string
+/// let msg = s!("Hello {name}, you are {age} years old");
+///
+/// // Positional arguments still work
+/// let msg2 = s!("Hello {}, you are {}", name, age);
+/// ```
+#[proc_macro]
+pub fn s(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as SInput);
+    let format_str = input.format_str;
+    let format_value = format_str.value();
+
+    // Check for format string issues
+    let (has_positional, has_named, positional_count, named_vars) = analyze_format_string(&format_value);
+    
+    // If there are explicit arguments, validate and use positional approach
+    if !input.args.is_empty() {
+        // Check for mixed usage errors
+        if has_named {
+            return syn::Error::new_spanned(
+                &format_str,
+                format!(
+                    "Format string contains named arguments like {{{}}} but you provided positional arguments. \
+                    Either use positional placeholders like {{}} or remove the explicit arguments to use automatic variable capture.",
+                    named_vars.first().unwrap_or(&String::new())
+                )
+            )
+            .to_compile_error()
+            .into();
+        }
+        
+        // Check argument count matches placeholders
+        if positional_count != input.args.len() {
+            return syn::Error::new_spanned(
+                &format_str,
+                format!(
+                    "Format string has {} positional placeholders but {} arguments were provided",
+                    positional_count,
+                    input.args.len()
+                )
+            )
+            .to_compile_error()
+            .into();
+        }
+        let args: Vec<_> = input.args.iter().collect();
+        return match args.len() {
+            1 => {
+                let arg = &args[0];
+                quote! {
+                    {
+                        use nami::SignalExt;
+                        SignalExt::map(#arg.clone(), |arg| nami::__format!(#format_str, arg))
+                    }
+                }
+                .into()
+            }
+            2 => {
+                let arg1 = &args[0];
+                let arg2 = &args[1];
+                quote! {
+                    {
+                        use nami::{SignalExt, zip::zip};
+                        SignalExt::map(zip(#arg1.clone(), #arg2.clone()), |(arg1, arg2)| {
+                            nami::__format!(#format_str, arg1, arg2)
+                        })
+                    }
+                }
+                .into()
+            }
+            3 => {
+                let arg1 = &args[0];
+                let arg2 = &args[1];
+                let arg3 = &args[2];
+                quote! {
+                    {
+                        use nami::{SignalExt, zip::zip};
+                        SignalExt::map(
+                            zip(zip(#arg1.clone(), #arg2.clone()), #arg3.clone()),
+                            |((arg1, arg2), arg3)| nami::__format!(#format_str, arg1, arg2, arg3)
+                        )
+                    }
+                }
+                .into()
+            }
+            4 => {
+                let arg1 = &args[0];
+                let arg2 = &args[1];
+                let arg3 = &args[2];
+                let arg4 = &args[3];
+                quote! {
+                    {
+                        use nami::{SignalExt, zip::zip};
+                        SignalExt::map(
+                            zip(
+                                zip(#arg1.clone(), #arg2.clone()),
+                                zip(#arg3.clone(), #arg4.clone())
+                            ),
+                            |((arg1, arg2), (arg3, arg4))| nami::__format!(#format_str, arg1, arg2, arg3, arg4)
+                        )
+                    }
+                }.into()
+            }
+            _ => syn::Error::new_spanned(format_str, "Too many arguments, maximum 4 supported")
+                .to_compile_error()
+                .into(),
+        };
+    }
+
+    // Check for mixed placeholders when no explicit arguments
+    if has_positional && has_named {
+        return syn::Error::new_spanned(
+            &format_str,
+            "Format string mixes positional {{}} and named {{var}} placeholders. \
+            Use either all positional with explicit arguments, or all named for automatic capture."
+        )
+        .to_compile_error()
+        .into();
+    }
+    
+    // If has positional placeholders but no arguments provided
+    if has_positional && input.args.is_empty() {
+        return syn::Error::new_spanned(
+            &format_str,
+            format!(
+                "Format string has {} positional placeholder(s) {{}} but no arguments provided. \
+                Either provide arguments or use named placeholders like {{variable}} for automatic capture.",
+                positional_count
+            )
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // Parse format string to extract variable names for automatic capture
+    let var_names = named_vars;
+
+    // If no variables found, return constant
+    if var_names.is_empty() {
+        return quote! {
+            {
+                use nami::constant;
+                constant(nami::__format!(#format_str))
+            }
+        }
+        .into();
+    }
+
+    // Generate code for named variable capture
+    let var_idents: Vec<syn::Ident> = var_names
+        .iter()
+        .map(|name| syn::Ident::new(name, format_str.span()))
+        .collect();
+
+    match var_names.len() {
+        1 => {
+            let var = &var_idents[0];
+            quote! {
+                {
+                    use nami::SignalExt;
+                    SignalExt::map(#var.clone(), |#var| {
+                        nami::__format!(#format_str)
+                    })
+                }
+            }
+            .into()
+        }
+        2 => {
+            let var1 = &var_idents[0];
+            let var2 = &var_idents[1];
+            quote! {
+                {
+                    use nami::{SignalExt, zip::zip};
+                    SignalExt::map(zip(#var1.clone(), #var2.clone()), |(#var1, #var2)| {
+                        nami::__format!(#format_str)
+                    })
+                }
+            }
+            .into()
+        }
+        3 => {
+            let var1 = &var_idents[0];
+            let var2 = &var_idents[1];
+            let var3 = &var_idents[2];
+            quote! {
+                {
+                    use nami::{SignalExt, zip::zip};
+                    SignalExt::map(
+                        zip(zip(#var1.clone(), #var2.clone()), #var3.clone()),
+                        |((#var1, #var2), #var3)| {
+                            nami::__format!(#format_str)
+                        }
+                    )
+                }
+            }
+            .into()
+        }
+        4 => {
+            let var1 = &var_idents[0];
+            let var2 = &var_idents[1];
+            let var3 = &var_idents[2];
+            let var4 = &var_idents[3];
+            quote! {
+                {
+                    use nami::{SignalExt, zip::zip};
+                    SignalExt::map(
+                        zip(
+                            zip(#var1.clone(), #var2.clone()),
+                            zip(#var3.clone(), #var4.clone())
+                        ),
+                        |((#var1, #var2), (#var3, #var4))| {
+                            nami::__format!(#format_str)
+                        }
+                    )
+                }
+            }.into()
+        }
+        _ => syn::Error::new_spanned(format_str, "Too many named variables, maximum 4 supported")
+            .to_compile_error()
+            .into(),
+    }
+}
+
+/// Analyze a format string to detect placeholder types and extract variable names
+fn analyze_format_string(format_str: &str) -> (bool, bool, usize, Vec<String>) {
+    let mut has_positional = false;
+    let mut has_named = false;
+    let mut positional_count = 0;
+    let mut named_vars = Vec::new();
+    let mut chars = format_str.chars().peekable();
+    
+    while let Some(c) = chars.next() {
+        if c == '{' && chars.peek() == Some(&'{') {
+            // Skip escaped braces
+            chars.next();
+            continue;
+        } else if c == '{' {
+            let mut content = String::new();
+            let mut has_content = false;
+            
+            while let Some(&next_char) = chars.peek() {
+                if next_char == '}' {
+                    chars.next(); // consume }
+                    break;
+                } else if next_char == ':' {
+                    // Format specifier found, we've captured the name/position part
+                    chars.next(); // consume :
+                    while let Some(&spec_char) = chars.peek() {
+                        if spec_char == '}' {
+                            chars.next(); // consume }
+                            break;
+                        }
+                        chars.next();
+                    }
+                    break;
+                } else {
+                    content.push(chars.next().unwrap());
+                    has_content = true;
+                }
+            }
+            
+            // Analyze the content
+            if !has_content || content.is_empty() {
+                // Empty {} is positional
+                has_positional = true;
+                positional_count += 1;
+            } else if content.chars().all(|ch| ch.is_ascii_digit()) {
+                // Numeric like {0} or {1} is positional
+                has_positional = true;
+                positional_count += 1;
+            } else if content.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_') {
+                // Starts with letter or underscore, likely a variable name
+                has_named = true;
+                if !named_vars.contains(&content) {
+                    named_vars.push(content);
+                }
+            } else {
+                // Other cases treat as positional
+                has_positional = true;
+                positional_count += 1;
+            }
+        }
+    }
+    
+    (has_positional, has_named, positional_count, named_vars)
+}
+

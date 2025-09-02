@@ -10,6 +10,7 @@
 #![deny(clippy::todo)]
 #![warn(missing_docs)]
 #![deny(clippy::unimplemented)]
+
 extern crate alloc;
 pub mod binding;
 #[doc(inline)]
@@ -36,7 +37,10 @@ pub use ext::SignalExt;
 
 #[cfg(feature = "derive")]
 #[doc(inline)]
-pub use nami_derive::Project;
+pub use nami_derive::{Project, s};
+
+#[doc(hidden)]
+pub use alloc::format as __format;
 
 /// Macro to implement the Signal trait for constant types.
 ///
@@ -91,26 +95,6 @@ macro_rules! impl_generic_constant {
 
 
 
-}
-
-/// Macro for creating formatted string signals from signal arguments.
-///
-/// This macro takes a format string and signal variables, creating a computed signal
-/// that formats the string with the current values of the provided signals.
-#[macro_export]
-macro_rules! s {
-    ($fmt:tt,$($arg:ident),*) => {
-        {
-            use $crate::SignalExt;
-            let args=($($arg.clone()),*);
-            #[allow(unused_parens)]
-            SignalExt::map(
-                args.clone(),|($($arg),*)|{
-                    alloc::format!($fmt,$($arg),*)
-                }
-            )
-        }
-    };
 }
 
 mod impl_constant {
