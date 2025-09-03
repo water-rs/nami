@@ -212,10 +212,13 @@ impl<T: 'static> WatcherManager<T> {
     }
 
     /// Registers a watcher and returns a guard that will unregister it when dropped.
-    pub fn register_as_guard(&self, watcher: impl Fn(Context<T>) + 'static) -> impl WatcherGuard {
+    pub fn register_as_guard(
+        &self,
+        watcher: impl Fn(Context<T>) + 'static,
+    ) -> WatcherManagerGuard<T> {
         let id = self.register(watcher);
         let this = self.clone();
-        OnDrop::new(move || this.cancel(id))
+        WatcherManagerGuard { manager: this, id }
     }
 
     /// Notifies all registered watchers with a value and specific metadata.
@@ -229,6 +232,22 @@ impl<T: 'static> WatcherManager<T> {
     /// Cancels a previously registered watcher by its identifier.
     pub fn cancel(&self, id: WatcherId) {
         self.inner.borrow_mut().cancel(id);
+    }
+}
+
+/// A guard that ensures a watcher is unregistered when dropped.
+#[must_use]
+#[derive(Debug)]
+pub struct WatcherManagerGuard<T: 'static> {
+    manager: WatcherManager<T>,
+    id: WatcherId,
+}
+
+impl<T> WatcherGuard for WatcherManagerGuard<T> {}
+
+impl<T: 'static> Drop for WatcherManagerGuard<T> {
+    fn drop(&mut self) {
+        self.manager.cancel(self.id);
     }
 }
 

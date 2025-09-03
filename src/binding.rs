@@ -5,10 +5,11 @@
 
 use core::{
     any::{Any, type_name},
-    cell::RefCell,
+    cell::{Cell, RefCell},
     fmt::Debug,
     marker::PhantomData,
-    ops::{Add, AddAssign, Deref, DerefMut, RangeBounds},
+    ops::{Add, AddAssign, Deref, DerefMut, Not, RangeBounds},
+    time::Duration,
 };
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
@@ -89,9 +90,57 @@ pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
 }
 
 impl<T> Binding<Vec<T>> {
-    /// Adds a value to the end of the vector.
+    /// Adds a value to the end of the vector and notifies watchers.
+    ///
+    /// # Example
+    /// ```
+    /// let list = nami::binding(vec![1, 2, 3]);
+    /// list.push(4);
+    /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
+    /// ```
     pub fn push(&self, value: T) {
         self.get_mut().push(value);
+    }
+
+    /// Inserts an element at the specified index and notifies watchers.
+    ///
+    /// # Panics
+    /// Panics if `index > len`.
+    ///
+    /// # Example
+    /// ```
+    /// let list = nami::binding(vec![1, 3, 4]);
+    /// list.insert(1, 2);
+    /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
+    /// ```
+    pub fn insert(&self, index: usize, element: T) {
+        self.get_mut().insert(index, element);
+    }
+
+    /// Removes and returns the last element from the vector, or `None` if empty.
+    /// Notifies watchers of the change.
+    ///
+    /// # Example
+    /// ```
+    /// let list = nami::binding(vec![1, 2, 3]);
+    /// assert_eq!(list.pop(), Some(3));
+    /// assert_eq!(list.get(), vec![1, 2]);
+    /// ```
+    #[must_use]
+    pub fn pop(&self) -> Option<T> {
+        self.get_mut().pop()
+    }
+
+    /// Removes all elements from the vector and notifies watchers.
+    ///
+    /// # Example
+    /// ```
+    /// let list = nami::binding(vec![1, 2, 3]);
+    /// list.clear();
+    /// assert!(list.get().is_empty());
+    /// ```
+    pub fn clear(&self) {
+        self.get_mut().clear();
     }
 }
 
@@ -248,10 +297,82 @@ impl<T: 'static> Binding<T> {
             },
         )
     }
+
+    /// Creates a binding that maps this binding's value to a boolean condition.
+    ///
+    /// The resulting binding is read-only and reflects whether the condition is met.
+    ///
+    /// # Example
+    /// ```
+    /// let number = nami::binding(5i32);
+    /// let is_positive = number.condition(|&n: &i32| n > 0);
+    /// assert_eq!(is_positive.get(), true);
+    /// ```
+    pub fn condition(&self, condition: impl 'static + Fn(&T) -> bool) -> Binding<bool>
+    where
+        T: 'static,
+    {
+        Self::mapping(self, move |value| condition(&value), move |_, _| {})
+    }
+
+    /// Creates a binding that tracks whether this binding's value equals a specific value.
+    ///
+    /// The resulting binding is read-only.
+    ///
+    /// # Example
+    /// ```
+    /// let text = nami::binding("hello".to_string());
+    /// let is_hello = text.equal_to("hello".to_string());
+    /// assert_eq!(is_hello.get(), true);
+    /// ```
+    pub fn equal_to(&self, other: T) -> Binding<bool>
+    where
+        T: PartialEq + 'static,
+    {
+        Self::mapping(self, move |value| value == other, move |_, _| {})
+    }
+
+    /// Creates a debounced version of this binding that delays updates.
+    ///
+    /// Updates to the debounced binding will only be applied to the source binding
+    /// after the specified duration has passed without any new updates.
+    ///
+    /// # Arguments
+    /// * `delay` - The duration to wait before applying updates
+    /// * `timer` - Timer implementation for scheduling delayed updates
+    ///
+    /// # Example
+    /// ```ignore
+    /// let search = binding("".to_string());
+    /// let debounced = search.debounced(Duration::from_millis(300), timer);
+    ///
+    /// // Rapid typing: "h", "he", "hel", "hello"
+    /// // Only "hello" is applied after 300ms of no changes
+    /// ```
+    #[must_use]
+    pub fn debounced(&self, delay: Duration, timer: impl Timer) -> Self
+    where
+        T: Clone,
+    {
+        Self::custom(DebouncedBinding {
+            source: self.clone(),
+            delay,
+            pending_value: Rc::new(RefCell::new(None)),
+            timer_handle: Rc::new(Cell::new(None)),
+            timer: Rc::new(timer),
+        })
+    }
 }
 
 impl<T: Ord + Clone> Binding<Vec<T>> {
     /// Sorts the vector in-place and notifies watchers.
+    ///
+    /// # Example
+    /// ```
+    /// let list = nami::binding(vec![3, 1, 4, 1, 5]);
+    /// list.sort();
+    /// assert_eq!(list.get(), vec![1, 1, 3, 4, 5]);
+    /// ```
     pub fn sort(&self) {
         self.handle(|value| {
             value.sort();
@@ -262,31 +383,60 @@ impl<T: Ord + Clone> Binding<Vec<T>> {
 impl<T: PartialOrd + 'static> Binding<T> {
     /// Creates a binding that only allows values within a specified range.
     #[must_use]
-    pub fn range(self, range: impl RangeBounds<T> + 'static) -> Self {
+    pub fn range(&self, range: impl RangeBounds<T> + 'static) -> Self {
         self.filter(move |value| range.contains(value))
     }
 }
 
 impl Binding<i32> {
-    /// Creates a new integer binding.
+    /// Creates a new integer binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let counter = nami::Binding::int(42);
+    /// assert_eq!(counter.get(), 42);
+    /// ```
     #[must_use]
     pub fn int(i: i32) -> Self {
         Self::container(i)
     }
 
-    /// Increments the value by the specified amount.
+    /// Increments the value by the specified amount and notifies watchers.
+    ///
+    /// # Example
+    /// ```
+    /// let counter = nami::binding(10);
+    /// counter.increment(5);
+    /// assert_eq!(counter.get(), 15);
+    /// ```
     pub fn increment(&self, n: i32) {
         self.handle(|v| *v += n);
     }
 
-    /// Decrements the value by the specified amount.
+    /// Decrements the value by the specified amount and notifies watchers.
+    ///
+    /// # Example
+    /// ```
+    /// let counter = nami::binding(10);
+    /// counter.decrement(3);
+    /// assert_eq!(counter.get(), 7);
+    /// ```
     pub fn decrement(&self, n: i32) {
         self.handle(|v| *v -= n);
     }
 }
 
 impl<T: Clone> Binding<T> {
-    /// Appends an element to the binding's value (which must implement `Extend`).
+    /// Appends an element to the binding's value and notifies watchers.
+    ///
+    /// The binding's value must implement `Extend` for the element type.
+    ///
+    /// # Example
+    /// ```
+    /// let text: nami::Binding<String> = nami::binding(String::from("Hello"));
+    /// text.append(" World");
+    /// assert_eq!(text.get(), "Hello World");
+    /// ```
     pub fn append<Ele>(&self, ele: Ele)
     where
         T: Extend<Ele>,
@@ -297,16 +447,188 @@ impl<T: Clone> Binding<T> {
     }
 }
 
+impl<T> Binding<Option<T>> {
+    /// Creates a binding that unwraps the option or uses a default value from a closure.
+    ///
+    /// When setting values on the returned binding, they are wrapped in `Some`.
+    ///
+    /// # Example
+    /// ```
+    /// let maybe_text = nami::binding(None::<String>);
+    /// let text = maybe_text.unwrap_or_else(|| "default".to_string());
+    /// assert_eq!(text.get(), "default");
+    /// ```
+    pub fn unwrap_or_else(&self, default: impl 'static + Fn() -> T) -> Binding<T>
+    where
+        T: Clone + 'static,
+    {
+        Self::mapping(
+            self,
+            move |value| value.unwrap_or_else(&default),
+            move |binding, value| {
+                binding.set(Some(value));
+            },
+        )
+    }
+
+    /// Creates a binding that unwraps the option or uses a default value.
+    ///
+    /// When setting values on the returned binding, they are wrapped in `Some`.
+    ///
+    /// # Example
+    /// ```
+    /// let maybe_number = nami::binding(None::<i32>);
+    /// let number = maybe_number.unwrap_or(42);
+    /// assert_eq!(number.get(), 42);
+    /// ```
+    pub fn unwrap_or(&self, default: T) -> Binding<T>
+    where
+        T: Clone + 'static,
+    {
+        self.unwrap_or_else(move || default.clone())
+    }
+
+    /// Creates a binding that unwraps the option or uses the type's default value.
+    ///
+    /// When setting values on the returned binding, they are wrapped in `Some`.
+    ///
+    /// # Example
+    /// ```
+    /// let maybe_vec = nami::binding(None::<Vec<i32>>);
+    /// let vec: nami::Binding<Vec<i32>> = maybe_vec.unwrap_or_default();
+    /// assert!(vec.get().is_empty());
+    /// ```
+    pub fn unwrap_or_default(&self) -> Binding<T>
+    where
+        T: Default + Clone + 'static,
+    {
+        self.unwrap_or_else(T::default)
+    }
+}
+
 impl Binding<bool> {
-    /// Creates a new boolean binding.
+    /// Creates a new boolean binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let flag = nami::Binding::bool(true);
+    /// assert_eq!(flag.get(), true);
+    /// ```
     #[must_use]
     pub fn bool(value: bool) -> Self {
         Self::container(value)
     }
 
-    /// Toggles the boolean value (true becomes false, false becomes true).
+    /// Toggles the boolean value and notifies watchers.
+    ///
+    /// True becomes false, false becomes true.
+    ///
+    /// # Example
+    /// ```
+    /// let flag = nami::binding(false);
+    /// flag.toggle();
+    /// assert_eq!(flag.get(), true);
+    /// ```
     pub fn toggle(&self) {
         self.handle(|v| *v = !*v);
+    }
+
+    /// Creates a conditional binding that returns `Some(value)` when true, `None` when false.
+    ///
+    /// Setting `Some(value)` on the result sets this binding to `true`.
+    /// Setting `None` sets this binding to `false`.
+    ///
+    /// # Example
+    /// ```
+    /// let is_logged_in = nami::binding(true);
+    /// let username = is_logged_in.then("alice".to_string());
+    /// assert_eq!(username.get(), Some("alice".to_string()));
+    /// ```
+    pub fn then<T>(&self, if_true: T) -> Binding<Option<T>>
+    where
+        T: Clone + 'static,
+    {
+        Self::mapping(
+            self,
+            move |value| {
+                if value { Some(if_true.clone()) } else { None }
+            },
+            move |binding, value| {
+                binding.set(value.is_some());
+            },
+        )
+    }
+
+    /// Creates a conditional binding that returns `Some(value)` when true, `None` when false.
+    ///
+    /// This is identical to `then()` but follows Rust's `Option::then_some()` naming convention.
+    ///
+    /// # Example
+    /// ```
+    /// let enabled = nami::binding(false);
+    /// let button_text = enabled.then_some("Click me!".to_string());
+    /// assert_eq!(button_text.get(), None);
+    /// ```
+    pub fn then_some<T>(&self, if_true: T) -> Binding<Option<T>>
+    where
+        T: Clone + 'static,
+    {
+        Self::mapping(
+            self,
+            move |value| {
+                if value { Some(if_true.clone()) } else { None }
+            },
+            move |binding, value| {
+                binding.set(value.is_some());
+            },
+        )
+    }
+
+    /// Creates a binding that selects between two values based on this boolean.
+    ///
+    /// Returns `if_true` when this binding is `true`, `if_false` when `false`.
+    /// Setting the `if_true` value on the result sets this binding to `true`.
+    /// Setting the `if_false` value sets this binding to `false`.
+    ///
+    /// # Example
+    /// ```
+    /// let dark_mode = nami::binding(false);
+    /// let theme = dark_mode.select("dark".to_string(), "light".to_string());
+    /// assert_eq!(theme.get(), "light");
+    /// ```
+    pub fn select<T>(&self, if_true: T, if_false: T) -> Binding<T>
+    where
+        T: Eq + Clone + 'static,
+    {
+        let if_true_clone = if_true.clone();
+        Self::mapping(
+            self,
+            move |value| {
+                if value {
+                    if_true.clone()
+                } else {
+                    if_false.clone()
+                }
+            },
+            move |binding, value| {
+                binding.set(value == if_true_clone);
+            },
+        )
+    }
+}
+
+impl Not for Binding<bool> {
+    type Output = Self;
+
+    /// Implements the logical NOT operator for boolean bindings.
+    fn not(self) -> Self::Output {
+        Self::mapping(
+            &self,
+            |value| !value,
+            move |binding, value| {
+                binding.set(!value);
+            },
+        )
     }
 }
 
@@ -390,6 +712,107 @@ impl<T: 'static> Signal for Binding<T> {
     }
 }
 
+/// Timer handle type used to identify and cancel scheduled callbacks
+pub type TimerHandle = u64;
+
+/// Trait for scheduling delayed callbacks, required for debounced bindings
+pub trait Timer: 'static {
+    /// Schedule a callback to run after the specified duration
+    /// Returns a handle that can be used to cancel the callback
+    fn schedule(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle;
+
+    /// Cancel a previously scheduled callback
+    fn cancel(&self, handle: TimerHandle);
+}
+
+/// A debounced binding that delays updates until a period of inactivity.
+///
+/// This is useful for expensive operations like API calls or validations
+/// that shouldn't trigger on every keystroke.
+///
+/// # Example
+/// ```ignore
+/// let search = binding("".to_string());
+/// let debounced_search = search.debounced(Duration::from_millis(300), timer);
+///
+/// // Rapid updates...
+/// debounced_search.set("h".to_string());
+/// debounced_search.set("he".to_string());  
+/// debounced_search.set("hel".to_string());
+/// debounced_search.set("hello".to_string());
+///
+/// // Only "hello" is applied to the source binding after 300ms
+/// ```
+pub struct DebouncedBinding<T: Clone + 'static> {
+    /// The source binding being debounced
+    source: Binding<T>,
+    /// The delay duration before updates are applied
+    delay: Duration,
+    /// Stores the pending value waiting to be applied
+    pending_value: Rc<RefCell<Option<T>>>,
+    /// Tracks if a timer is currently active
+    timer_handle: Rc<Cell<Option<TimerHandle>>>,
+    /// Timer implementation for scheduling delayed updates
+    timer: Rc<dyn Timer>,
+}
+
+impl<T: Clone + 'static> Clone for DebouncedBinding<T> {
+    fn clone(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+            delay: self.delay,
+            pending_value: self.pending_value.clone(),
+            timer_handle: self.timer_handle.clone(),
+            timer: self.timer.clone(),
+        }
+    }
+}
+
+impl<T: Clone + 'static> Signal for DebouncedBinding<T> {
+    type Output = T;
+    type Guard = <Binding<T> as Signal>::Guard;
+
+    fn get(&self) -> Self::Output {
+        // If there's a pending value, return it; otherwise return the source value
+        self.pending_value
+            .borrow()
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.source.get())
+    }
+
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+        self.source.watch(watcher)
+    }
+}
+
+impl<T: Clone + 'static> CustomBinding for DebouncedBinding<T> {
+    fn set(&self, value: Self::Output) {
+        // Cancel any existing timer
+        if let Some(handle) = self.timer_handle.get() {
+            self.timer.cancel(handle);
+        }
+
+        // Store the pending value
+        *self.pending_value.borrow_mut() = Some(value);
+
+        // Schedule a new timer
+        let source = self.source.clone();
+        let pending_value = self.pending_value.clone();
+        let timer_handle = self.timer_handle.clone();
+
+        let callback = Box::new(move || {
+            if let Some(value) = pending_value.borrow_mut().take() {
+                source.set(value);
+            }
+            timer_handle.set(None);
+        });
+
+        let handle = self.timer.schedule(self.delay, callback);
+        self.timer_handle.set(Some(handle));
+    }
+}
+
 /// A mapping between one binding type and another.
 ///
 /// This allows creating derived bindings that transform values from one type to another,
@@ -461,5 +884,131 @@ impl<T> From<Binding<T>> for Computed<T> {
     fn from(val: Binding<T>) -> Self {
         let boxed = val.0 as Box<_>;
         Self(boxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::ToString;
+    use alloc::sync::Arc;
+    use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    /// Simple test timer implementation for unit tests
+    #[derive(Clone)]
+    struct TestTimer {
+        current_id: Arc<AtomicU64>,
+        callbacks: Arc<RefCell<Vec<(u64, Box<dyn FnOnce()>)>>>,
+        cancelled: Arc<RefCell<Vec<u64>>>,
+    }
+
+    impl TestTimer {
+        fn new() -> Self {
+            Self {
+                current_id: Arc::new(AtomicU64::new(0)),
+                callbacks: Arc::new(RefCell::new(Vec::new())),
+                cancelled: Arc::new(RefCell::new(Vec::new())),
+            }
+        }
+
+        /// Manually trigger all pending callbacks (simulates time passing)
+        fn trigger_all(&self) {
+            let callbacks = self.callbacks.borrow_mut().drain(..).collect::<Vec<_>>();
+            let cancelled = self.cancelled.borrow().clone();
+
+            for (id, callback) in callbacks {
+                if !cancelled.contains(&id) {
+                    callback();
+                }
+            }
+
+            self.cancelled.borrow_mut().clear();
+        }
+    }
+
+    impl Timer for TestTimer {
+        fn schedule(&self, _delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
+            let id = self.current_id.fetch_add(1, Ordering::SeqCst);
+            self.callbacks.borrow_mut().push((id, callback));
+            id
+        }
+
+        fn cancel(&self, handle: TimerHandle) {
+            self.cancelled.borrow_mut().push(handle);
+        }
+    }
+
+    #[test]
+    fn test_debounced_binding_basic() {
+        let timer = TestTimer::new();
+        let source = binding("initial".to_string());
+        let debounced = source.debounced(Duration::from_millis(100), timer.clone());
+
+        // Initial value should be the same
+        assert_eq!(debounced.get(), "initial");
+        assert_eq!(source.get(), "initial");
+
+        // Set a new value on debounced binding
+        debounced.set("updated".to_string());
+
+        // Debounced binding should show pending value immediately
+        assert_eq!(debounced.get(), "updated");
+        // But source should still have old value
+        assert_eq!(source.get(), "initial");
+
+        // Trigger the timer
+        timer.trigger_all();
+
+        // Now source should be updated
+        assert_eq!(source.get(), "updated");
+    }
+
+    #[test]
+    fn test_debounced_binding_cancellation() {
+        let timer = TestTimer::new();
+        let source = binding(0i32);
+        let debounced = source.debounced(Duration::from_millis(100), timer.clone());
+
+        // Rapid updates
+        debounced.set(1);
+        debounced.set(2);
+        debounced.set(3);
+
+        // Debounced should show latest pending value
+        assert_eq!(debounced.get(), 3);
+        // Source should still be 0
+        assert_eq!(source.get(), 0);
+
+        // Trigger timer - only last value should be applied
+        timer.trigger_all();
+        assert_eq!(source.get(), 3);
+    }
+
+    #[test]
+    fn test_debounced_binding_with_watcher() {
+        let timer = TestTimer::new();
+        let source = binding(0i32);
+        let debounced = source.debounced(Duration::from_millis(100), timer.clone());
+
+        let notified = Arc::new(AtomicBool::new(false));
+        let notified_clone = notified.clone();
+
+        // Watch the source binding
+        let _guard = source.watch(move |_| {
+            notified_clone.store(true, Ordering::SeqCst);
+        });
+
+        // Update through debounced binding
+        debounced.set(42);
+
+        // Should not be notified yet
+        assert!(!notified.load(Ordering::SeqCst));
+
+        // Trigger timer
+        timer.trigger_all();
+
+        // Now should be notified
+        assert!(notified.load(Ordering::SeqCst));
+        assert_eq!(source.get(), 42);
     }
 }

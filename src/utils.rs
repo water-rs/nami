@@ -61,3 +61,87 @@ where
     let zip = zip(a, b);
     map(zip, |(a, b)| a.add(b))
 }
+
+/// Returns the maximum value between two `Signal` values.
+///
+/// This function takes two values implementing the `Signal` trait with the same output type
+/// and returns a new computation that, when executed, will produce the maximum of the outputs
+/// from the two input computations.
+///
+/// # Type Parameters
+///
+/// * `A`: The first computation type that implements `Signal<Output = T>`.
+/// * `B`: The second computation type that implements `Signal<Output = T>`.
+/// * `T`: The output type that must implement `Ord` for comparison.
+///
+/// # Constraints
+///
+/// * Both `A` and `B` must have the same output type `T`.
+/// * `T` must implement `Ord` to enable comparison operations.
+/// * `T` must be `'static` for lifetime requirements.
+///
+/// # Returns
+///
+/// A new computation that will yield the maximum value between the outputs from computations `a` and `b`.
+///
+/// # Examples
+///
+/// ```
+/// # use nami::{Signal, utils::max, binding};
+/// let a = binding(10);
+/// let b = binding(5);
+/// let maximum = max(a, b);
+/// assert_eq!(maximum.get(), 10);
+/// ```
+#[allow(clippy::type_complexity)]
+pub fn max<A, B, T>(a: A, b: B) -> Map<Zip<A, B>, fn((T, T)) -> T, T>
+where
+    A: Signal<Output = T>,
+    B: Signal<Output = T>,
+    T: Ord + 'static,
+{
+    let zip = zip(a, b);
+    map(zip, |(a, b)| core::cmp::max(a, b))
+}
+
+/// Returns the minimum value between two `Signal` values.
+///
+/// This function takes two values implementing the `Signal` trait with the same output type
+/// and returns a new computation that, when executed, will produce the minimum of the outputs
+/// from the two input computations.
+///
+/// # Type Parameters
+///
+/// * `A`: The first computation type that implements `Signal<Output = T>`.
+/// * `B`: The second computation type that implements `Signal<Output = T>`.
+/// * `T`: The output type that must implement `Ord` for comparison.
+///
+/// # Constraints
+///
+/// * Both `A` and `B` must have the same output type `T`.
+/// * `T` must implement `Ord` to enable comparison operations.
+/// * `T` must be `'static` for lifetime requirements.
+///
+/// # Returns
+///
+/// A new computation that will yield the minimum value between the outputs from computations `a` and `b`.
+///
+/// # Examples
+///
+/// ```
+/// # use nami::{Signal, utils::min, binding};
+/// let a = binding(10);
+/// let b = binding(5);
+/// let minimum = min(a, b);
+/// assert_eq!(minimum.get(), 5);
+/// ```
+#[allow(clippy::type_complexity)]
+pub fn min<A, B, T>(a: A, b: B) -> Map<Zip<A, B>, fn((T, T)) -> T, T>
+where
+    A: Signal<Output = T>,
+    B: Signal<Output = T>,
+    T: Ord + 'static,
+{
+    let zip = zip(a, b);
+    map(zip, |(a, b)| core::cmp::min(a, b))
+}
