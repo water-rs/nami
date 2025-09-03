@@ -14,7 +14,9 @@
 extern crate alloc;
 pub mod binding;
 #[doc(inline)]
-pub use binding::{Binding, binding, CustomBinding, Container, Timer, TimerHandle, DebouncedBinding};
+pub use binding::{
+    Binding, Container, CustomBinding, DebouncedBinding, Timer, TimerHandle, binding,
+};
 pub mod constant;
 #[doc(inline)]
 pub use constant::constant;

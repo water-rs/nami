@@ -40,9 +40,7 @@ license = { file = "LICENSE" }
 paste = "1.0"
 log = "0.4.27"
 nami-derive = { workspace = true, optional = true}
-futures-timer = { version = "3.0", optional = true }
 
 [features]
 default = ["derive"]
 derive = ["dep:nami-derive"]
-debounce = ["futures-timer"]

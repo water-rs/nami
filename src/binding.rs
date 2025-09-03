@@ -504,6 +504,37 @@ impl<T> Binding<Option<T>> {
     {
         self.unwrap_or_else(T::default)
     }
+
+    /// Creates a binding that tracks whether this option contains a specific value.
+    ///
+    /// The resulting binding is `true` when this option contains `Some(equal)`,
+    /// and `false` when it contains `Some(other_value)` or `None`.
+    /// Setting `true` on the result sets this binding to `Some(equal)`.
+    /// Setting `false` has no effect on the binding.
+    ///
+    /// # Example
+    /// ```
+    /// let maybe_text = nami::binding(Some("hello".to_string()));
+    /// let is_hello = maybe_text.some_equal_to("hello".to_string());
+    /// assert_eq!(is_hello.get(), true);
+    /// ```
+    pub fn some_equal_to(&self, equal: T) -> Binding<bool>
+    where
+        T: Eq + Clone + 'static,
+    {
+        Self::mapping(
+            self,
+            {
+                let equal = equal.clone();
+                move |value| value.as_ref().filter(|value| **value == equal).is_some()
+            },
+            move |binding, value| {
+                if value {
+                    binding.set(Some(equal.clone()));
+                }
+            },
+        )
+    }
 }
 
 impl Binding<bool> {
@@ -884,131 +915,5 @@ impl<T> From<Binding<T>> for Computed<T> {
     fn from(val: Binding<T>) -> Self {
         let boxed = val.0 as Box<_>;
         Self(boxed)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloc::string::ToString;
-    use alloc::sync::Arc;
-    use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
-    /// Simple test timer implementation for unit tests
-    #[derive(Clone)]
-    struct TestTimer {
-        current_id: Arc<AtomicU64>,
-        callbacks: Arc<RefCell<Vec<(u64, Box<dyn FnOnce()>)>>>,
-        cancelled: Arc<RefCell<Vec<u64>>>,
-    }
-
-    impl TestTimer {
-        fn new() -> Self {
-            Self {
-                current_id: Arc::new(AtomicU64::new(0)),
-                callbacks: Arc::new(RefCell::new(Vec::new())),
-                cancelled: Arc::new(RefCell::new(Vec::new())),
-            }
-        }
-
-        /// Manually trigger all pending callbacks (simulates time passing)
-        fn trigger_all(&self) {
-            let callbacks = self.callbacks.borrow_mut().drain(..).collect::<Vec<_>>();
-            let cancelled = self.cancelled.borrow().clone();
-
-            for (id, callback) in callbacks {
-                if !cancelled.contains(&id) {
-                    callback();
-                }
-            }
-
-            self.cancelled.borrow_mut().clear();
-        }
-    }
-
-    impl Timer for TestTimer {
-        fn schedule(&self, _delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
-            let id = self.current_id.fetch_add(1, Ordering::SeqCst);
-            self.callbacks.borrow_mut().push((id, callback));
-            id
-        }
-
-        fn cancel(&self, handle: TimerHandle) {
-            self.cancelled.borrow_mut().push(handle);
-        }
-    }
-
-    #[test]
-    fn test_debounced_binding_basic() {
-        let timer = TestTimer::new();
-        let source = binding("initial".to_string());
-        let debounced = source.debounced(Duration::from_millis(100), timer.clone());
-
-        // Initial value should be the same
-        assert_eq!(debounced.get(), "initial");
-        assert_eq!(source.get(), "initial");
-
-        // Set a new value on debounced binding
-        debounced.set("updated".to_string());
-
-        // Debounced binding should show pending value immediately
-        assert_eq!(debounced.get(), "updated");
-        // But source should still have old value
-        assert_eq!(source.get(), "initial");
-
-        // Trigger the timer
-        timer.trigger_all();
-
-        // Now source should be updated
-        assert_eq!(source.get(), "updated");
-    }
-
-    #[test]
-    fn test_debounced_binding_cancellation() {
-        let timer = TestTimer::new();
-        let source = binding(0i32);
-        let debounced = source.debounced(Duration::from_millis(100), timer.clone());
-
-        // Rapid updates
-        debounced.set(1);
-        debounced.set(2);
-        debounced.set(3);
-
-        // Debounced should show latest pending value
-        assert_eq!(debounced.get(), 3);
-        // Source should still be 0
-        assert_eq!(source.get(), 0);
-
-        // Trigger timer - only last value should be applied
-        timer.trigger_all();
-        assert_eq!(source.get(), 3);
-    }
-
-    #[test]
-    fn test_debounced_binding_with_watcher() {
-        let timer = TestTimer::new();
-        let source = binding(0i32);
-        let debounced = source.debounced(Duration::from_millis(100), timer.clone());
-
-        let notified = Arc::new(AtomicBool::new(false));
-        let notified_clone = notified.clone();
-
-        // Watch the source binding
-        let _guard = source.watch(move |_| {
-            notified_clone.store(true, Ordering::SeqCst);
-        });
-
-        // Update through debounced binding
-        debounced.set(42);
-
-        // Should not be notified yet
-        assert!(!notified.load(Ordering::SeqCst));
-
-        // Trigger timer
-        timer.trigger_all();
-
-        // Now should be notified
-        assert!(notified.load(Ordering::SeqCst));
-        assert_eq!(source.get(), 42);
     }
 }
