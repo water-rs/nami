@@ -1,4 +1,10 @@
-use crate::{Computed, Signal, cache::Cached, map::Map, signal::WithMetadata, zip::Zip};
+#[cfg(feature = "native-executor")]
+use native_executor::MainExecutor;
+
+use crate::{
+    Computed, Signal, cache::Cached, debounce::Debounce, map::Map, signal::WithMetadata, zip::Zip,
+};
+use core::time::Duration;
 
 /// Extension trait providing convenient methods for all Signal types.
 ///
@@ -38,6 +44,18 @@ pub trait SignalExt: Signal + Sized {
     /// Attaches metadata to this signal's watcher notifications.
     fn with<T>(self, metadata: T) -> WithMetadata<Self, T> {
         WithMetadata::new(metadata, self)
+    }
+
+    /// Creates a debounced version of this signal.
+    ///
+    /// The debounced signal will only emit values after the specified duration
+    /// has passed without receiving new values.
+    #[cfg(feature = "native-executor")]
+    fn debounce(self, duration: Duration) -> Debounce<Self, MainExecutor>
+    where
+        Self::Output: Clone,
+    {
+        Debounce::new(self, duration)
     }
 }
 

@@ -42,7 +42,7 @@ impl<A, B> Zip<A, B> {
     }
 }
 
-/// A/ This trait provides a way to apply a function to the individual elements
+/// This trait provides a way to apply a function to the individual elements
 /// of a nested tuple structure, flattening the structure in the process.
 pub trait FlattenMap<F, T, Output>: Sized + Signal {
     /// Maps a function over the flattened elements of a nested tuple.

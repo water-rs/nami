@@ -5,11 +5,10 @@
 
 use core::{
     any::{Any, type_name},
-    cell::{Cell, RefCell},
+    cell::RefCell,
     fmt::Debug,
     marker::PhantomData,
     ops::{Add, AddAssign, Deref, DerefMut, Not, RangeBounds},
-    time::Duration,
 };
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
@@ -331,38 +330,89 @@ impl<T: 'static> Binding<T> {
     {
         Self::mapping(self, move |value| value == other, move |_, _| {})
     }
+}
 
-    /// Creates a debounced version of this binding that delays updates.
+#[cfg(feature = "native-executor")]
+mod use_native_executor {
+    use executor_core::LocalExecutor;
+    use native_executor::mailbox::Mailbox;
+
+    use crate::Binding;
+
+    /// A handle for interacting with a background mailbox tied to a `Binding`.
     ///
-    /// Updates to the debounced binding will only be applied to the source binding
-    /// after the specified duration has passed without any new updates.
-    ///
-    /// # Arguments
-    /// * `delay` - The duration to wait before applying updates
-    /// * `timer` - Timer implementation for scheduling delayed updates
-    ///
-    /// # Example
-    /// ```ignore
-    /// let search = binding("".to_string());
-    /// let debounced = search.debounced(Duration::from_millis(300), timer);
-    ///
-    /// // Rapid typing: "h", "he", "hel", "hello"
-    /// // Only "hello" is applied after 300ms of no changes
-    /// ```
-    #[must_use]
-    pub fn debounced(&self, delay: Duration, timer: impl Timer) -> Self
-    where
-        T: Clone,
-    {
-        Self::custom(DebouncedBinding {
-            source: self.clone(),
-            delay,
-            pending_value: Rc::new(RefCell::new(None)),
-            timer_handle: Rc::new(Cell::new(None)),
-            timer: Rc::new(timer),
-        })
+    /// When the `native-executor` feature is enabled, a `Binding` can be paired with
+    /// a mailbox to send updates from asynchronous contexts or other threads.
+    pub struct BindingMailbox<T: 'static> {
+        mailbox: Mailbox<Binding<T>>,
+    }
+
+    impl<T: 'static> BindingMailbox<T> {
+        /// Gets the current value of the binding asynchronously via the mailbox.
+        pub async fn get(&self) -> T
+        where
+            T: Clone + Send,
+        {
+            self.mailbox.call(super::Binding::get).await
+        }
+
+        /// Gets the current value of the binding asynchronously and converts it to type `T2`.
+        ///
+        /// This method retrieves the binding's value via the mailbox and automatically
+        /// converts it to the target type using the `From` trait. This is particularly
+        /// useful for bindings with non-`Send` types (like `waterui_str::Str`) that need to be
+        /// converted to `Send` types (like `String`) for use across async boundaries.
+        ///
+        /// # Type Parameters
+        ///
+        /// * `T2` - The target type to convert to. Must implement `From<T>` where `T` is the binding's value type.
+        ///
+        /// # Examples
+        ///
+        /// ```rust
+        /// // Convert Str binding to String for cross-thread usage
+        /// use waterui_str::Str;
+        /// let text_binding:Binding<Str> = nami::binding("hello world");
+        /// let mailbox = text_binding.mailbox();
+        /// let owned_string: String = mailbox.get_as().await;
+        /// assert_eq!(owned_string, "hello world");
+        /// ```
+        pub async fn get_as<T2>(&self) -> T2
+        where
+            T2: Send + 'static + From<T>,
+        {
+            self.mailbox.call(|b| b.get().into()).await
+        }
+
+        /// Sets a new value on the binding asynchronously via the mailbox.
+        pub async fn set(&self, value: impl Into<T> + Send + 'static) {
+            self.mailbox
+                .call(move |binding| binding.set(value.into()))
+                .await;
+        }
+    }
+
+    impl<T: 'static> Binding<T> {
+        /// Attaches this `Binding` to a mailbox using a provided executor.
+        ///
+        /// Returns a `BindingMailbox` which can be cloned and used to send the
+        /// binding to other tasks for mutation or observation.
+        pub fn mailbox_with_executor<E: LocalExecutor>(&self, executor: E) -> BindingMailbox<T> {
+            BindingMailbox {
+                mailbox: Mailbox::new(executor, self.clone()),
+            }
+        }
+
+        /// Attaches this `Binding` to a mailbox using the default native executor.
+        #[must_use]
+        pub fn mailbox(&self) -> BindingMailbox<T> {
+            self.mailbox_with_executor(native_executor::MainExecutor)
+        }
     }
 }
+
+#[cfg(feature = "native-executor")]
+pub use use_native_executor::BindingMailbox;
 
 impl<T: Ord + Clone> Binding<Vec<T>> {
     /// Sorts the vector in-place and notifies watchers.
@@ -694,6 +744,12 @@ pub struct Container<T: 'static + Clone> {
     watchers: WatcherManager<T>,
 }
 
+impl<T: 'static + Clone + Default> Default for Container<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
 impl<T: 'static + Clone> Container<T> {
     /// Creates a new container with the given value.
     pub fn new(value: T) -> Self {
@@ -740,107 +796,6 @@ impl<T: 'static> Signal for Binding<T> {
     /// Registers a watcher to be notified when the binding's value changes.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         Box::new(self.0.add_watcher(Box::new(watcher)))
-    }
-}
-
-/// Timer handle type used to identify and cancel scheduled callbacks
-pub type TimerHandle = u64;
-
-/// Trait for scheduling delayed callbacks, required for debounced bindings
-pub trait Timer: 'static {
-    /// Schedule a callback to run after the specified duration
-    /// Returns a handle that can be used to cancel the callback
-    fn schedule(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle;
-
-    /// Cancel a previously scheduled callback
-    fn cancel(&self, handle: TimerHandle);
-}
-
-/// A debounced binding that delays updates until a period of inactivity.
-///
-/// This is useful for expensive operations like API calls or validations
-/// that shouldn't trigger on every keystroke.
-///
-/// # Example
-/// ```ignore
-/// let search = binding("".to_string());
-/// let debounced_search = search.debounced(Duration::from_millis(300), timer);
-///
-/// // Rapid updates...
-/// debounced_search.set("h".to_string());
-/// debounced_search.set("he".to_string());  
-/// debounced_search.set("hel".to_string());
-/// debounced_search.set("hello".to_string());
-///
-/// // Only "hello" is applied to the source binding after 300ms
-/// ```
-pub struct DebouncedBinding<T: Clone + 'static> {
-    /// The source binding being debounced
-    source: Binding<T>,
-    /// The delay duration before updates are applied
-    delay: Duration,
-    /// Stores the pending value waiting to be applied
-    pending_value: Rc<RefCell<Option<T>>>,
-    /// Tracks if a timer is currently active
-    timer_handle: Rc<Cell<Option<TimerHandle>>>,
-    /// Timer implementation for scheduling delayed updates
-    timer: Rc<dyn Timer>,
-}
-
-impl<T: Clone + 'static> Clone for DebouncedBinding<T> {
-    fn clone(&self) -> Self {
-        Self {
-            source: self.source.clone(),
-            delay: self.delay,
-            pending_value: self.pending_value.clone(),
-            timer_handle: self.timer_handle.clone(),
-            timer: self.timer.clone(),
-        }
-    }
-}
-
-impl<T: Clone + 'static> Signal for DebouncedBinding<T> {
-    type Output = T;
-    type Guard = <Binding<T> as Signal>::Guard;
-
-    fn get(&self) -> Self::Output {
-        // If there's a pending value, return it; otherwise return the source value
-        self.pending_value
-            .borrow()
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| self.source.get())
-    }
-
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
-        self.source.watch(watcher)
-    }
-}
-
-impl<T: Clone + 'static> CustomBinding for DebouncedBinding<T> {
-    fn set(&self, value: Self::Output) {
-        // Cancel any existing timer
-        if let Some(handle) = self.timer_handle.get() {
-            self.timer.cancel(handle);
-        }
-
-        // Store the pending value
-        *self.pending_value.borrow_mut() = Some(value);
-
-        // Schedule a new timer
-        let source = self.source.clone();
-        let pending_value = self.pending_value.clone();
-        let timer_handle = self.timer_handle.clone();
-
-        let callback = Box::new(move || {
-            if let Some(value) = pending_value.borrow_mut().take() {
-                source.set(value);
-            }
-            timer_handle.set(None);
-        });
-
-        let handle = self.timer.schedule(self.delay, callback);
-        self.timer_handle.set(Some(handle));
     }
 }
 

@@ -14,9 +14,7 @@
 extern crate alloc;
 pub mod binding;
 #[doc(inline)]
-pub use binding::{
-    Binding, Container, CustomBinding, DebouncedBinding, Timer, TimerHandle, binding,
-};
+pub use binding::{Binding, Container, CustomBinding, binding};
 pub mod constant;
 #[doc(inline)]
 pub use constant::constant;
@@ -24,11 +22,16 @@ pub mod signal;
 #[doc(inline)]
 pub use signal::{Computed, Signal};
 pub mod cache;
+pub mod debounce;
 pub mod debug;
 mod ext;
+pub mod future;
 pub mod map;
 /// Projection utilities for decomposing bindings into component parts.
 pub mod project;
+pub mod stream;
+/// Throttling utilities for limiting signal update rates.
+pub mod throttle;
 #[doc(inline)]
 pub use project::Project;
 pub mod utils;

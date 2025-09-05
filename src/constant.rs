@@ -10,13 +10,13 @@
 //! ## Examples
 //!
 //! ```
-//! use nami::{Signal, SignalExt, constant, binding};
+//! use nami::{Signal, SignalExt, constant, binding, Binding};
 //!
 //! // Create a constant
 //! let tax_rate = constant(0.08);
 //!
 //! // Use in a reactive computation
-//! let price = binding(100.0);
+//! let price: Binding<f64> = binding(100.0);
 //! let total = price.clone().zip(tax_rate)
 //!     .map(|(price, rate)| price * (1.0 + rate));
 //!

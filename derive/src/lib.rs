@@ -22,7 +22,7 @@ use syn::{
 ///     age: u32,
 /// }
 ///
-/// let person_binding = binding(Person {
+/// let person_binding: Binding<Person> = binding(Person {
 ///     name: "Alice".to_string(),
 ///     age: 30,
 /// });

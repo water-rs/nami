@@ -21,10 +21,10 @@ use crate::Binding;
 /// use nami::project::Project;
 ///
 /// // Create a binding to a tuple
-/// let tuple_binding = binding((42, "hello"));
+/// let tuple_binding: Binding<(i32, &'static str)> = binding((42, "hello"));
 ///
 /// // Project it into separate bindings for each element
-/// let (num_binding, str_binding) = tuple_binding.project();
+/// let (num_binding, str_binding): (Binding<i32>, Binding<&'static str>) = tuple_binding.project();
 ///
 /// // Changes to individual projections update the original
 /// num_binding.set(100);
@@ -37,18 +37,18 @@ use crate::Binding;
 ///
 /// #[cfg(feature = "derive")]
 /// # {
-/// #[derive(nami::Project)]
+/// #[derive(Clone, nami::Project)]
 /// struct Person {
 ///     name: String,
 ///     age: u32,
 /// }
 ///
-/// let person_binding = binding(Person {
+/// let person_binding: Binding<Person> = binding(Person {
 ///     name: "Alice".to_string(),
 ///     age: 30,
 /// });
 ///
-/// let projected = person_binding.project();
+/// let projected: PersonProjected = person_binding.project();
 /// projected.name.set("Bob".to_string());
 /// projected.age.set(25);
 ///
@@ -244,7 +244,7 @@ impl<T: Project> Binding<T> {
     /// ```rust
     /// use nami::{Binding, binding};
     ///
-    /// let tuple_binding = binding((1, 2, 3));
+    /// let tuple_binding: Binding<(i32, i32, i32)> = binding((1, 2, 3));
     /// let (a, b, c) = tuple_binding.project();
     ///
     /// // Modify individual projections

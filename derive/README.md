@@ -1,8 +1,9 @@
 # nami-derive
 
-Derive macros for the [nami](https://github.com/waterui/nami) reactive framework.
+Derive and helper macros for the [nami](https://github.com/water-rs/nami) reactive framework.
 
-This crate provides procedural derive macros that automatically implement traits for the nami reactive system, making it easier to work with complex data structures in reactive applications.
+This crate provides procedural macros to make reactive code more ergonomic, including
+field projection for structs and an `s!` macro that builds formatted string signals.
 
 ## Features
 
@@ -14,10 +15,10 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-nami = { version = "0.1", features = ["derive"] }
+nami = { version = "0.3", features = ["derive"] }
 ```
 
-The derive macros are re-exported through the main `nami` crate when the `derive` feature is enabled (which is the default).
+The macros are re-exported through the main `nami` crate when the `derive` feature is enabled (default).
 
 ## `#[derive(Project)]`
 
@@ -37,7 +38,7 @@ struct Person {
     email: String,
 }
 
-let person = binding(Person {
+let person: Binding<Person> = binding(Person {
     name: "Alice".to_string(),
     age: 30,
     email: "alice@example.com".to_string(),
@@ -67,7 +68,7 @@ use nami::{Binding, binding};
 #[derive(nami::Project)]
 struct Point(i32, i32);
 
-let point = binding(Point(10, 20));
+let point: Binding<Point> = binding(Point(10, 20));
 let (x, y) = point.project();
 
 x.set(100);
@@ -87,7 +88,7 @@ use nami::{Binding, binding};
 #[derive(nami::Project)]
 struct Marker;
 
-let marker = binding(Marker);
+let marker: Binding<Marker> = binding(Marker);
 let _unit = marker.project(); // Returns ()
 ```
 
@@ -104,7 +105,7 @@ struct Container<T> {
     count: usize,
 }
 
-let container = binding(Container {
+let container: Binding<Container<String>> = binding(Container {
     value: "hello",
     count: 5,
 });
@@ -131,3 +132,20 @@ All projected bindings maintain bidirectional reactivity with the original bindi
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
+
+## `s!` macro
+
+Creates a formatted string signal, automatically capturing named variables from the format string.
+
+```rust
+use nami::*;
+
+let name = constant("Alice");
+let age = constant(25);
+
+// Automatic variable capture from format string
+let msg = s!("Hello {name}, you are {age} years old");
+
+// Positional arguments still work
+let msg2 = s!("Hello {}, you are {}", name, age);
+```

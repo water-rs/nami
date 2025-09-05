@@ -38,9 +38,9 @@ use crate::{
 /// # Examples
 ///
 /// ```
-/// # use nami::{Signal, utils::add, binding};
-/// let a = binding(5);
-/// let b = binding(3);
+/// # use nami::{Signal, utils::add, binding, Binding};
+/// let a: Binding<i32> = binding(5);
+/// let b: Binding<i32> = binding(3);
 /// let sum = add(a, b);
 /// assert_eq!(sum.get(), 8);
 /// ```
@@ -87,9 +87,9 @@ where
 /// # Examples
 ///
 /// ```
-/// # use nami::{Signal, utils::max, binding};
-/// let a = binding(10);
-/// let b = binding(5);
+/// # use nami::{Signal, utils::max, binding, Binding};
+/// let a: Binding<i32> = binding(10);
+/// let b: Binding<i32> = binding(5);
 /// let maximum = max(a, b);
 /// assert_eq!(maximum.get(), 10);
 /// ```
@@ -129,9 +129,9 @@ where
 /// # Examples
 ///
 /// ```
-/// # use nami::{Signal, utils::min, binding};
-/// let a = binding(10);
-/// let b = binding(5);
+/// # use nami::{Signal, utils::min, binding, Binding};
+/// let a: Binding<i32> = binding(10);
+/// let b: Binding<i32> = binding(5);
 /// let minimum = min(a, b);
 /// assert_eq!(minimum.get(), 5);
 /// ```

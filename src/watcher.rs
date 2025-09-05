@@ -229,6 +229,11 @@ impl<T: 'static> WatcherManager<T> {
         }
     }
 
+    /// Clears all registered watchers.
+    pub fn clear(&self) {
+        self.inner.borrow_mut().map.clear();
+    }
+
     /// Cancels a previously registered watcher by its identifier.
     pub fn cancel(&self, id: WatcherId) {
         self.inner.borrow_mut().cancel(id);

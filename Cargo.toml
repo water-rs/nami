@@ -40,7 +40,12 @@ license = { file = "LICENSE" }
 paste = "1.0"
 log = "0.4.27"
 nami-derive = { workspace = true, optional = true}
+futures-core = "0.3.31"
+pin-project-lite = "0.2.16"
+executor-core = "0.3.0"
+async-channel = "2.5.0"
+native-executor = { version = "0.3.1", optional = true}
 
 [features]
-default = ["derive"]
+default = ["derive","native-executor"]
 derive = ["dep:nami-derive"]

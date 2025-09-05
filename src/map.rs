@@ -9,11 +9,11 @@
 //! ## Usage Example
 //!
 //! ```rust
-//! use nami::{binding, Signal};
+//! use nami::{binding, Binding, Signal};
 //! use nami::map::map;
 //!
-//! let number = binding(5);
-//! let doubled = map(number, |n| n * 2);
+//! let number: Binding<i32> = binding(5);
+//! let doubled = map(number, |n: i32| n * 2);
 //!
 //! assert_eq!(doubled.get(), 10);
 //!
@@ -74,11 +74,11 @@ impl<C: Signal + 'static, F: 'static, Output> Map<C, F, Output> {
 /// # Example
 ///
 /// ```rust
-/// use nami::{binding, Signal};
+/// use nami::{binding, Binding, Signal};
 /// use nami::map::map;
 ///
-/// let counter = binding(1);
-/// let doubled = map(counter, |n| n * 2);
+/// let counter: Binding<i32> = binding(1);
+/// let doubled = map(counter, |n: i32| n * 2);
 /// assert_eq!(doubled.get(), 2);
 /// ```
 pub fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
