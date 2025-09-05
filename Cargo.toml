@@ -3,7 +3,6 @@ resolver = "2"
 members = ["derive"]
 
 [workspace.package]
-name = "nami"
 edition = "2024"
 authors = ["Lexo Liu <me@lexo.cool>"]
 description = "A powerful, lightweight reactive framework."
@@ -20,7 +19,7 @@ nami-derive = { path = "derive", version = "0.1.0" }
 
 [package]
 name = "nami"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 authors.workspace = true
 description = "A powerful, lightweight reactive framework."
