@@ -22,6 +22,7 @@ pub mod signal;
 #[doc(inline)]
 pub use signal::{Computed, Signal};
 pub mod cache;
+pub mod collection;
 pub mod debounce;
 pub mod debug;
 mod ext;
