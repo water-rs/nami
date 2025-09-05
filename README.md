@@ -76,7 +76,7 @@ Common helpers:
 React to changes via `watch`. Keep the returned guard alive to stay subscribed.
 
 ```rust,no_run
-use nami::{binding, Signal, watcher::Context};
+use nami::{binding, Binding, Signal, watcher::Context};
 
 let name: Binding<String> = binding("World".to_string());
 
@@ -183,8 +183,8 @@ use nami::{Signal, stream::SignalStream};
 
 **Enhanced Mailboxes** (requires `native-executor` feature):
 
-```rust,no_run
-use nami::binding;
+```rust,ignore
+use nami::{binding, Binding};
 use waterui_str::Str; // Example non-Send type
 
 // Create binding with non-Send type

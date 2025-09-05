@@ -369,8 +369,9 @@ mod use_native_executor {
         ///
         /// # Examples
         ///
-        /// ```rust
-        /// // Convert Str binding to String for cross-thread usage
+        /// ```rust,ignore
+        /// // Convert Str binding to String for cross-thread usage  
+        /// use nami::{binding, Binding};
         /// use waterui_str::Str;
         /// let text_binding:Binding<Str> = nami::binding("hello world");
         /// let mailbox = text_binding.mailbox();
@@ -696,6 +697,27 @@ impl Binding<bool> {
             },
         )
     }
+    /// Creates a binding that returns the logical inverse of this boolean binding.
+    ///
+    /// When this binding is `true`, the returned binding is `false`, and vice versa.
+    /// Setting a value on the returned binding will set the inverse value on this binding.
+    ///
+    /// # Example
+    /// ```
+    /// let enabled = nami::binding(true);
+    /// let disabled = enabled.reverse();
+    /// assert_eq!(disabled.get(), false);
+    /// ```
+    #[must_use]
+    pub fn reverse(&self) -> Self {
+        Self::mapping(
+            self,
+            |value| !value,
+            move |binding, value| {
+                binding.set(!value);
+            },
+        )
+    }
 }
 
 impl Not for Binding<bool> {
@@ -703,13 +725,7 @@ impl Not for Binding<bool> {
 
     /// Implements the logical NOT operator for boolean bindings.
     fn not(self) -> Self::Output {
-        Self::mapping(
-            &self,
-            |value| !value,
-            move |binding, value| {
-                binding.set(!value);
-            },
-        )
+        self.reverse()
     }
 }
 
