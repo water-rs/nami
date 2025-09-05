@@ -11,7 +11,7 @@ use crate::watcher::{WatcherManager, WatcherManagerGuard};
 ///
 /// This trait provides a common interface for collections that support
 /// reactive programming patterns through watchers.
-pub trait Collection {
+pub trait Collection: Clone {
     /// The type of items stored in the collection.
     type Item;
     /// The type of guard returned when registering a watcher.
@@ -44,6 +44,15 @@ pub trait Collection {
 pub struct List<T> {
     vec: Rc<RefCell<Vec<T>>>,
     watchers: WatcherManager<Vec<T>>,
+}
+
+impl<T> Clone for List<T> {
+    fn clone(&self) -> Self {
+        Self {
+            vec: self.vec.clone(),
+            watchers: self.watchers.clone(),
+        }
+    }
 }
 
 impl<T: Clone + 'static> Collection for List<T> {
