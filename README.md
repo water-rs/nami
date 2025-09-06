@@ -92,7 +92,7 @@ React to changes via `watch`. Keep the returned guard alive to stay subscribed.
 ```rust,no_run
 use nami::{binding, Binding, Signal, watcher::Context};
 
-let name: Binding<String> = binding("World".to_string());
+let name: Binding<String> = binding("World");
 
 let _guard = name.watch(|ctx: Context<String>| {
     // metadata is available via ctx.metadata
@@ -100,7 +100,7 @@ let _guard = name.watch(|ctx: Context<String>| {
     println!("Hello, {}!", ctx.value);
 });
 
-name.set("Universe".to_string());
+name.set("Universe");
 ```
 
 The `Context` carries typed metadata to power advanced features (e.g., animations).
@@ -215,15 +215,29 @@ mailbox.set("world").await;
 
 ## Debugging
 
-Enable structured logging of computations and changes:
+Enable structured logging to trace signal behavior during development:
 
 ```rust,no_run
-use nami::{Signal, SignalExt, debug::{Debug, Config, ConfigFlags}};
+use nami::{binding, Binding, Signal, debug::{Debug, Config}};
 
-let config = Config { flags: ConfigFlags::CHANGE };
-let debugged = Debug::with_config(123_i32.computed(), config);
-let _ = debugged.get();
+let value: Binding<i32> = binding(42);
+
+// Log only value changes (most common)
+let debug = Debug::changes(value.clone());
+
+// Log all operations (verbose mode)
+let debug = Debug::verbose(value.clone());
+
+// Log specific operations
+let debug = Debug::compute_only(value.clone());        // Only computations
+let debug = Debug::watchers(value.clone());            // Watcher lifecycle
+let debug = Debug::compute_and_changes(value.clone()); // Both computations and changes
+
+// Use custom configuration
+let debug = Debug::with_config(value, Config::default());
 ```
+
+The debug module uses the `log` crate for output, so configure your logger (e.g., `env_logger`) to see the debug messages.
 
 ## Derive Macros
 
