@@ -258,13 +258,6 @@ projected.name.set("B");  // Automatic &str -> String conversion
 assert_eq!(p.get().name, "B");
 ```
 
-## Installation
-
-```toml
-[dependencies]
-nami = { version = "0.3", features = ["derive", "native-executor"] }
-```
-
 Feature flags:
 
 - `derive` (default): re-exports macros from `nami-derive`
