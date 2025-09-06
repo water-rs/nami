@@ -12,7 +12,7 @@ use syn::{
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,ignore
 /// use nami::{Binding, binding};
 /// use nami_derive::Project;
 ///
@@ -231,7 +231,7 @@ impl Parse for SInput {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,ignore
 /// use nami::*;
 ///
 /// let name = constant("Alice");

@@ -81,7 +81,32 @@ impl<T: Default + Clone + 'static> Default for Binding<T> {
     }
 }
 
-/// A convenience function to create a new binding from a value.
+/// Creates a new binding from a value with automatic type conversion.
+///
+/// This function accepts any value that implements `Into<T>`, providing ergonomic
+/// initialization without manual conversion. Common use cases include:
+///
+/// - `binding("text")` creates a `Binding<String>` from `&str`
+/// - `binding(vec![1, 2, 3])` creates a `Binding<Vec<i32>>`
+/// - `binding(42)` creates a `Binding<i32>`
+///
+/// # Examples
+///
+/// ```
+/// use nami::{binding, Binding};
+///
+/// // Automatic conversion from &str to String
+/// let text: Binding<String> = binding("hello");
+/// assert_eq!(text.get(), "hello");
+///
+/// // Direct initialization with owned types
+/// let numbers: Binding<Vec<i32>> = binding(vec![1, 2, 3]);
+/// assert_eq!(numbers.get(), vec![1, 2, 3]);
+///
+/// // Works with any type implementing Into
+/// let count: Binding<i64> = binding(42i32); // i32 -> i64
+/// assert_eq!(count.get(), 42i64);
+/// ```
 ///
 /// This is equivalent to `Binding::container(value.into())`.
 pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
@@ -252,9 +277,28 @@ impl<T: 'static> Binding<T> {
         }
     }
 
-    /// Sets the binding to a new value.
-    pub fn set(&self, value: T) {
-        self.0.set(value);
+    /// Sets the binding to a new value with automatic type conversion.
+    ///
+    /// Accepts any value that implements `Into<T>`, providing the same ergonomic
+    /// benefits as the `binding()` constructor.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use nami::{binding, Binding};
+    ///
+    /// let text: Binding<String> = binding("initial");
+    /// 
+    /// // Direct &str usage - no .into() or .to_string() needed
+    /// text.set("updated");
+    /// assert_eq!(text.get(), "updated");
+    ///
+    /// let count: Binding<i64> = binding(0i64);
+    /// count.set(42i32);  // i32 -> i64 conversion
+    /// assert_eq!(count.get(), 42i64);
+    /// ```
+    pub fn set(&self, value: impl Into<T>) {
+        self.0.set(value.into());
     }
 
     /// Creates a bidirectional mapping between this binding and another type.
@@ -886,5 +930,64 @@ impl<T> From<Binding<T>> for Computed<T> {
     fn from(val: Binding<T>) -> Self {
         let boxed = val.0 as Box<_>;
         Self(boxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::{string::String, vec, vec::Vec};
+
+    #[test]
+    fn test_binding_into_conversion() {
+        // Test &str -> String conversion
+        let text: Binding<String> = binding("hello");
+        assert_eq!(text.get(), "hello");
+
+        // Test direct initialization
+        let number: Binding<i32> = binding(42);
+        assert_eq!(number.get(), 42);
+
+        // Test Vec initialization
+        let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);
+        assert_eq!(items.get(), vec![1, 2, 3]);
+
+        // Test i32 -> i64 conversion
+        let count: Binding<i64> = binding(100i32);
+        assert_eq!(count.get(), 100i64);
+    }
+
+    #[test]
+    fn test_binding_operations() {
+        let text: Binding<String> = binding("initial");
+        text.set("updated");  // Now works directly with &str!
+        assert_eq!(text.get(), "updated");
+
+        let counter: Binding<i32> = binding(0);
+        counter.increment(5);
+        assert_eq!(counter.get(), 5);
+        counter.decrement(2);
+        assert_eq!(counter.get(), 3);
+    }
+
+    #[test]
+    fn test_set_with_into_conversion() {
+        // Test various Into conversions with set()
+        let text: Binding<String> = binding(String::new());
+        
+        // &str -> String
+        text.set("hello");
+        assert_eq!(text.get(), "hello");
+        
+        // String -> String (owned)
+        text.set(String::from("world"));
+        assert_eq!(text.get(), "world");
+        
+        // Cross-type conversions
+        let number: Binding<i64> = binding(0i64);
+        number.set(42i32);  // i32 -> i64
+        assert_eq!(number.get(), 42i64);
+        number.set(100i64); // Direct i64
+        assert_eq!(number.get(), 100i64);
     }
 }

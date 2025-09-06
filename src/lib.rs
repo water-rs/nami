@@ -43,7 +43,7 @@ pub use ext::SignalExt;
 
 #[cfg(feature = "derive")]
 #[doc(inline)]
-pub use nami_derive::{Project, s};
+pub use nami_derive::Project;
 
 #[doc(hidden)]
 pub use alloc::format as __format;

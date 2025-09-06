@@ -13,9 +13,7 @@ license = "MIT"
 readme = "README.md"
 
 [workspace.dependencies]
-nami-derive = { path = "derive", version = "0.1.0" }
-
-
+nami-derive = { path = "derive", version = "0.2.0" }
 
 [package]
 name = "nami"
@@ -38,7 +36,7 @@ license = { file = "LICENSE" }
 [dependencies]
 paste = "1.0"
 log = "0.4.27"
-nami-derive = { workspace = true, optional = true}
+nami-derive = { version = "0.1.0", optional = true}
 futures-core = "0.3.31"
 pin-project-lite = "0.2.16"
 executor-core = "0.3.0"

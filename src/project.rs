@@ -49,8 +49,8 @@ use crate::Binding;
 /// });
 ///
 /// let projected: PersonProjected = person_binding.project();
-/// projected.name.set("Bob".to_string());
-/// projected.age.set(25);
+/// projected.name.set("Bob");
+/// projected.age.set(25u32);
 ///
 /// let person = person_binding.get();
 /// assert_eq!(person.name, "Bob");

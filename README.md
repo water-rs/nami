@@ -10,15 +10,16 @@ A powerful, lightweight reactive framework for Rust.
 - Ergonomic two-way `Binding<T>` with helpers
 - Composition primitives: `map`, `zip`, `cached`, `debounce`, `throttle`, `utils::{add,max,min}`
 - Typed watcher context with metadata
-- Optional derive macros and string signal macro `s!`
+- Optional derive macros
 
 ## Quick Start
 
 ```rust
 use nami::{binding, Binding, Signal};
 
-// Create mutable reactive state
+// Create mutable reactive state with automatic type conversion
 let counter: Binding<i32> = binding(0);
+let message: Binding<String> = binding("hello");  // &str -> String conversion
 
 // Derive a new computation from it
 let doubled = nami::map::map(counter.clone(), |n: i32| n * 2);
@@ -30,6 +31,9 @@ assert_eq!(doubled.get(), 0);
 // Update the source and observe derived changes
 counter.set(3);
 assert_eq!(doubled.get(), 6);
+
+// set() also accepts Into<T> for ergonomic updates
+message.set("world");  // &str works directly!
 ```
 
 ## The `Signal` Trait
@@ -53,15 +57,25 @@ pub trait Signal: Clone + 'static {
 
 ## Bindings
 
-`Binding<T>` is two-way reactive state with ergonomic helpers.
+`Binding<T>` is two-way reactive state with ergonomic helpers. Both `binding()` and `set()` accept any value implementing `Into<T>`, eliminating the need for manual conversions:
 
 ```rust
 use nami::{binding, Binding};
 
-let counter: Binding<i32> = binding(0);
+// Automatic type conversion with Into trait
+let text: Binding<String> = binding("hello");           // &str -> String
+let counter: Binding<i32> = binding(0);                 // Direct initialization
+let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);  // Vec<i32> binding
+
+// set() also uses Into<T> for ergonomic updates
+text.set("world");                                // Direct &str, no .into() needed
 counter.set(5);
 counter.increment(1);
 assert_eq!(counter.get(), 6);
+
+// Works with type conversions
+let bignum: Binding<i64> = binding(0i64);
+bignum.set(42i32);                               // i32 -> i64 automatic conversion
 ```
 
 Common helpers:
@@ -122,10 +136,10 @@ assert_eq!(squared.get(), 25);
 Control the rate of updates with debounce and throttle utilities:
 
 ```rust
-use nami::{binding, debounce::Debounce, throttle::Throttle};
+use nami::{binding, debounce::Debounce, throttle::Throttle, Binding};
 use core::time::Duration;
 
-let input = binding("".to_string());
+let input: Binding<String> = binding("");
 
 // Debounce: delay updates until 300ms of quiet time
 let debounced = Debounce::new(input.clone(), Duration::from_millis(300));
@@ -134,7 +148,7 @@ let debounced = Debounce::new(input.clone(), Duration::from_millis(300));
 let throttled = Throttle::new(input.clone(), Duration::from_millis(100));
 
 // Both preserve reactivity while controlling update frequency
-input.set("typing...".to_string());
+input.set("typing...");
 ```
 
 **Debounce vs Throttle:**
@@ -211,12 +225,11 @@ let debugged = Debug::with_config(123_i32.computed(), config);
 let _ = debugged.get();
 ```
 
-## Derive Macros and `s!` Macro
+## Derive Macros
 
 Enable the `derive` feature (enabled by default) to access:
 
 - `#[derive(nami::Project)]`: project a struct binding into bindings for each field
-- `s!("Hello {name}")`: string formatting that captures variables as signals
 
 ```rust
 use nami::{binding, Binding, project::Project};
@@ -227,7 +240,7 @@ struct Person { name: String, age: u32 }
 let p: Binding<Person> = binding(Person { name: "A".into(), age: 1 });
 // The derive generates `PersonProjected`
 let projected: PersonProjected = p.project();
-projected.name.set("B".into());
+projected.name.set("B");  // Automatic &str -> String conversion
 assert_eq!(p.get().name, "B");
 ```
 

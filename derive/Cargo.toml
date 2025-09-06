@@ -1,12 +1,12 @@
 [package]
 name = "nami-derive"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Lexo Liu <me@lexo.cool>"]
 description = "Derive macros for the nami reactive framework"
-repository = "https://github.com/waterui/nami"
+repository = "https://github.com/water-rs/nami"
 documentation = "https://docs.rs/nami-derive"
-homepage = "https://github.com/waterui/nami"
+homepage = "https://github.com/water-rs/nami"
 license = "MIT"
 keywords = ["reactive", "derive", "macro", "procedural", "binding"]
 categories = ["rust-patterns", "development-tools::procedural-macro-helpers"]
