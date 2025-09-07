@@ -17,7 +17,7 @@ nami-derive = { path = "derive", version = "0.2.0" }
 
 [package]
 name = "nami"
-version = "0.4.0"
+version = "0.5.0"
 edition.workspace = true
 authors.workspace = true
 description = "A powerful, lightweight reactive framework."
@@ -35,11 +35,11 @@ license = { file = "LICENSE" }
 
 [dependencies]
 paste = "1.0"
-log = "0.4.27"
-nami-derive = { version = "0.1.0", optional = true}
+log = "0.4.28"
+nami-derive = { version = "0.2.0", optional = true}
 futures-core = "0.3.31"
 pin-project-lite = "0.2.16"
-executor-core = "0.3.0"
+executor-core = "0.3.1"
 async-channel = "2.5.0"
 native-executor = { version = "0.3.1", optional = true}
 
