@@ -5,7 +5,7 @@
 use alloc::rc::Rc;
 use core::{cell::RefCell, time::Duration};
 use executor_core::{LocalExecutor, Task};
-use native_executor::{MainExecutor, timer::Timer};
+use native_executor::{NativeExecutor, timer::Timer};
 
 use crate::{
     Signal,
@@ -62,13 +62,13 @@ where
     }
 }
 
-impl<S> Debounce<S, MainExecutor>
+impl<S> Debounce<S, NativeExecutor>
 where
     S: Signal,
 {
     /// Creates a new debounce wrapper using the default executor.
     pub fn new(signal: S, duration: Duration) -> Self {
-        Self::with_executor(signal, duration, MainExecutor)
+        Self::with_executor(signal, duration, NativeExecutor)
     }
 }
 

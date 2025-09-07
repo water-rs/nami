@@ -288,7 +288,7 @@ impl<T: 'static> Binding<T> {
     /// use nami::{binding, Binding};
     ///
     /// let text: Binding<String> = binding("initial");
-    /// 
+    ///
     /// // Direct &str usage - no .into() or .to_string() needed
     /// text.set("updated");
     /// assert_eq!(text.get(), "updated");
@@ -451,7 +451,7 @@ mod use_native_executor {
         /// Attaches this `Binding` to a mailbox using the default native executor.
         #[must_use]
         pub fn mailbox(&self) -> BindingMailbox<T> {
-            self.mailbox_with_executor(native_executor::MainExecutor)
+            self.mailbox_with_executor(native_executor::NativeExecutor)
         }
     }
 }
@@ -960,7 +960,7 @@ mod tests {
     #[test]
     fn test_binding_operations() {
         let text: Binding<String> = binding("initial");
-        text.set("updated");  // Now works directly with &str!
+        text.set("updated"); // Now works directly with &str!
         assert_eq!(text.get(), "updated");
 
         let counter: Binding<i32> = binding(0);
@@ -974,18 +974,18 @@ mod tests {
     fn test_set_with_into_conversion() {
         // Test various Into conversions with set()
         let text: Binding<String> = binding(String::new());
-        
+
         // &str -> String
         text.set("hello");
         assert_eq!(text.get(), "hello");
-        
+
         // String -> String (owned)
         text.set(String::from("world"));
         assert_eq!(text.get(), "world");
-        
+
         // Cross-type conversions
         let number: Binding<i64> = binding(0i64);
-        number.set(42i32);  // i32 -> i64
+        number.set(42i32); // i32 -> i64
         assert_eq!(number.get(), 42i64);
         number.set(100i64); // Direct i64
         assert_eq!(number.get(), 100i64);

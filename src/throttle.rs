@@ -4,7 +4,7 @@ use core::{
     time::Duration,
 };
 use executor_core::{LocalExecutor, Task};
-use native_executor::{MainExecutor, timer::Timer};
+use native_executor::{NativeExecutor, timer::Timer};
 
 use crate::{
     Signal,
@@ -66,13 +66,13 @@ where
     }
 }
 
-impl<S> Throttle<S, MainExecutor>
+impl<S> Throttle<S, NativeExecutor>
 where
     S: Signal,
 {
     /// Creates a new throttle wrapper using the default executor.
     pub fn new(signal: S, duration: Duration) -> Self {
-        Self::with_executor(signal, duration, MainExecutor)
+        Self::with_executor(signal, duration, NativeExecutor)
     }
 }
 
@@ -204,7 +204,7 @@ mod tests {
     fn test_throttle_with_custom_executor() {
         let binding = Binding::container(0);
         let throttled =
-            Throttle::with_executor(binding.clone(), Duration::from_millis(50), MainExecutor);
+            Throttle::with_executor(binding.clone(), Duration::from_millis(50), NativeExecutor);
 
         // Test basic functionality with custom executor
         assert_eq!(throttled.get(), 0);

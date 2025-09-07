@@ -1,5 +1,5 @@
 #[cfg(feature = "native-executor")]
-use native_executor::MainExecutor;
+use native_executor::NativeExecutor;
 
 use crate::{
     Computed, Signal, cache::Cached, debounce::Debounce, map::Map, signal::WithMetadata, zip::Zip,
@@ -51,7 +51,7 @@ pub trait SignalExt: Signal + Sized {
     /// The debounced signal will only emit values after the specified duration
     /// has passed without receiving new values.
     #[cfg(feature = "native-executor")]
-    fn debounce(self, duration: Duration) -> Debounce<Self, MainExecutor>
+    fn debounce(self, duration: Duration) -> Debounce<Self, NativeExecutor>
     where
         Self::Output: Clone,
     {
