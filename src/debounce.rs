@@ -126,7 +126,7 @@ where
                 let ctx_value = ctx.value.clone();
                 let ctx_metadata = ctx.metadata;
 
-                let task = executor.spawn(async move {
+                let task = executor.spawn_local(async move {
                     Timer::after(duration).await;
                     watchers.notify(|| ctx_value.clone(), &ctx_metadata);
                 });

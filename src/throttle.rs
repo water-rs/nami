@@ -130,7 +130,7 @@ where
                 throttled.set(true);
 
                 let throttled = throttled.clone();
-                let task = executor.spawn(async move {
+                let task = executor.spawn_local(async move {
                     Timer::after(duration).await;
                     // Reset throttled state after the duration
                     throttled.set(false);

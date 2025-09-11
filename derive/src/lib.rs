@@ -71,7 +71,7 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
         let field_name = &field.ident;
         let field_type = &field.ty;
         quote! {
-            pub #field_name: nami::Binding<#field_type>
+            pub #field_name: ::nami::Binding<#field_type>
         }
     });
 
@@ -81,7 +81,7 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
         quote! {
             #field_name: {
                 let source = source.clone();
-                nami::Binding::mapping(
+                ::nami::Binding::mapping(
                     &source,
                     |value| value.#field_name.clone(),
                     move |binding, value| {
@@ -108,10 +108,10 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
             #(#projected_fields,)*
         }
 
-        impl #impl_generics_with_static nami::project::Project for #struct_name #ty_generics #where_clause {
+        impl #impl_generics_with_static ::nami::project::Project for #struct_name #ty_generics #where_clause {
             type Projected = #projected_struct_name #ty_generics;
 
-            fn project(source: &nami::Binding<Self>) -> Self::Projected {
+            fn project(source: &::nami::Binding<Self>) -> Self::Projected {
                 #projected_struct_name {
                     #(#field_projections,)*
                 }
@@ -129,9 +129,9 @@ fn derive_project_tuple_struct(input: &DeriveInput, fields: &syn::FieldsUnnamed)
     // Generate tuple type for projection
     let field_types: Vec<&Type> = fields.unnamed.iter().map(|field| &field.ty).collect();
     let projected_tuple = if field_types.len() == 1 {
-        quote! { (nami::Binding<#(#field_types)*>,) }
+        quote! { (::nami::Binding<#(#field_types)*>,) }
     } else {
-        quote! { (#(nami::Binding<#field_types>),*) }
+        quote! { (#(::nami::Binding<#field_types>),*) }
     };
 
     // Generate field projections using index access
@@ -140,7 +140,7 @@ fn derive_project_tuple_struct(input: &DeriveInput, fields: &syn::FieldsUnnamed)
         quote! {
             {
                 let source = source.clone();
-                nami::Binding::mapping(
+                ::nami::Binding::mapping(
                     &source,
                     |value| value.#idx.clone(),
                     move |binding, value| {
@@ -167,10 +167,10 @@ fn derive_project_tuple_struct(input: &DeriveInput, fields: &syn::FieldsUnnamed)
     };
 
     let expanded = quote! {
-        impl #impl_generics_with_static nami::project::Project for #struct_name #ty_generics #where_clause {
+        impl #impl_generics_with_static ::nami::project::Project for #struct_name #ty_generics #where_clause {
             type Projected = #projected_tuple;
 
-            fn project(source: &nami::Binding<Self>) -> Self::Projected {
+            fn project(source: &::nami::Binding<Self>) -> Self::Projected {
                 #projection_tuple
             }
         }
@@ -193,10 +193,10 @@ fn derive_project_unit_struct(input: &DeriveInput) -> TokenStream {
     let (impl_generics_with_static, _, _) = generics_with_static.split_for_impl();
 
     let expanded = quote! {
-        impl #impl_generics_with_static nami::project::Project for #struct_name #ty_generics #where_clause {
+        impl #impl_generics_with_static ::nami::project::Project for #struct_name #ty_generics #where_clause {
             type Projected = ();
 
-            fn project(_source: &nami::Binding<Self>) -> Self::Projected {
+            fn project(_source: &::nami::Binding<Self>) -> Self::Projected {
                 ()
             }
         }
@@ -288,7 +288,7 @@ pub fn s(input: TokenStream) -> TokenStream {
                 let arg = &args[0];
                 quote! {
                     {
-                        use nami::SignalExt;
+                        use ::nami::SignalExt;
                         SignalExt::map(#arg.clone(), |arg| nami::__format!(#format_str, arg))
                     }
                 }
@@ -313,7 +313,7 @@ pub fn s(input: TokenStream) -> TokenStream {
                 let arg3 = &args[2];
                 quote! {
                     {
-                        use nami::{SignalExt, zip::zip};
+                        use ::nami::{SignalExt, zip::zip};
                         SignalExt::map(
                             zip(zip(#arg1.clone(), #arg2.clone()), #arg3.clone()),
                             |((arg1, arg2), arg3)| nami::__format!(#format_str, arg1, arg2, arg3)
@@ -329,7 +329,7 @@ pub fn s(input: TokenStream) -> TokenStream {
                 let arg4 = &args[3];
                 quote! {
                     {
-                        use nami::{SignalExt, zip::zip};
+                        use ::nami::{SignalExt, zip::zip};
                         SignalExt::map(
                             zip(
                                 zip(#arg1.clone(), #arg2.clone()),
@@ -378,7 +378,7 @@ pub fn s(input: TokenStream) -> TokenStream {
     if var_names.is_empty() {
         return quote! {
             {
-                use nami::constant;
+                use ::nami::constant;
                 constant(nami::__format!(#format_str))
             }
         }
@@ -396,7 +396,7 @@ pub fn s(input: TokenStream) -> TokenStream {
             let var = &var_idents[0];
             quote! {
                 {
-                    use nami::SignalExt;
+                    use ::nami::SignalExt;
                     SignalExt::map(#var.clone(), |#var| {
                         nami::__format!(#format_str)
                     })
@@ -409,7 +409,7 @@ pub fn s(input: TokenStream) -> TokenStream {
             let var2 = &var_idents[1];
             quote! {
                 {
-                    use nami::{SignalExt, zip::zip};
+                    use ::nami::{SignalExt, zip::zip};
                     SignalExt::map(zip(#var1.clone(), #var2.clone()), |(#var1, #var2)| {
                         nami::__format!(#format_str)
                     })
@@ -423,11 +423,11 @@ pub fn s(input: TokenStream) -> TokenStream {
             let var3 = &var_idents[2];
             quote! {
                 {
-                    use nami::{SignalExt, zip::zip};
+                    use ::nami::{SignalExt, zip::zip};
                     SignalExt::map(
                         zip(zip(#var1.clone(), #var2.clone()), #var3.clone()),
                         |((#var1, #var2), #var3)| {
-                            nami::__format!(#format_str)
+                            ::nami::__format!(#format_str)
                         }
                     )
                 }
@@ -441,14 +441,14 @@ pub fn s(input: TokenStream) -> TokenStream {
             let var4 = &var_idents[3];
             quote! {
                 {
-                    use nami::{SignalExt, zip::zip};
+                    use ::nami::{SignalExt, zip::zip};
                     SignalExt::map(
                         zip(
                             zip(#var1.clone(), #var2.clone()),
                             zip(#var3.clone(), #var4.clone())
                         ),
                         |((#var1, #var2), (#var3, #var4))| {
-                            nami::__format!(#format_str)
+                            ::nami::__format!(#format_str)
                         }
                     )
                 }

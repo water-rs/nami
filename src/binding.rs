@@ -13,7 +13,7 @@ use core::{
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use async_channel::{Sender, unbounded};
-use executor_core::{DefaultExecutor, LocalExecutor};
+use executor_core::{DefaultExecutor, LocalExecutor, Task};
 
 use crate::{
     Computed, Signal,
@@ -471,11 +471,13 @@ impl<T: 'static> Binding<T> {
 
         {
             let binding = self.clone();
-            let _fut = executor.spawn(async move {
-                while let Ok(job) = receiver.recv().await {
-                    job(&binding);
-                }
-            });
+            executor
+                .spawn_local(async move {
+                    while let Ok(job) = receiver.recv().await {
+                        job(&binding);
+                    }
+                })
+                .detach();
         }
 
         BindingMailbox { sender }

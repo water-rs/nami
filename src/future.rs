@@ -6,7 +6,7 @@
 //!
 //! This is handy for wiring async computations into a reactive graph.
 
-use executor_core::{DefaultExecutor, LocalExecutor};
+use executor_core::{DefaultExecutor, LocalExecutor, Task};
 
 use crate::{Container, CustomBinding, Signal};
 
@@ -42,10 +42,12 @@ where
         let container = Container::default();
         {
             let container = container.clone();
-            let _fut = executor.spawn(async move {
-                let value = fut.await;
-                container.set(Some(value));
-            });
+            executor
+                .spawn_local(async move {
+                    let value = fut.await;
+                    container.set(Some(value));
+                })
+                .detach();
         }
         Self { container }
     }
