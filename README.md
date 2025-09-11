@@ -188,7 +188,7 @@ use executor_core::LocalExecutor;
 // ... later ... sig.get() == Some(42)
 ```
 
-```rust,ignore
+```rust
 use nami::{Signal, stream::SignalStream};
 // let s = /* some Signal */;
 // let mut stream = SignalStream { signal: s, guard: None };

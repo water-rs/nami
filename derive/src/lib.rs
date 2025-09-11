@@ -12,7 +12,7 @@ use syn::{
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```rust
 /// use nami::{Binding, binding};
 /// use nami_derive::Project;
 ///
@@ -231,7 +231,7 @@ impl Parse for SInput {
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```rust
 /// use nami::*;
 ///
 /// let name = constant("Alice");
@@ -250,8 +250,9 @@ pub fn s(input: TokenStream) -> TokenStream {
     let format_value = format_str.value();
 
     // Check for format string issues
-    let (has_positional, has_named, positional_count, named_vars) = analyze_format_string(&format_value);
-    
+    let (has_positional, has_named, positional_count, named_vars) =
+        analyze_format_string(&format_value);
+
     // If there are explicit arguments, validate and use positional approach
     if !input.args.is_empty() {
         // Check for mixed usage errors
@@ -267,7 +268,7 @@ pub fn s(input: TokenStream) -> TokenStream {
             .to_compile_error()
             .into();
         }
-        
+
         // Check argument count matches placeholders
         if positional_count != input.args.len() {
             return syn::Error::new_spanned(
@@ -276,7 +277,7 @@ pub fn s(input: TokenStream) -> TokenStream {
                     "Format string has {} positional placeholders but {} arguments were provided",
                     positional_count,
                     input.args.len()
-                )
+                ),
             )
             .to_compile_error()
             .into();
@@ -350,12 +351,12 @@ pub fn s(input: TokenStream) -> TokenStream {
         return syn::Error::new_spanned(
             &format_str,
             "Format string mixes positional {{}} and named {{var}} placeholders. \
-            Use either all positional with explicit arguments, or all named for automatic capture."
+            Use either all positional with explicit arguments, or all named for automatic capture.",
         )
         .to_compile_error()
         .into();
     }
-    
+
     // If has positional placeholders but no arguments provided
     if has_positional && input.args.is_empty() {
         return syn::Error::new_spanned(
@@ -451,7 +452,8 @@ pub fn s(input: TokenStream) -> TokenStream {
                         }
                     )
                 }
-            }.into()
+            }
+            .into()
         }
         _ => syn::Error::new_spanned(format_str, "Too many named variables, maximum 4 supported")
             .to_compile_error()
@@ -466,7 +468,7 @@ fn analyze_format_string(format_str: &str) -> (bool, bool, usize, Vec<String>) {
     let mut positional_count = 0;
     let mut named_vars = Vec::new();
     let mut chars = format_str.chars().peekable();
-    
+
     while let Some(c) = chars.next() {
         if c == '{' && chars.peek() == Some(&'{') {
             // Skip escaped braces
@@ -475,7 +477,7 @@ fn analyze_format_string(format_str: &str) -> (bool, bool, usize, Vec<String>) {
         } else if c == '{' {
             let mut content = String::new();
             let mut has_content = false;
-            
+
             while let Some(&next_char) = chars.peek() {
                 if next_char == '}' {
                     chars.next(); // consume }
@@ -496,7 +498,7 @@ fn analyze_format_string(format_str: &str) -> (bool, bool, usize, Vec<String>) {
                     has_content = true;
                 }
             }
-            
+
             // Analyze the content
             if !has_content || content.is_empty() {
                 // Empty {} is positional
@@ -506,7 +508,11 @@ fn analyze_format_string(format_str: &str) -> (bool, bool, usize, Vec<String>) {
                 // Numeric like {0} or {1} is positional
                 has_positional = true;
                 positional_count += 1;
-            } else if content.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_') {
+            } else if content
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            {
                 // Starts with letter or underscore, likely a variable name
                 has_named = true;
                 if !named_vars.contains(&content) {
@@ -519,7 +525,6 @@ fn analyze_format_string(format_str: &str) -> (bool, bool, usize, Vec<String>) {
             }
         }
     }
-    
+
     (has_positional, has_named, positional_count, named_vars)
 }
-

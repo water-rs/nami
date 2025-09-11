@@ -12,6 +12,8 @@ use core::{
 };
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
+use async_channel::{Sender, unbounded};
+use executor_core::{DefaultExecutor, LocalExecutor};
 
 use crate::{
     Computed, Signal,
@@ -376,88 +378,115 @@ impl<T: 'static> Binding<T> {
     }
 }
 
-#[cfg(feature = "native-executor")]
-mod use_native_executor {
-    use executor_core::LocalExecutor;
-    use native_executor::mailbox::Mailbox;
+type Job<T> = Box<dyn FnOnce(&Binding<T>) + 'static + Send>;
 
-    use crate::Binding;
+/// A handle for interacting with a background mailbox tied to a `Binding`.
+pub struct BindingMailbox<T: 'static> {
+    sender: Sender<Job<T>>,
+}
 
-    /// A handle for interacting with a background mailbox tied to a `Binding`.
+impl<T: 'static> BindingMailbox<T> {
+    /// Sends a job to be executed with the binding on the background task.
     ///
-    /// When the `native-executor` feature is enabled, a `Binding` can be paired with
-    /// a mailbox to send updates from asynchronous contexts or other threads.
-    pub struct BindingMailbox<T: 'static> {
-        mailbox: Mailbox<Binding<T>>,
+    /// The job will be executed asynchronously and will have access to the binding
+    /// for reading or modifying its value.
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::unwrap_used)]
+    pub fn handle(&self, job: impl FnOnce(&Binding<T>) + 'static + Send) {
+        self.sender.try_send(Box::new(job)).unwrap();
     }
 
-    impl<T: 'static> BindingMailbox<T> {
-        /// Gets the current value of the binding asynchronously via the mailbox.
-        pub async fn get(&self) -> T
-        where
-            T: Clone + Send,
-        {
-            self.mailbox.call(super::Binding::get).await
-        }
+    /// Gets the current value of the binding asynchronously via the mailbox.
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::unwrap_used)]
+    pub async fn get(&self) -> T
+    where
+        T: Clone + Send,
+    {
+        let (sender, receiver) = unbounded();
+        self.handle(move |binding| {
+            sender.try_send(binding.get()).unwrap();
+        });
 
-        /// Gets the current value of the binding asynchronously and converts it to type `T2`.
-        ///
-        /// This method retrieves the binding's value via the mailbox and automatically
-        /// converts it to the target type using the `From` trait. This is particularly
-        /// useful for bindings with non-`Send` types (like `waterui_str::Str`) that need to be
-        /// converted to `Send` types (like `String`) for use across async boundaries.
-        ///
-        /// # Type Parameters
-        ///
-        /// * `T2` - The target type to convert to. Must implement `From<T>` where `T` is the binding's value type.
-        ///
-        /// # Examples
-        ///
-        /// ```rust,ignore
-        /// // Convert Str binding to String for cross-thread usage  
-        /// use nami::{binding, Binding};
-        /// use waterui_str::Str;
-        /// let text_binding:Binding<Str> = nami::binding("hello world");
-        /// let mailbox = text_binding.mailbox();
-        /// let owned_string: String = mailbox.get_as().await;
-        /// assert_eq!(owned_string, "hello world");
-        /// ```
-        pub async fn get_as<T2>(&self) -> T2
-        where
-            T2: Send + 'static + From<T>,
-        {
-            self.mailbox.call(|b| b.get().into()).await
-        }
-
-        /// Sets a new value on the binding asynchronously via the mailbox.
-        pub async fn set(&self, value: impl Into<T> + Send + 'static) {
-            self.mailbox
-                .call(move |binding| binding.set(value.into()))
-                .await;
-        }
+        receiver.recv().await.unwrap()
     }
 
-    impl<T: 'static> Binding<T> {
-        /// Attaches this `Binding` to a mailbox using a provided executor.
-        ///
-        /// Returns a `BindingMailbox` which can be cloned and used to send the
-        /// binding to other tasks for mutation or observation.
-        pub fn mailbox_with_executor<E: LocalExecutor>(&self, executor: E) -> BindingMailbox<T> {
-            BindingMailbox {
-                mailbox: Mailbox::new(executor, self.clone()),
-            }
-        }
+    /// Gets the current value of the binding asynchronously and converts it to type `T2`.
+    ///
+    /// This method retrieves the binding's value via the mailbox and automatically
+    /// converts it to the target type using the `From` trait. This is particularly
+    /// useful for bindings with non-`Send` types (like `waterui_str::Str`) that need to be
+    /// converted to `Send` types (like `String`) for use across async boundaries.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T2` - The target type to convert to. Must implement `From<T>` where `T` is the binding's value type.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// // Convert Str binding to String for cross-thread usage  
+    /// use nami::{binding, Binding};
+    /// use waterui_str::Str;
+    /// let text_binding:Binding<Str> = nami::binding("hello world");
+    /// let mailbox = text_binding.mailbox();
+    /// let owned_string: String = mailbox.get_as().await;
+    /// assert_eq!(owned_string, "hello world");
+    /// ```
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::unwrap_used)]
+    pub async fn get_as<T2>(&self) -> T2
+    where
+        T2: Send + 'static + From<T>,
+    {
+        let (sender, receiver) = unbounded();
+        self.handle(move |binding| {
+            sender.try_send(binding.get().into()).unwrap();
+        });
 
-        /// Attaches this `Binding` to a mailbox using the default native executor.
-        #[must_use]
-        pub fn mailbox(&self) -> BindingMailbox<T> {
-            self.mailbox_with_executor(native_executor::NativeExecutor)
-        }
+        receiver.recv().await.unwrap()
+    }
+
+    /// Sets a new value on the binding asynchronously via the mailbox.
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::unwrap_used)]
+    pub async fn set(&self, value: impl Into<T> + Send + 'static) {
+        let (sender, receiver) = unbounded();
+        self.handle(move |binding| {
+            let value = value.into();
+            binding.set(value);
+            sender.try_send(()).unwrap();
+        });
+        receiver.recv().await.unwrap();
     }
 }
 
-#[cfg(feature = "native-executor")]
-pub use use_native_executor::BindingMailbox;
+impl<T: 'static> Binding<T> {
+    /// Attaches this `Binding` to a mailbox using a provided executor.
+    ///
+    /// Returns a `BindingMailbox` which can be cloned and used to send the
+    /// binding to other tasks for mutation or observation.
+    pub fn mailbox_with_executor<E: LocalExecutor>(&self, executor: E) -> BindingMailbox<T> {
+        let (sender, receiver) = unbounded::<Job<T>>();
+
+        {
+            let binding = self.clone();
+            let _fut = executor.spawn(async move {
+                while let Ok(job) = receiver.recv().await {
+                    job(&binding);
+                }
+            });
+        }
+
+        BindingMailbox { sender }
+    }
+
+    /// Attaches this `Binding` to a mailbox using the default native executor.
+    #[must_use]
+    pub fn mailbox(&self) -> BindingMailbox<T> {
+        self.mailbox_with_executor(DefaultExecutor)
+    }
+}
 
 impl<T: Ord + Clone> Binding<Vec<T>> {
     /// Sorts the vector in-place and notifies watchers.
