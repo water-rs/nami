@@ -1,5 +1,4 @@
 use alloc::{boxed::Box, rc::Rc};
-use async_io::Timer;
 use core::{
     cell::{Cell, RefCell},
     fmt::Debug,
@@ -9,6 +8,7 @@ use executor_core::{DefaultExecutor, LocalExecutor, Task};
 
 use crate::{
     Signal,
+    utils::sleep,
     watcher::{WatcherManager, WatcherManagerGuard},
 };
 
@@ -131,7 +131,7 @@ where
 
                 let throttled = throttled.clone();
                 let task = executor.spawn_local(async move {
-                    Timer::after(duration).await;
+                    sleep(duration).await;
                     // Reset throttled state after the duration
                     throttled.set(false);
                 });

@@ -145,3 +145,17 @@ where
     let zip = zip(a, b);
     map(zip, |(a, b)| core::cmp::min(a, b))
 }
+
+#[cfg(feature = "timer")]
+pub(crate) async fn sleep(duration: core::time::Duration) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_timers::future::sleep;
+        sleep(duration).await;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use async_io::Timer;
+        Timer::after(duration).await;
+    }
+}

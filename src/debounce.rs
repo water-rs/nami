@@ -3,12 +3,12 @@
 //! This module provides (or will provide) helpers to debounce and throttle
 //! reactive updates. It is currently a placeholder.
 use alloc::{boxed::Box, rc::Rc};
-use async_io::Timer;
 use core::{cell::RefCell, fmt::Debug, time::Duration};
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
 
 use crate::{
     Signal,
+    utils::sleep,
     watcher::{WatcherManager, WatcherManagerGuard},
 };
 
@@ -127,7 +127,7 @@ where
                 let ctx_metadata = ctx.metadata;
 
                 let task = executor.spawn_local(async move {
-                    Timer::after(duration).await;
+                    sleep(duration).await;
                     watchers.notify(|| ctx_value.clone(), &ctx_metadata);
                 });
 
