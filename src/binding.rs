@@ -13,7 +13,7 @@ use core::{
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use async_channel::{Sender, unbounded};
-use executor_core::{DefaultExecutor, LocalExecutor, Task};
+use executor_core::{LocalExecutor, Task};
 
 use crate::{
     Computed, Signal,
@@ -483,10 +483,11 @@ impl<T: 'static> Binding<T> {
         BindingMailbox { sender }
     }
 
+    #[cfg(feature = "std")]
     /// Attaches this `Binding` to a mailbox using the default native executor.
     #[must_use]
     pub fn mailbox(&self) -> BindingMailbox<T> {
-        self.mailbox_with_executor(DefaultExecutor)
+        self.mailbox_with_executor(executor_core::DefaultExecutor)
     }
 }
 

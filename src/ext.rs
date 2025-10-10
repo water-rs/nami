@@ -1,5 +1,3 @@
-use executor_core::DefaultExecutor;
-
 use crate::{
     Computed, Signal, cache::Cached, debounce::Debounce, map::Map, signal::WithMetadata, zip::Zip,
 };
@@ -45,15 +43,30 @@ pub trait SignalExt: Signal + Sized {
         WithMetadata::new(metadata, self)
     }
 
+    #[cfg(feature = "timer")]
     /// Creates a debounced version of this signal.
     ///
     /// The debounced signal will only emit values after the specified duration
     /// has passed without receiving new values.
-    fn debounce(self, duration: Duration) -> Debounce<Self, DefaultExecutor>
+    fn debounce(self, duration: Duration) -> Debounce<Self, executor_core::DefaultExecutor>
     where
         Self::Output: Clone,
     {
         Debounce::new(self, duration)
+    }
+    #[cfg(feature = "timer")]
+    /// Creates a throttled version of this signal.
+    ///
+    /// The throttled signal will emit values at most once every specified duration,
+    /// ignoring any additional values received during that period.
+    fn throttle(
+        self,
+        duration: Duration,
+    ) -> crate::throttle::Throttle<Self, executor_core::DefaultExecutor>
+    where
+        Self::Output: Clone,
+    {
+        crate::throttle::Throttle::new(self, duration)
     }
 }
 

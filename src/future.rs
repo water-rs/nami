@@ -6,7 +6,7 @@
 //!
 //! This is handy for wiring async computations into a reactive graph.
 
-use executor_core::{DefaultExecutor, LocalExecutor, Task};
+use executor_core::{LocalExecutor, Task};
 
 use crate::{Container, CustomBinding, Signal};
 
@@ -23,6 +23,7 @@ impl<T> FutureSignal<T>
 where
     T: Clone + 'static,
 {
+    #[cfg(feature = "std")]
     /// Creates a new `FutureSignal` that will resolve when the given future completes.
     ///
     /// Uses the default executor to spawn the future.
@@ -30,7 +31,7 @@ where
     where
         Fut: core::future::Future<Output = T> + 'static,
     {
-        Self::with_executor(DefaultExecutor, fut)
+        Self::with_executor(executor_core::DefaultExecutor, fut)
     }
 
     /// Spawn the future on the given executor and create a `FutureSignal`.

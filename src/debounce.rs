@@ -88,7 +88,7 @@ where
         S: Signal,
         S::Output: Clone + 'static,
     {
-        Self::with_executor(signal, duration, DefaultExecutor)
+        Self::with_executor(signal, duration, executor_core::DefaultExecutor)
     }
 }
 

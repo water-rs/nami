@@ -23,6 +23,7 @@ pub mod signal;
 pub use signal::{Computed, Signal};
 pub mod cache;
 pub mod collection;
+#[cfg(feature = "timer")]
 pub mod debounce;
 pub mod debug;
 mod ext;
@@ -31,6 +32,7 @@ pub mod map;
 /// Projection utilities for decomposing bindings into component parts.
 pub mod project;
 pub mod stream;
+#[cfg(feature = "timer")]
 /// Throttling utilities for limiting signal update rates.
 pub mod throttle;
 #[doc(inline)]

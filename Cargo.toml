@@ -17,7 +17,7 @@ nami-derive = { path = "derive", version = "0.2.0" }
 
 [package]
 name = "nami"
-version = "0.6.1"
+version = "0.6.2"
 edition.workspace = true
 authors.workspace = true
 description = "A powerful, lightweight reactive framework."
@@ -36,15 +36,16 @@ license = { file = "LICENSE" }
 [dependencies]
 paste = "1.0"
 log = "0.4.28"
-nami-derive = { version = "0.2.0", optional = true}
+nami-derive = { version = "0.2.0", optional = true }
 futures-core = "0.3.31"
 pin-project-lite = "0.2.16"
-executor-core = { version = "0.6.0", features = ["std"] }
+executor-core = { version = "0.6.0" }
 async-channel = "2.5.0"
 
 [features]
+std = ["executor-core/std"]
 default = ["derive", "timer"]
-timer = ["dep:async-io","dep:gloo-timers"]
+timer = ["std","dep:async-io","dep:gloo-timers"]
 derive = ["dep:nami-derive"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
