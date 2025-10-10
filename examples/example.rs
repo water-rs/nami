@@ -6,7 +6,7 @@ fn main() {
     println!("Text value: {}", text.get());
 
     // Direct initialization
-    let counter = binding(42i32);
+    let counter: Binding<f64> = binding(42);
     println!("Counter: {}", counter.get());
 
     // Works with collections
@@ -15,7 +15,7 @@ fn main() {
 
     // Update values - set() also accepts Into<T> for ergonomic usage
     text.set("updated text"); // No .into() needed!
-    counter.increment(8);
+    counter.increment(8.0);
     items.push(4);
 
     println!("\nAfter updates:");

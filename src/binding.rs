@@ -514,6 +514,32 @@ impl<T: PartialOrd + 'static> Binding<T> {
     }
 }
 
+impl Binding<f64> {
+    /// Increments the value by the specified amount and notifies watchers.
+    ///
+    /// # Example
+    /// ```
+    /// let value = nami::binding(1.5);
+    /// value.increment(2.5);
+    /// assert_eq!(value.get(), 4.0);
+    /// ```
+    pub fn increment(&self, n: f64) {
+        self.handle(|v| *v += n);
+    }
+
+    /// Decrements the value by the specified amount and notifies watchers.
+    ///
+    /// # Example
+    /// ```
+    /// let value = nami::binding(5.5);
+    /// value.decrement(1.5);
+    /// assert_eq!(value.get(), 4.0);
+    /// ```
+    pub fn decrement(&self, n: f64) {
+        self.handle(|v| *v -= n);
+    }
+}
+
 impl Binding<i32> {
     /// Creates a new integer binding with the given value.
     ///
