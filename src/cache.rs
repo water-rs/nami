@@ -84,3 +84,113 @@ where
 {
     Cached::new(source)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::{rc::Rc, vec::Vec};
+    use core::cell::RefCell;
+
+    use crate::watcher::{Context, Metadata, WatcherManager, WatcherManagerGuard};
+
+    /// A test helper signal that counts how often its value is recomputed.
+    #[derive(Clone, Debug)]
+    struct CountingSignal {
+        value: Rc<RefCell<i32>>,
+        get_counter: Rc<RefCell<usize>>,
+        watchers: WatcherManager<i32>,
+    }
+
+    impl CountingSignal {
+        fn new(initial: i32) -> Self {
+            Self {
+                value: Rc::new(RefCell::new(initial)),
+                get_counter: Rc::new(RefCell::new(0)),
+                watchers: WatcherManager::default(),
+            }
+        }
+
+        fn set(&self, value: i32) {
+            *self.value.borrow_mut() = value;
+            self.watchers.notify(|| value, &Metadata::new());
+        }
+
+        fn get_call_count(&self) -> usize {
+            *self.get_counter.borrow()
+        }
+    }
+
+    impl Signal for CountingSignal {
+        type Output = i32;
+        type Guard = WatcherManagerGuard<i32>;
+
+        fn get(&self) -> Self::Output {
+            *self.get_counter.borrow_mut() += 1;
+            *self.value.borrow()
+        }
+
+        fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+            self.watchers.register_as_guard(watcher)
+        }
+    }
+
+    #[test]
+    fn cached_signal_avoids_recomputing_when_value_is_unchanged() {
+        let signal = CountingSignal::new(5);
+        let cached = Cached::new(signal.clone());
+
+        assert_eq!(cached.get(), 5);
+        assert_eq!(
+            signal.get_call_count(),
+            1,
+            "first access should compute the value"
+        );
+
+        assert_eq!(cached.get(), 5);
+        assert_eq!(
+            signal.get_call_count(),
+            1,
+            "cached access should reuse the stored value without recomputing",
+        );
+    }
+
+    #[test]
+    fn cached_signal_updates_when_source_changes() {
+        let signal = CountingSignal::new(1);
+        let cached = Cached::new(signal.clone());
+
+        assert_eq!(cached.get(), 1);
+        assert_eq!(signal.get_call_count(), 1);
+
+        signal.set(42);
+
+        assert_eq!(cached.get(), 42);
+        assert_eq!(
+            signal.get_call_count(),
+            1,
+            "up-to-date cache should provide the new value without triggering recomputation",
+        );
+    }
+
+    #[test]
+    fn cached_signal_forwards_watch_notifications() {
+        let signal = CountingSignal::new(0);
+        let cached = Cached::new(signal.clone());
+
+        let received: Rc<RefCell<Vec<i32>>> = Rc::default();
+        let received_clone = received.clone();
+
+        let _guard = cached.watch(move |context| {
+            assert!(
+                context.metadata.is_empty(),
+                "cached signal should not alter metadata"
+            );
+            received_clone.borrow_mut().push(context.value);
+        });
+
+        signal.set(3);
+        signal.set(7);
+
+        assert_eq!(&*received.borrow(), &[3, 7]);
+    }
+}

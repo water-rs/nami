@@ -92,6 +92,11 @@ impl<T: Default + Clone + 'static> Default for Binding<T> {
 /// - `binding(vec![1, 2, 3])` creates a `Binding<Vec<i32>>`
 /// - `binding(42)` creates a `Binding<i32>`
 ///
+/// # Warning
+///
+/// This function rely on Rust's type inference to determine the target type `T`.
+/// If the type cannot be inferred, you may need to provide an explicit type annotation.
+///
 /// # Examples
 ///
 /// ```
@@ -558,7 +563,7 @@ impl Binding<i32> {
     ///
     /// # Example
     /// ```
-    /// let counter = nami::binding(10);
+    /// let counter = nami::binding(10i32);
     /// counter.increment(5);
     /// assert_eq!(counter.get(), 15);
     /// ```
@@ -570,7 +575,7 @@ impl Binding<i32> {
     ///
     /// # Example
     /// ```
-    /// let counter = nami::binding(10);
+    /// let counter = nami::binding(10i32);
     /// counter.decrement(3);
     /// assert_eq!(counter.get(), 7);
     /// ```
