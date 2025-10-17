@@ -30,7 +30,7 @@
 //!
 //! // Watch for changes in a specific range
 //! let _guard = list.watch(0..2, |ctx| {
-//!     println!("Items changed: {:?}", ctx.value);
+//!     println!("Items changed: {:?}", ctx.into_value());
 //! });
 //!
 //! // Modifications will trigger the watcher
@@ -66,47 +66,16 @@ use core::{
     cell::RefCell,
     ops::{Bound, RangeBounds},
 };
+pub use nami_core::collection::*;
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
+use nami_core::watcher::{Context, Metadata};
 
 use crate::watcher::{
     BoxWatcher, BoxWatcherGuard, WatcherGuard, WatcherManager, WatcherManagerGuard,
 };
 
-/// A trait for collections that can be observed for changes.
-///
-/// This trait provides a common interface for collections that support
-/// reactive programming patterns through watchers.
-pub trait Collection: Clone + 'static {
-    /// The type of items stored in the collection.
-    type Item: 'static;
-    /// The type of guard returned when registering a watcher.
-    type Guard: WatcherGuard;
-
-    /// Gets an item from the collection at the specified index.
-    fn get(&self, index: usize) -> Option<Self::Item>;
-    /// Returns the number of items in the collection.
-    fn len(&self) -> usize;
-
-    /// Returns `true` if the collection contains no elements.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Registers a watcher for changes in the specified range of the collection.
-    ///
-    /// Returns a guard that will unregister the watcher when dropped.
-    fn watch(
-        &self,
-        range: impl RangeBounds<usize>,
-        watcher: impl Fn(crate::watcher::Context<Vec<Self::Item>>) + 'static,
-    ) -> Self::Guard;
-}
-
 /// A reactive list that can be observed for changes.
-///
-/// This list provides shared ownership semantics through `Rc<RefCell<Vec<T>>>`
-/// and supports registering watchers for change notifications.
 pub struct List<T> {
     vec: Rc<RefCell<Vec<T>>>,
     watchers: WatcherManager<Vec<T>>,
@@ -138,10 +107,8 @@ impl<T: 'static> List<T> {
     {
         self.vec.borrow_mut().push(value);
         let vec_clone = self.vec.clone();
-        self.watchers.notify(
-            move || Clone::clone(&*vec_clone.borrow()),
-            &crate::watcher::Metadata::new(),
-        );
+        self.watchers
+            .notify(|| Context::from(vec_clone.borrow().to_vec()))
     }
 
     /// Removes and returns the last element of the list.
@@ -153,10 +120,8 @@ impl<T: 'static> List<T> {
         let result = self.vec.borrow_mut().pop();
         if result.is_some() {
             let vec_clone = self.vec.clone();
-            self.watchers.notify(
-                move || Clone::clone(&*vec_clone.borrow()),
-                &crate::watcher::Metadata::new(),
-            );
+            self.watchers
+                .notify(|| Context::from(vec_clone.borrow().to_vec()))
         }
         result
     }
@@ -168,10 +133,8 @@ impl<T: 'static> List<T> {
     {
         self.vec.borrow_mut().insert(index, value);
         let vec_clone = self.vec.clone();
-        self.watchers.notify(
-            move || Clone::clone(&*vec_clone.borrow()),
-            &crate::watcher::Metadata::new(),
-        );
+        self.watchers
+            .notify(|| Context::from(vec_clone.borrow().to_vec()))
     }
 
     /// Removes and returns the element at the specified index.
@@ -182,10 +145,8 @@ impl<T: 'static> List<T> {
     {
         let result = self.vec.borrow_mut().remove(index);
         let vec_clone = self.vec.clone();
-        self.watchers.notify(
-            move || Clone::clone(&*vec_clone.borrow()),
-            &crate::watcher::Metadata::new(),
-        );
+        self.watchers
+            .notify(|| Context::from(vec_clone.borrow().to_vec()));
         result
     }
 
@@ -198,10 +159,8 @@ impl<T: 'static> List<T> {
         self.vec.borrow_mut().clear();
         if !was_empty {
             let vec_clone = self.vec.clone();
-            self.watchers.notify(
-                move || Clone::clone(&*vec_clone.borrow()),
-                &crate::watcher::Metadata::new(),
-            );
+            self.watchers
+                .notify(|| Context::from(vec_clone.borrow().to_vec()));
         }
     }
 }
@@ -234,7 +193,7 @@ impl<T: Clone + 'static> Collection for List<T> {
     fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl Fn(crate::watcher::Context<Vec<Self::Item>>) + 'static,
+        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
     ) -> Self::Guard {
         let vec = self.vec.clone();
 
@@ -270,11 +229,8 @@ impl<T: Clone + 'static> Collection for List<T> {
 
             // Only notify if the range is valid and non-empty
             if start < len && start < end {
-                let range_slice = full_slice[start..end].to_vec();
-                watcher(crate::watcher::Context::new(
-                    range_slice,
-                    crate::watcher::Metadata::new(),
-                ));
+                let range_slice = &full_slice[start..end];
+                watcher(Context::from(range_slice));
             }
         }
 
@@ -297,166 +253,10 @@ impl<T: Clone + 'static> Collection for List<T> {
 
             // Only notify if the range is valid and non-empty
             if start < len && start < end {
-                let range_slice = full_slice[start..end].to_vec();
-                watcher(crate::watcher::Context::new(range_slice, ctx.metadata));
+                let range_slice = &full_slice[start..end];
+                watcher(ctx.map(|_| range_slice));
             }
         })
-    }
-}
-
-impl<T: Clone + 'static> Collection for Vec<T> {
-    type Item = T;
-    type Guard = ();
-
-    fn get(&self, index: usize) -> Option<Self::Item> {
-        self.as_slice().get(index).cloned()
-    }
-    fn len(&self) -> usize {
-        <[T]>::len(self)
-    }
-    fn watch(
-        &self,
-        _range: impl RangeBounds<usize>,
-        _watcher: impl Fn(crate::watcher::Context<Vec<Self::Item>>) + 'static,
-    ) -> Self::Guard {
-        // Vec is static - no reactivity, so watch is a no-op
-    }
-}
-
-impl<T: Clone + 'static, const N: usize> Collection for [T; N] {
-    type Item = T;
-    type Guard = ();
-
-    fn get(&self, index: usize) -> Option<Self::Item> {
-        self.as_slice().get(index).cloned()
-    }
-    fn len(&self) -> usize {
-        N
-    }
-    fn watch(
-        &self,
-        _range: impl RangeBounds<usize>,
-        _watcher: impl Fn(crate::watcher::Context<Vec<Self::Item>>) + 'static,
-    ) -> Self::Guard {
-        // Arrays are static - no reactivity, so watch is a no-op
-    }
-}
-
-/// A type-erased wrapper for any collection that implements `Collection`.
-///
-/// This allows storing collections of different concrete types in the same container
-/// while preserving the ability to observe them through the `Collection` interface.
-/// Items are returned as `Box<dyn Any>` to allow runtime type checking.
-pub struct AnyCollection<T> {
-    inner: Box<dyn AnyCollectionImpl<Output = T>>,
-}
-
-impl<T> Clone for AnyCollection<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-/// Internal trait for type-erased collection operations.
-trait AnyCollectionImpl {
-    type Output;
-    fn get(&self, index: usize) -> Option<Self::Output>;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool;
-    fn watch(
-        &self,
-        range: (Bound<usize>, Bound<usize>),
-        watcher: BoxWatcher<Vec<Self::Output>>,
-    ) -> BoxWatcherGuard;
-    fn clone(&self) -> Box<dyn AnyCollectionImpl<Output = Self::Output>>;
-}
-
-impl<T> AnyCollectionImpl for T
-where
-    T: Collection,
-{
-    type Output = T::Item;
-    fn get(&self, index: usize) -> Option<Self::Output> {
-        <T as Collection>::get(self, index)
-    }
-
-    fn len(&self) -> usize {
-        <T as Collection>::len(self)
-    }
-
-    fn is_empty(&self) -> bool {
-        <T as Collection>::is_empty(self)
-    }
-
-    fn watch(
-        &self,
-        range: (Bound<usize>, Bound<usize>),
-        watcher: BoxWatcher<Vec<Self::Output>>,
-    ) -> BoxWatcherGuard {
-        Box::new(<T as Collection>::watch(self, range, watcher))
-    }
-
-    fn clone(&self) -> Box<dyn AnyCollectionImpl<Output = Self::Output>> {
-        Box::new(self.clone())
-    }
-}
-
-impl<T> AnyCollection<T> {
-    /// Creates a new `AnyCollection` from any type that implements `Collection`.
-    pub fn new<C>(collection: C) -> Self
-    where
-        C: Collection<Item = T>,
-    {
-        Self {
-            inner: Box::new(collection),
-        }
-    }
-
-    /// Gets an item from the collection at the specified index.
-    ///
-    /// Returns `None` if the index is out of bounds.
-    /// The returned item is type-erased as `Box<dyn Any>`.
-    #[must_use]
-    pub fn get(&self, index: usize) -> Option<T> {
-        self.inner.get(index)
-    }
-
-    /// Returns the number of items in the collection.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    /// Returns `true` if the collection contains no elements.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    /// Registers a watcher for changes in the specified range of the collection.
-    ///
-    /// The watcher receives a `Vec<Box<dyn Any>>` of items.
-    /// Returns a type-erased guard that will unregister the watcher when dropped.
-    pub fn watch(
-        &self,
-        range: impl RangeBounds<usize>,
-        watcher: impl Fn(crate::watcher::Context<Vec<T>>) + 'static,
-    ) -> BoxWatcherGuard {
-        let start_bound = match range.start_bound() {
-            Bound::Included(&n) => Bound::Included(n),
-            Bound::Excluded(&n) => Bound::Excluded(n),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-        let end_bound = match range.end_bound() {
-            Bound::Included(&n) => Bound::Included(n),
-            Bound::Excluded(&n) => Bound::Excluded(n),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-
-        self.inner
-            .watch((start_bound, end_bound), Box::new(watcher))
     }
 }
 
@@ -602,7 +402,7 @@ mod tests {
         let count = notification_count.clone();
         let _guard = Collection::watch(&list, 1..4, move |ctx| {
             *count.borrow_mut() += 1;
-            assert_eq!(ctx.value, vec![2, 3, 4]);
+            assert_eq!(ctx.into_value(), vec![2, 3, 4]);
         });
 
         list.push(6);
@@ -721,7 +521,7 @@ mod tests {
         let c = called.clone();
         let _guard = any_collection.watch(1..3, move |ctx| {
             *c.borrow_mut() = true;
-            assert_eq!(ctx.value, vec![2, 3]);
+            assert_eq!(ctx.into_value(), vec![2, 3]);
         });
 
         assert!(*called.borrow());
@@ -735,7 +535,7 @@ mod tests {
         let c = called.clone();
         let _guard = Collection::watch(&list, 1..=3, move |ctx| {
             *c.borrow_mut() = true;
-            assert_eq!(ctx.value, vec![1, 2, 3]);
+            assert_eq!(ctx.into_value(), vec![1, 2, 3]);
         });
 
         assert!(*called.borrow());
@@ -749,7 +549,7 @@ mod tests {
         let c = called.clone();
         let _guard = Collection::watch(&list, 2.., move |ctx| {
             *c.borrow_mut() = true;
-            assert_eq!(ctx.value, vec![2, 3, 4]);
+            assert_eq!(ctx.into_value(), vec![2, 3, 4]);
         });
 
         assert!(*called.borrow());
@@ -763,7 +563,7 @@ mod tests {
         let c = called.clone();
         let _guard = Collection::watch(&list, ..3, move |ctx| {
             *c.borrow_mut() = true;
-            assert_eq!(ctx.value, vec![0, 1, 2]);
+            assert_eq!(ctx.into_value(), vec![0, 1, 2]);
         });
 
         assert!(*called.borrow());
@@ -777,7 +577,7 @@ mod tests {
         let c = called.clone();
         let _guard = Collection::watch(&list, .., move |ctx| {
             *c.borrow_mut() = true;
-            assert_eq!(ctx.value, vec![0, 1, 2, 3, 4]);
+            assert_eq!(ctx.into_value(), vec![0, 1, 2, 3, 4]);
         });
 
         assert!(*called.borrow());

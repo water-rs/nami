@@ -66,7 +66,8 @@ where
         let name = type_name::<C>();
         let guard: BoxWatcherGuard = if config.should_log_changes() {
             Box::new(source.watch(move |context: Context<_>| {
-                let Context { value, metadata } = context;
+                let value = context.value();
+                let metadata = context.metadata();
                 if metadata.is_empty() {
                     log::info!("`{name}` changed to {value:?}");
                 } else {

@@ -38,7 +38,7 @@ where
         let guard = {
             let cache = cache.clone();
             source.watch(move |context: Context<C::Output>| {
-                let value = context.value;
+                let value = context.into_value();
                 *cache.borrow_mut() = Some(value);
             })
         };
@@ -91,7 +91,7 @@ mod tests {
     use alloc::{rc::Rc, vec::Vec};
     use core::cell::RefCell;
 
-    use crate::watcher::{Context, Metadata, WatcherManager, WatcherManagerGuard};
+    use crate::watcher::{Context, WatcherManager, WatcherManagerGuard};
 
     /// A test helper signal that counts how often its value is recomputed.
     #[derive(Clone, Debug)]
@@ -112,7 +112,7 @@ mod tests {
 
         fn set(&self, value: i32) {
             *self.value.borrow_mut() = value;
-            self.watchers.notify(|| value, &Metadata::new());
+            self.watchers.notify(|| Context::from(value));
         }
 
         fn get_call_count(&self) -> usize {
@@ -182,10 +182,10 @@ mod tests {
 
         let _guard = cached.watch(move |context| {
             assert!(
-                context.metadata.is_empty(),
+                context.metadata().is_empty(),
                 "cached signal should not alter metadata"
             );
-            received_clone.borrow_mut().push(context.value);
+            received_clone.borrow_mut().push(context.into_value());
         });
 
         signal.set(3);

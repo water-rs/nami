@@ -5,6 +5,7 @@
 use alloc::{boxed::Box, rc::Rc};
 use core::{cell::RefCell, fmt::Debug, time::Duration};
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
+use nami_core::watcher::Context;
 
 use crate::{
     Signal,
@@ -105,10 +106,7 @@ where
         self.signal.get()
     }
 
-    fn watch(
-        &self,
-        watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static,
-    ) -> Self::Guard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let signal = self.signal.clone();
         let watchers = self.watchers.clone();
         let executor = self.executor.clone();
@@ -123,12 +121,10 @@ where
 
                 let watchers = watchers.clone();
                 let timer = timer.clone();
-                let ctx_value = ctx.value.clone();
-                let ctx_metadata = ctx.metadata;
 
                 let task = executor.spawn_local(async move {
                     sleep(duration).await;
-                    watchers.notify(|| ctx_value.clone(), &ctx_metadata);
+                    watchers.notify(move || ctx.clone());
                 });
 
                 *timer.borrow_mut() = Some(Box::new(task));

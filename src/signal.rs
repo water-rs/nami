@@ -15,28 +15,10 @@ pub use computed::*;
 
 use crate::{
     map::{Map, map},
-    watcher::{Context, WatcherGuard},
+    watcher::Context,
 };
 
-/// The core trait for reactive system.
-///
-/// Types implementing `Signal` represent a computation that can produce a value
-/// and notify observers when that value changes.
-pub trait Signal: Clone + 'static {
-    /// The type of value produced by this computation.
-    type Output: 'static;
-    /// The guard type returned by the watch method that manages watcher lifecycle.
-    type Guard: WatcherGuard;
-
-    /// Execute the computation and return the current value.
-    fn get(&self) -> Self::Output;
-
-    /// Register a watcher to be notified when the computed value changes.
-    ///
-    /// Returns a guard that, when dropped, will unregister the watcher.
-    #[must_use]
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard;
-}
+pub use nami_core::Signal;
 
 /// A trait for converting a value into a computation.
 pub trait IntoSignal<Output> {
@@ -61,14 +43,14 @@ pub trait IntoComputed<Output>: IntoSignal<Output> + 'static {
 impl<C, Output> IntoSignal<Output> for C
 where
     C: Signal,
-    C::Output: 'static,
+    C::Output: 'static + Clone,
     Output: From<C::Output> + 'static,
 {
     type Signal = Map<C, fn(C::Output) -> Output, Output>;
 
     /// Convert this computation into one that produces the desired output type.
     fn into_signal(self) -> Self::Signal {
-        map(self, Into::into)
+        map(self, |value| value.clone().into())
     }
 }
 

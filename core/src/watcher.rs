@@ -50,12 +50,11 @@ pub type BoxWatcher<T> = Box<dyn Fn(Context<T>) + 'static>;
 
 /// Context passed to watchers containing the value and associated metadata.
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct Context<T> {
     /// The current value being watched.
-    pub value: T,
+    value: T,
     /// Associated metadata for this value change.
-    pub metadata: Metadata,
+    metadata: Metadata,
 }
 
 impl<T> Context<T> {
@@ -69,6 +68,32 @@ impl<T> Context<T> {
     pub fn with<V: Clone + 'static>(mut self, value: V) -> Self {
         self.metadata = self.metadata.with(value);
         self
+    }
+
+    pub fn into_value(self) -> T {
+        self.value
+    }
+
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
+    pub fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Context<U> {
+        Context::new(f(self.value), self.metadata)
+    }
+
+    pub fn as_ref(&self) -> Context<&T> {
+        Context::new(&self.value, self.metadata.clone())
+    }
+}
+
+impl<T> From<T> for Context<T> {
+    fn from(value: T) -> Self {
+        Self::new(value, Metadata::new())
     }
 }
 
@@ -222,10 +247,10 @@ impl<T: 'static> WatcherManager<T> {
     }
 
     /// Notifies all registered watchers with a value and specific metadata.
-    pub fn notify(&self, value: impl Fn() -> T, metadata: &Metadata) {
+    pub fn notify(&self, ctx: impl Fn() -> Context<T>) {
         let this = Rc::downgrade(&self.inner);
         if let Some(this) = this.upgrade() {
-            this.borrow().notify(value, metadata);
+            this.borrow().notify(ctx);
         }
     }
 
@@ -303,9 +328,9 @@ impl<T: 'static> WatcherManagerInner<T> {
     }
 
     /// Notifies all registered watchers with a value and metadata.
-    pub fn notify(&self, value: impl Fn() -> T, metadata: &Metadata) {
+    pub fn notify(&self, ctx: impl Fn() -> Context<T>) {
         for watcher in self.map.values() {
-            watcher(Context::new(value(), metadata.clone()));
+            watcher(ctx());
         }
     }
 

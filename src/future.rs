@@ -7,6 +7,7 @@
 //! This is handy for wiring async computations into a reactive graph.
 
 use executor_core::{LocalExecutor, Task};
+use nami_core::watcher::Context;
 
 use crate::{Container, CustomBinding, Signal};
 
@@ -42,7 +43,7 @@ where
     {
         let container = Container::default();
         {
-            let container = container.clone();
+            let mut container = container.clone();
             executor
                 .spawn_local(async move {
                     let value = fut.await;
@@ -65,10 +66,7 @@ where
         self.container.get()
     }
     /// Watches for completion and subsequent updates (if any).
-    fn watch(
-        &self,
-        watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static,
-    ) -> Self::Guard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         self.container.watch(watcher)
     }
 }

@@ -130,19 +130,15 @@ impl<A: Signal, B: Signal> Signal for Zip<A, B> {
         let guard_a = {
             let watcher = watcher.clone();
             let b = b.clone();
-            self.a.watch(move |context: Context<A::Output>| {
-                let Context { value, metadata } = context;
-                let result = (value, b.get());
-                watcher(Context::new(result, metadata));
+            self.a.watch(move |ctx: Context<A::Output>| {
+                watcher(ctx.map(|value| (value, b.get())));
             })
         };
 
         let guard_b = {
             let a = a.clone();
-            self.b.watch(move |context: Context<B::Output>| {
-                let Context { value, metadata } = context;
-                let result = (a.get(), value);
-                watcher(Context::new(result, metadata));
+            self.b.watch(move |ctx: Context<B::Output>| {
+                watcher(ctx.map(|value| (a.get(), value)));
             })
         };
 

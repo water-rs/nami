@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["derive"]
+members = ["core","derive"]
 
 [workspace.package]
 edition = "2024"
@@ -14,7 +14,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 nami-derive = { path = "derive", version = "0.2.0" }
-
+nami-core = { path = "core", version = "0.1.0" }
 [package]
 name = "nami"
 version = "0.6.2"
@@ -41,6 +41,7 @@ futures-core = "0.3.31"
 pin-project-lite = "0.2.16"
 executor-core = { version = "0.6.0" }
 async-channel = "2.5.0"
+nami-core.workspace = true
 
 [features]
 std = ["executor-core/std"]

@@ -5,6 +5,7 @@ use core::{
     time::Duration,
 };
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
+use nami_core::watcher::Context;
 
 use crate::{
     Signal,
@@ -104,10 +105,7 @@ where
         self.signal.get()
     }
 
-    fn watch(
-        &self,
-        watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static,
-    ) -> Self::Guard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let signal = self.signal.clone();
         let watchers = self.watchers.clone();
         let executor = self.executor.clone();
@@ -124,7 +122,7 @@ where
                 }
 
                 // Immediately emit the update
-                watchers.notify(|| ctx.value.clone(), &ctx.metadata);
+                watchers.notify(|| ctx.clone());
 
                 // Set throttled state and start timer
                 throttled.set(true);

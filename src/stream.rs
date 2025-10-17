@@ -16,6 +16,7 @@ use core::pin::Pin;
 
 use alloc::boxed::Box;
 use futures_core::Stream;
+use nami_core::watcher::Context;
 use pin_project_lite::pin_project;
 
 use crate::{Container, Signal};
@@ -58,10 +59,7 @@ where
     }
 
     /// Watches changes to the latest item (i.e., when the stream yields).
-    fn watch(
-        &self,
-        watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static,
-    ) -> Self::Guard {
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         self.container.watch(watcher)
     }
 }

@@ -19,20 +19,11 @@ use crate::{
     Computed, Signal,
     map::Map,
     utils::add,
-    watcher::{BoxWatcherGuard, Context, Metadata, WatcherManager},
+    watcher::{BoxWatcherGuard, Context, WatcherManager},
     zip::Zip,
 };
 
-/// The `CustomBinding` trait represents a computable value that can also be set.
-///
-/// Any type implementing this trait must also implement `Signal` to provide the
-/// ability to retrieve its current value, and adds the ability to mutate the value.
-pub trait CustomBinding: Signal {
-    /// Sets a new value for this binding.
-    ///
-    /// This will typically trigger notifications to any watchers.
-    fn set(&self, value: Self::Output);
-}
+pub use nami_core::CustomBinding;
 
 /// A `Binding<T>` represents a mutable value of type `T` that can be observed.
 ///
@@ -46,13 +37,13 @@ pub struct Binding<T: 'static>(Box<dyn BindingImpl<Output = T>>);
 /// the operations that can be performed on it.
 trait BindingImpl: crate::signal::ComputedImpl {
     /// Sets a new value
-    fn set(&self, value: Self::Output);
+    fn set(&mut self, value: Self::Output);
 
     fn cloned_binding(&self) -> Binding<Self::Output>;
 }
 
 impl<T: CustomBinding + Clone + 'static> BindingImpl for T {
-    fn set(&self, value: Self::Output) {
+    fn set(&mut self, value: Self::Output) {
         <T as CustomBinding>::set(self, value);
     }
 
@@ -129,7 +120,7 @@ impl<T> Binding<Vec<T>> {
     /// list.push(4);
     /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
     /// ```
-    pub fn push(&self, value: T) {
+    pub fn push(&mut self, value: T) {
         self.get_mut().push(value);
     }
 
@@ -144,7 +135,7 @@ impl<T> Binding<Vec<T>> {
     /// list.insert(1, 2);
     /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
     /// ```
-    pub fn insert(&self, index: usize, element: T) {
+    pub fn insert(&mut self, index: usize, element: T) {
         self.get_mut().insert(index, element);
     }
 
@@ -158,7 +149,7 @@ impl<T> Binding<Vec<T>> {
     /// assert_eq!(list.get(), vec![1, 2]);
     /// ```
     #[must_use]
-    pub fn pop(&self) -> Option<T> {
+    pub fn pop(&mut self) -> Option<T> {
         self.get_mut().pop()
     }
 
@@ -170,7 +161,7 @@ impl<T> Binding<Vec<T>> {
     /// list.clear();
     /// assert!(list.get().is_empty());
     /// ```
-    pub fn clear(&self) {
+    pub fn clear(&mut self) {
         self.get_mut().clear();
     }
 }
@@ -196,13 +187,13 @@ where
 /// When dropped, it will update the binding with the modified value.
 #[must_use]
 pub struct BindingMutGuard<'a, T: 'static> {
-    binding: &'a Binding<T>,
+    binding: &'a mut Binding<T>,
     value: Option<T>,
 }
 
 impl<'a, T> BindingMutGuard<'a, T> {
     /// Creates a new guard for the given binding.
-    pub fn new(binding: &'a Binding<T>) -> Self {
+    pub fn new(binding: &'a mut Binding<T>) -> Self {
         Self {
             value: Some(binding.get()),
             binding,
@@ -258,7 +249,7 @@ impl<T: 'static> Binding<T> {
     /// Gets mutable access to the binding's value through a guard.
     ///
     /// When the guard is dropped, the binding is updated with the modified value.
-    pub fn get_mut(&self) -> BindingMutGuard<'_, T> {
+    pub fn get_mut(&mut self) -> BindingMutGuard<'_, T> {
         BindingMutGuard::new(self)
     }
 
@@ -266,7 +257,7 @@ impl<T: 'static> Binding<T> {
     ///
     /// This is a convenience method that handles getting the value, modifying it,
     /// and then setting it back, all while properly handling notifications.
-    pub fn handle(&self, handler: impl FnOnce(&mut T))
+    pub fn handle(&mut self, handler: impl FnOnce(&mut T))
     where
         T: Clone,
     {
@@ -275,7 +266,7 @@ impl<T: 'static> Binding<T> {
                 let mut value = container.value.borrow_mut();
                 handler(&mut value);
             }
-            container.watchers.notify(|| self.get(), &Metadata::new());
+            container.watchers.notify(|| Context::from(self.get()));
         } else {
             let mut temp = self.get();
 
@@ -304,7 +295,7 @@ impl<T: 'static> Binding<T> {
     /// count.set(42i32);  // i32 -> i64 conversion
     /// assert_eq!(count.get(), 42i64);
     /// ```
-    pub fn set(&self, value: impl Into<T>) {
+    pub fn set(&mut self, value: impl Into<T>) {
         self.0.set(value.into());
     }
 
@@ -319,7 +310,7 @@ impl<T: 'static> Binding<T> {
     ) -> Binding<Output>
     where
         Getter: 'static + Fn(T) -> Output,
-        Setter: 'static + Fn(&Self, Output),
+        Setter: 'static + Fn(&mut Self, Output),
     {
         Binding::custom(Mapping {
             binding: source.clone(),
@@ -383,7 +374,7 @@ impl<T: 'static> Binding<T> {
     }
 }
 
-type Job<T> = Box<dyn FnOnce(&Binding<T>) + 'static + Send>;
+type Job<T> = Box<dyn FnOnce(&mut Binding<T>) + 'static + Send>;
 
 /// A handle for interacting with a background mailbox tied to a `Binding`.
 pub struct BindingMailbox<T: 'static> {
@@ -397,7 +388,7 @@ impl<T: 'static> BindingMailbox<T> {
     /// for reading or modifying its value.
     #[allow(clippy::missing_panics_doc)]
     #[allow(clippy::unwrap_used)]
-    pub fn handle(&self, job: impl FnOnce(&Binding<T>) + 'static + Send) {
+    pub fn handle(&self, job: impl FnOnce(&mut Binding<T>) + 'static + Send) {
         self.sender.try_send(Box::new(job)).unwrap();
     }
 
@@ -475,11 +466,11 @@ impl<T: 'static> Binding<T> {
         let (sender, receiver) = unbounded::<Job<T>>();
 
         {
-            let binding = self.clone();
+            let mut binding = self.clone();
             executor
                 .spawn_local(async move {
                     while let Ok(job) = receiver.recv().await {
-                        job(&binding);
+                        job(&mut binding);
                     }
                 })
                 .detach();
@@ -505,7 +496,7 @@ impl<T: Ord + Clone> Binding<Vec<T>> {
     /// list.sort();
     /// assert_eq!(list.get(), vec![1, 1, 3, 4, 5]);
     /// ```
-    pub fn sort(&self) {
+    pub fn sort(&mut self) {
         self.handle(|value| {
             value.sort();
         });
@@ -529,7 +520,7 @@ impl Binding<f64> {
     /// value.increment(2.5);
     /// assert_eq!(value.get(), 4.0);
     /// ```
-    pub fn increment(&self, n: f64) {
+    pub fn increment(&mut self, n: f64) {
         self.handle(|v| *v += n);
     }
 
@@ -541,7 +532,7 @@ impl Binding<f64> {
     /// value.decrement(1.5);
     /// assert_eq!(value.get(), 4.0);
     /// ```
-    pub fn decrement(&self, n: f64) {
+    pub fn decrement(&mut self, n: f64) {
         self.handle(|v| *v -= n);
     }
 }
@@ -567,7 +558,7 @@ impl Binding<i32> {
     /// counter.increment(5);
     /// assert_eq!(counter.get(), 15);
     /// ```
-    pub fn increment(&self, n: i32) {
+    pub fn increment(&mut self, n: i32) {
         self.handle(|v| *v += n);
     }
 
@@ -579,7 +570,7 @@ impl Binding<i32> {
     /// counter.decrement(3);
     /// assert_eq!(counter.get(), 7);
     /// ```
-    pub fn decrement(&self, n: i32) {
+    pub fn decrement(&mut self, n: i32) {
         self.handle(|v| *v -= n);
     }
 }
@@ -595,7 +586,7 @@ impl<T: Clone> Binding<T> {
     /// text.append(" World");
     /// assert_eq!(text.get(), "Hello World");
     /// ```
-    pub fn append<Ele>(&self, ele: Ele)
+    pub fn append<Ele>(&mut self, ele: Ele)
     where
         T: Extend<Ele>,
     {
@@ -718,7 +709,7 @@ impl Binding<bool> {
     /// flag.toggle();
     /// assert_eq!(flag.get(), true);
     /// ```
-    pub fn toggle(&self) {
+    pub fn toggle(&mut self) {
         self.handle(|v| *v = !*v);
     }
 
@@ -900,10 +891,9 @@ impl<T: 'static + Clone> Signal for Container<T> {
 
 impl<T: 'static + Clone> CustomBinding for Container<T> {
     /// Sets a new value and notifies watchers.
-    fn set(&self, value: T) {
+    fn set(&mut self, value: T) {
         self.value.replace(value.clone());
-        self.watchers
-            .notify(move || value.clone(), &Metadata::new());
+        self.watchers.notify(|| Context::from(value.clone()));
     }
 }
 
@@ -968,9 +958,10 @@ where
     /// The watcher receives the transformed value.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let getter = self.getter.clone();
+
         self.binding.watch(move |context| {
-            let Context { value, metadata } = context;
-            watcher(Context::new(getter(value), metadata));
+            let context = context.map(|value| (getter)(value));
+            watcher(context);
         })
     }
 }
@@ -980,11 +971,11 @@ where
     Input: 'static,
     Output: 'static,
     Getter: 'static + Fn(Input) -> Output,
-    Setter: 'static + Fn(&Binding<Input>, Output),
+    Setter: 'static + Fn(&mut Binding<Input>, Output),
 {
     /// Sets a new value by applying the setter to convert from output to input.
-    fn set(&self, value: Output) {
-        (self.setter)(&self.binding, value);
+    fn set(&mut self, value: Output) {
+        (self.setter)(&mut self.binding, value);
     }
 }
 
@@ -1022,11 +1013,11 @@ mod tests {
 
     #[test]
     fn test_binding_operations() {
-        let text: Binding<String> = binding("initial");
+        let mut text: Binding<String> = binding("initial");
         text.set("updated"); // Now works directly with &str!
         assert_eq!(text.get(), "updated");
 
-        let counter: Binding<i32> = binding(0);
+        let mut counter: Binding<i32> = binding(0);
         counter.increment(5);
         assert_eq!(counter.get(), 5);
         counter.decrement(2);
@@ -1036,7 +1027,7 @@ mod tests {
     #[test]
     fn test_set_with_into_conversion() {
         // Test various Into conversions with set()
-        let text: Binding<String> = binding(String::new());
+        let mut text: Binding<String> = binding(String::new());
 
         // &str -> String
         text.set("hello");
@@ -1047,7 +1038,7 @@ mod tests {
         assert_eq!(text.get(), "world");
 
         // Cross-type conversions
-        let number: Binding<i64> = binding(0i64);
+        let mut number: Binding<i64> = binding(0i64);
         number.set(42i32); // i32 -> i64
         assert_eq!(number.get(), 42i64);
         number.set(100i64); // Direct i64

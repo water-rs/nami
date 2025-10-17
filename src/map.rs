@@ -118,8 +118,8 @@ where
         let this = self.clone();
 
         self.source.watch(move |context| {
-            let Context { value, metadata } = context;
-            watcher(Context::new((this.f)(value), metadata));
+            let context = context.map(|value| (this.f)(value));
+            watcher(context);
         })
     }
 }
