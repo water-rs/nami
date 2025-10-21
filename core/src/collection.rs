@@ -24,7 +24,7 @@ pub trait Collection: Clone + 'static {
     fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static, // watcher will receive a slice of items, its range is decided by the range parameter
     ) -> Self::Guard;
 }
 
@@ -99,6 +99,11 @@ pub struct AnyCollection<T> {
     inner: Box<dyn AnyCollectionImpl<Output = T>>,
 }
 
+impl<T> core::fmt::Debug for AnyCollection<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("AnyCollection").finish()
+    }
+}
 impl<T> Clone for AnyCollection<T> {
     fn clone(&self) -> Self {
         Self {
@@ -107,6 +112,7 @@ impl<T> Clone for AnyCollection<T> {
     }
 }
 
+/// A boxed collection watcher.
 pub type BoxCollectionWatcher<T> = Box<dyn for<'a> Fn(Context<&'a [T]>) + 'static>;
 
 /// Internal trait for type-erased collection operations.

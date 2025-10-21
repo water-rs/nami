@@ -1,15 +1,5 @@
 #![no_std]
 #![doc = include_str!("../README.md")]
-#![warn(clippy::all)]
-#![warn(clippy::pedantic)]
-#![warn(clippy::nursery)]
-#![warn(clippy::cargo)]
-#![warn(clippy::unwrap_used)]
-#![warn(clippy::expect_used)]
-#![warn(clippy::dbg_macro)]
-#![deny(clippy::todo)]
-#![warn(missing_docs)]
-#![deny(clippy::unimplemented)]
 
 extern crate alloc;
 pub mod binding;

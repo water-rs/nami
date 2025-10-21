@@ -1,8 +1,12 @@
+//! Core components for the Nami framework.
+
 #![no_std]
+#![forbid(unsafe_code)]
 extern crate alloc;
 
 use crate::watcher::{Context, WatcherGuard};
 
+/// Collection types for Nami.
 pub mod collection;
 pub mod watcher;
 

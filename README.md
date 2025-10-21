@@ -18,8 +18,8 @@ A powerful, lightweight reactive framework for Rust.
 use nami::{binding, Binding, Signal};
 
 // Create mutable reactive state with automatic type conversion
-let counter: Binding<i32> = binding(0);
-let message: Binding<String> = binding("hello");  // &str -> String conversion
+let mut counter: Binding<i32> = binding(0);
+let mut message: Binding<String> = binding("hello");  // &str -> String conversion
 
 // Derive a new computation from it
 let doubled = nami::map::map(counter.clone(), |n: i32| n * 2);
@@ -63,8 +63,9 @@ pub trait Signal: Clone + 'static {
 use nami::{binding, Binding};
 
 // Automatic type conversion with Into trait
-let text: Binding<String> = binding("hello");           // &str -> String
-let counter: Binding<i32> = binding(0);                 // Direct initialization
+let mut text: Binding<String> = binding("hello");           // &str -> String
+let mut counter: Binding<i32> = binding(0);                 // Direct initialization
+let mut bignum: Binding<i64> = binding(0i64);
 let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);  // Vec<i32> binding
 
 // set() also uses Into<T> for ergonomic updates
@@ -74,7 +75,7 @@ counter.increment(1);
 assert_eq!(counter.get(), 6);
 
 // Works with type conversions
-let bignum: Binding<i64> = binding(0i64);
+let mut bignum: Binding<i64> = binding(0i64);
 bignum.set(42i32);                               // i32 -> i64 automatic conversion
 ```
 
@@ -92,12 +93,12 @@ React to changes via `watch`. Keep the returned guard alive to stay subscribed.
 ```rust,no_run
 use nami::{binding, Binding, Signal, watcher::Context};
 
-let name: Binding<String> = binding("World");
+let mut name: Binding<String> = binding("World");
 
 let _guard = name.watch(|ctx: Context<String>| {
     // metadata is available via ctx.metadata
     // println! is just an example side-effect
-    println!("Hello, {}!", ctx.value);
+    println!("Hello, {}!", ctx.value());
 });
 
 name.set("Universe");
@@ -139,7 +140,7 @@ Control the rate of updates with debounce and throttle utilities:
 use nami::{binding, debounce::Debounce, throttle::Throttle, Binding};
 use core::time::Duration;
 
-let input: Binding<String> = binding("");
+let mut input: Binding<String> = binding("");
 
 // Debounce: delay updates until 300ms of quiet time
 let debounced = Debounce::new(input.clone(), Duration::from_millis(300));
@@ -253,7 +254,7 @@ struct Person { name: String, age: u32 }
 
 let p: Binding<Person> = binding(Person { name: "A".into(), age: 1 });
 // The derive generates `PersonProjected`
-let projected: PersonProjected = p.project();
+let mut projected: PersonProjected = p.project();
 projected.name.set("B");  // Automatic &str -> String conversion
 assert_eq!(p.get().name, "B");
 ```

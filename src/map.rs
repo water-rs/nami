@@ -32,6 +32,7 @@ use crate::{Signal, watcher::Context};
 /// `Map<C, F, Output>` applies a transformation function `F` to the results
 /// of a source computation `C`, producing a value of type `Output`. The result
 /// is automatically cached and only recomputed when the source value changes.
+#[derive(Debug)]
 pub struct Map<C, F, Output> {
     source: C,
     f: Rc<F>,

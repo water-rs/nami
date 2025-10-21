@@ -8,7 +8,8 @@ authors = ["Lexo Liu <me@lexo.cool>"]
 description = "A powerful, lightweight reactive framework."
 repository = "https://github.com/water-rs/nami"
 homepage = "https://github.com/water-rs/nami"
-
+keywords = ["reactive", "binding", "observer", "state"]
+categories = ["gui", "data-structures", "embedded", "wasm", "rust-patterns"]
 license = "MIT"
 readme = "README.md"
 
@@ -25,8 +26,8 @@ repository.workspace = true
 documentation = "https://docs.rs/nami"
 homepage.workspace = true
 license.workspace = true
-keywords = ["reactive", "binding", "observer", "state"]
-categories = ["gui", "data-structures", "embedded", "wasm", "rust-patterns"]
+keywords.workspace = true
+categories.workspace = true
 readme.workspace = true
 
 [badges]
@@ -54,3 +55,20 @@ async-io = { version = "2.5.0", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+
+[workspace.lints]
+rust.missing_docs = "warn"
+rust.missing_debug_implementations = "warn"
+clippy.all = "warn"
+clippy.style = "warn"
+clippy.correctness = "warn"
+clippy.complexity = "warn"
+clippy.suspicious = "warn"
+clippy.perf = "warn"
+clippy.pedantic = "warn"
+clippy.nursery = "warn"
+clippy.cargo = "warn"
+clippy.multiple_crate_versions =  { level = "allow", priority = 1 }
+
+[lints]
+workspace = true

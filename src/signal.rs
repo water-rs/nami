@@ -50,7 +50,7 @@ where
 
     /// Convert this computation into one that produces the desired output type.
     fn into_signal(self) -> Self::Signal {
-        map(self, |value| value.clone().into())
+        map(self, core::convert::Into::into)
     }
 }
 

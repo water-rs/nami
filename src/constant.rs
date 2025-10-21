@@ -120,6 +120,7 @@ pub fn constant<T>(value: T) -> Constant<T> {
     Constant::from(value)
 }
 
+#[derive(Debug)]
 struct LazyInner<F, T> {
     f: F,
     value: RefCell<Option<T>>,
@@ -128,6 +129,7 @@ struct LazyInner<F, T> {
 /// A lazy-evaluated constant that computes its value on first access.
 ///
 /// Unlike `Constant<T>`, this type allows for deferred computation of the constant value.
+#[derive(Debug)]
 pub struct Lazy<F, T> {
     inner: Rc<LazyInner<F, T>>,
 }

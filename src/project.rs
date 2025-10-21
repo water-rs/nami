@@ -24,7 +24,7 @@ use crate::Binding;
 /// let tuple_binding: Binding<(i32, &'static str)> = binding((42, "hello"));
 ///
 /// // Project it into separate bindings for each element
-/// let (num_binding, str_binding): (Binding<i32>, Binding<&'static str>) = tuple_binding.project();
+/// let (mut num_binding, str_binding): (Binding<i32>, Binding<&'static str>) = tuple_binding.project();
 ///
 /// // Changes to individual projections update the original
 /// num_binding.set(100);
@@ -48,7 +48,7 @@ use crate::Binding;
 ///     age: 30,
 /// });
 ///
-/// let projected: PersonProjected = person_binding.project();
+/// let mut projected: PersonProjected = person_binding.project();
 /// projected.name.set("Bob");
 /// projected.age.set(25u32);
 ///
@@ -245,7 +245,7 @@ impl<T: Project> Binding<T> {
     /// use nami::{Binding, binding};
     ///
     /// let tuple_binding: Binding<(i32, i32, i32)> = binding((1, 2, 3));
-    /// let (a, b, c) = tuple_binding.project();
+    /// let (mut a, mut b, c) = tuple_binding.project();
     ///
     /// // Modify individual projections
     /// a.set(10);

@@ -68,14 +68,13 @@ use core::{
 };
 pub use nami_core::collection::*;
 
-use alloc::{boxed::Box, rc::Rc, vec::Vec};
-use nami_core::watcher::{Context, Metadata};
+use alloc::{rc::Rc, vec::Vec};
+use nami_core::watcher::Context;
 
-use crate::watcher::{
-    BoxWatcher, BoxWatcherGuard, WatcherGuard, WatcherManager, WatcherManagerGuard,
-};
+use crate::watcher::{WatcherManager, WatcherManagerGuard};
 
 /// A reactive list that can be observed for changes.
+#[derive(Debug)]
 pub struct List<T> {
     vec: Rc<RefCell<Vec<T>>>,
     watchers: WatcherManager<Vec<T>>,
@@ -108,7 +107,7 @@ impl<T: 'static> List<T> {
         self.vec.borrow_mut().push(value);
         let vec_clone = self.vec.clone();
         self.watchers
-            .notify(|| Context::from(vec_clone.borrow().to_vec()))
+            .notify(|| Context::from(vec_clone.borrow().to_vec()));
     }
 
     /// Removes and returns the last element of the list.
@@ -121,7 +120,7 @@ impl<T: 'static> List<T> {
         if result.is_some() {
             let vec_clone = self.vec.clone();
             self.watchers
-                .notify(|| Context::from(vec_clone.borrow().to_vec()))
+                .notify(|| Context::from(vec_clone.borrow().to_vec()));
         }
         result
     }
@@ -134,7 +133,7 @@ impl<T: 'static> List<T> {
         self.vec.borrow_mut().insert(index, value);
         let vec_clone = self.vec.clone();
         self.watchers
-            .notify(|| Context::from(vec_clone.borrow().to_vec()))
+            .notify(|| Context::from(vec_clone.borrow().to_vec()));
     }
 
     /// Removes and returns the element at the specified index.

@@ -25,6 +25,7 @@ use crate::{Container, Signal};
 ///
 /// The output is `Option<S::Item>`: `None` before the first item arrives,
 /// then `Some(item)` for the latest seen value.
+#[derive(Debug)]
 pub struct StreamSignal<S>
 where
     S: Stream,

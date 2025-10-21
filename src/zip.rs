@@ -19,7 +19,7 @@ use crate::{
 
 /// A structure that combines two `Signal` instances into a single computation
 /// that produces a tuple of their results.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Zip<A, B> {
     /// The first computation to be zipped.
     a: A,

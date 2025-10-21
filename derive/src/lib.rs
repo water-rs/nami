@@ -1,3 +1,6 @@
+//! This crate provides the derive macro for the `nami` crate.
+//! It includes the `Project` derive macro and the `s!` procedural macro.
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
@@ -64,7 +67,7 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
 
     // Create the projected struct type
     let projected_struct_name =
-        syn::Ident::new(&format!("{}Projected", struct_name), struct_name.span());
+        syn::Ident::new(&format!("{struct_name}Projected"), struct_name.span());
 
     // Generate fields for the projected struct
     let projected_fields = fields.named.iter().map(|field| {
@@ -214,14 +217,13 @@ struct SInput {
 impl Parse for SInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let format_str: LitStr = input.parse()?;
-        let mut args = Punctuated::new();
-
-        if input.peek(Token![,]) {
+        let args = if input.peek(Token![,]) {
             input.parse::<Token![,]>()?;
-            args = Punctuated::parse_terminated(input)?;
-        }
-
-        Ok(SInput { format_str, args })
+            Punctuated::parse_terminated(input)?
+        } else {
+            Punctuated::new()
+        };
+        Ok(Self { format_str, args })
     }
 }
 
@@ -244,6 +246,7 @@ impl Parse for SInput {
 /// let msg2 = s!("Hello {}, you are {}", name, age);
 /// ```
 #[proc_macro]
+#[allow(clippy::similar_names)] // Allow arg1, arg2, etc.
 pub fn s(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as SInput);
     let format_str = input.format_str;
@@ -274,7 +277,7 @@ pub fn s(input: TokenStream) -> TokenStream {
             return syn::Error::new_spanned(
                 &format_str,
                 format!(
-                    "Format string has {} positional placeholders but {} arguments were provided",
+                    "Format string has {} positional placeholder(s) but {} arguments were provided",
                     positional_count,
                     input.args.len()
                 ),
@@ -283,67 +286,7 @@ pub fn s(input: TokenStream) -> TokenStream {
             .into();
         }
         let args: Vec<_> = input.args.iter().collect();
-        return match args.len() {
-            1 => {
-                let arg = &args[0];
-                quote! {
-                    {
-                        use ::nami::SignalExt;
-                        SignalExt::map(#arg.clone(), |arg| nami::__format!(#format_str, arg))
-                    }
-                }
-                .into()
-            }
-            2 => {
-                let arg1 = &args[0];
-                let arg2 = &args[1];
-                quote! {
-                    {
-                        use nami::{SignalExt, zip::zip};
-                        SignalExt::map(zip(#arg1.clone(), #arg2.clone()), |(arg1, arg2)| {
-                            nami::__format!(#format_str, arg1, arg2)
-                        })
-                    }
-                }
-                .into()
-            }
-            3 => {
-                let arg1 = &args[0];
-                let arg2 = &args[1];
-                let arg3 = &args[2];
-                quote! {
-                    {
-                        use ::nami::{SignalExt, zip::zip};
-                        SignalExt::map(
-                            zip(zip(#arg1.clone(), #arg2.clone()), #arg3.clone()),
-                            |((arg1, arg2), arg3)| nami::__format!(#format_str, arg1, arg2, arg3)
-                        )
-                    }
-                }
-                .into()
-            }
-            4 => {
-                let arg1 = &args[0];
-                let arg2 = &args[1];
-                let arg3 = &args[2];
-                let arg4 = &args[3];
-                quote! {
-                    {
-                        use ::nami::{SignalExt, zip::zip};
-                        SignalExt::map(
-                            zip(
-                                zip(#arg1.clone(), #arg2.clone()),
-                                zip(#arg3.clone(), #arg4.clone())
-                            ),
-                            |((arg1, arg2), (arg3, arg4))| nami::__format!(#format_str, arg1, arg2, arg3, arg4)
-                        )
-                    }
-                }.into()
-            }
-            _ => syn::Error::new_spanned(format_str, "Too many arguments, maximum 4 supported")
-                .to_compile_error()
-                .into(),
-        };
+        return handle_s_args(&format_str, &args);
     }
 
     // Check for mixed placeholders when no explicit arguments
@@ -362,9 +305,8 @@ pub fn s(input: TokenStream) -> TokenStream {
         return syn::Error::new_spanned(
             &format_str,
             format!(
-                "Format string has {} positional placeholder(s) {{}} but no arguments provided. \
-                Either provide arguments or use named placeholders like {{variable}} for automatic capture.",
-                positional_count
+                "Format string has {positional_count} positional placeholder(s) {{}} but no arguments provided. \
+                Either provide arguments or use named placeholders like {{variable}} for automatic capture."
             )
         )
         .to_compile_error()
@@ -391,37 +333,107 @@ pub fn s(input: TokenStream) -> TokenStream {
         .map(|name| syn::Ident::new(name, format_str.span()))
         .collect();
 
-    match var_names.len() {
+    handle_s_named_vars(&format_str, &var_idents)
+}
+
+#[allow(clippy::similar_names)]
+fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
+    match args.len() {
+        1 => {
+            let arg = &args[0];
+            (quote! {
+                {
+                    use ::nami::SignalExt;
+                    SignalExt::map(#arg.clone(), |arg| nami::__format!(#format_str, arg))
+                }
+            })
+            .into()
+        }
+        2 => {
+            let arg1 = &args[0];
+            let arg2 = &args[1];
+            (quote! {
+                {
+                    use nami::{SignalExt, zip::zip};
+                    SignalExt::map(zip(#arg1.clone(), #arg2.clone()), |(arg1, arg2)| {
+                        nami::__format!(#format_str, arg1, arg2)
+                    })
+                }
+            })
+            .into()
+        }
+        3 => {
+            let arg1 = &args[0];
+            let arg2 = &args[1];
+            let arg3 = &args[2];
+            (quote! {
+                {
+                    use ::nami::{SignalExt, zip::zip};
+                    SignalExt::map(
+                        zip(zip(#arg1.clone(), #arg2.clone()), #arg3.clone()),
+                        |((arg1, arg2), arg3)| nami::__format!(#format_str, arg1, arg2, arg3)
+                    )
+                }
+            })
+            .into()
+        }
+        4 => {
+            let arg1 = &args[0];
+            let arg2 = &args[1];
+            let arg3 = &args[2];
+            let arg4 = &args[3];
+            (quote! {
+                {
+                    use ::nami::{SignalExt, zip::zip};
+                    SignalExt::map(
+                        zip(
+                            zip(#arg1.clone(), #arg2.clone()),
+                            zip(#arg3.clone(), #arg4.clone())
+                        ),
+                        |((arg1, arg2), (arg3, arg4))| nami::__format!(#format_str, arg1, arg2, arg3, arg4)
+                    )
+                }
+            }).into()
+        }
+        _ => syn::Error::new_spanned(format_str, "Too many arguments, maximum 4 supported")
+            .to_compile_error()
+            .into(),
+    }
+}
+
+#[allow(clippy::similar_names)]
+fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenStream {
+    match var_idents.len() {
         1 => {
             let var = &var_idents[0];
-            quote! {
+            (quote! {
                 {
                     use ::nami::SignalExt;
                     SignalExt::map(#var.clone(), |#var| {
                         nami::__format!(#format_str)
                     })
                 }
-            }
+            })
             .into()
         }
         2 => {
             let var1 = &var_idents[0];
             let var2 = &var_idents[1];
-            quote! {
+            (quote! {
                 {
                     use ::nami::{SignalExt, zip::zip};
                     SignalExt::map(zip(#var1.clone(), #var2.clone()), |(#var1, #var2)| {
                         nami::__format!(#format_str)
                     })
                 }
-            }
+            })
             .into()
         }
         3 => {
             let var1 = &var_idents[0];
             let var2 = &var_idents[1];
             let var3 = &var_idents[2];
-            quote! {
+            (quote! {
                 {
                     use ::nami::{SignalExt, zip::zip};
                     SignalExt::map(
@@ -431,7 +443,7 @@ pub fn s(input: TokenStream) -> TokenStream {
                         }
                     )
                 }
-            }
+            })
             .into()
         }
         4 => {
@@ -439,7 +451,7 @@ pub fn s(input: TokenStream) -> TokenStream {
             let var2 = &var_idents[1];
             let var3 = &var_idents[2];
             let var4 = &var_idents[3];
-            quote! {
+            (quote! {
                 {
                     use ::nami::{SignalExt, zip::zip};
                     SignalExt::map(
@@ -452,7 +464,7 @@ pub fn s(input: TokenStream) -> TokenStream {
                         }
                     )
                 }
-            }
+            })
             .into()
         }
         _ => syn::Error::new_spanned(format_str, "Too many named variables, maximum 4 supported")
@@ -470,11 +482,13 @@ fn analyze_format_string(format_str: &str) -> (bool, bool, usize, Vec<String>) {
     let mut chars = format_str.chars().peekable();
 
     while let Some(c) = chars.next() {
-        if c == '{' && chars.peek() == Some(&'{') {
-            // Skip escaped braces
-            chars.next();
-            continue;
-        } else if c == '{' {
+        if c == '{' {
+            if chars.peek() == Some(&'{') {
+                // Skip escaped braces
+                chars.next();
+                continue;
+            }
+
             let mut content = String::new();
             let mut has_content = false;
 
@@ -493,10 +507,9 @@ fn analyze_format_string(format_str: &str) -> (bool, bool, usize, Vec<String>) {
                         chars.next();
                     }
                     break;
-                } else {
-                    content.push(chars.next().unwrap());
-                    has_content = true;
                 }
+                content.push(chars.next().unwrap());
+                has_content = true;
             }
 
             // Analyze the content

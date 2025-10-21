@@ -4,12 +4,14 @@
 //! Unlike read-only signals, bindings can be modified and will notify watchers of changes.
 
 use core::{
-    any::{Any, type_name},
+    any::type_name,
     cell::RefCell,
     fmt::Debug,
     marker::PhantomData,
-    ops::{Add, AddAssign, Deref, DerefMut, Not, RangeBounds},
+    ops::{Add, Deref, DerefMut, Not, RangeBounds},
 };
+
+mod ops;
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use async_channel::{Sender, unbounded};
@@ -116,7 +118,7 @@ impl<T> Binding<Vec<T>> {
     ///
     /// # Example
     /// ```
-    /// let list = nami::binding(vec![1, 2, 3]);
+    /// let mut list = nami::binding(vec![1, 2, 3]);
     /// list.push(4);
     /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
     /// ```
@@ -131,7 +133,7 @@ impl<T> Binding<Vec<T>> {
     ///
     /// # Example
     /// ```
-    /// let list = nami::binding(vec![1, 3, 4]);
+    /// let mut list = nami::binding(vec![1, 3, 4]);
     /// list.insert(1, 2);
     /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
     /// ```
@@ -144,7 +146,7 @@ impl<T> Binding<Vec<T>> {
     ///
     /// # Example
     /// ```
-    /// let list = nami::binding(vec![1, 2, 3]);
+    /// let mut list = nami::binding(vec![1, 2, 3]);
     /// assert_eq!(list.pop(), Some(3));
     /// assert_eq!(list.get(), vec![1, 2]);
     /// ```
@@ -157,7 +159,7 @@ impl<T> Binding<Vec<T>> {
     ///
     /// # Example
     /// ```
-    /// let list = nami::binding(vec![1, 2, 3]);
+    /// let mut list = nami::binding(vec![1, 2, 3]);
     /// list.clear();
     /// assert!(list.get().is_empty());
     /// ```
@@ -186,6 +188,7 @@ where
 ///
 /// When dropped, it will update the binding with the modified value.
 #[must_use]
+#[derive(Debug)]
 pub struct BindingMutGuard<'a, T: 'static> {
     binding: &'a mut Binding<T>,
     value: Option<T>,
@@ -237,42 +240,11 @@ impl<T: 'static> Binding<T> {
         self.0.compute()
     }
 
-    /// Attempts to get a reference to the container if this binding is a container binding.
-    pub(crate) fn as_container(&self) -> Option<&Container<T>>
-    where
-        T: Clone,
-    {
-        let any = &self.0 as &dyn Any;
-        any.downcast_ref()
-    }
-
     /// Gets mutable access to the binding's value through a guard.
     ///
     /// When the guard is dropped, the binding is updated with the modified value.
     pub fn get_mut(&mut self) -> BindingMutGuard<'_, T> {
         BindingMutGuard::new(self)
-    }
-
-    /// Applies a function to the binding's value.
-    ///
-    /// This is a convenience method that handles getting the value, modifying it,
-    /// and then setting it back, all while properly handling notifications.
-    pub fn handle(&mut self, handler: impl FnOnce(&mut T))
-    where
-        T: Clone,
-    {
-        if let Some(container) = self.as_container() {
-            {
-                let mut value = container.value.borrow_mut();
-                handler(&mut value);
-            }
-            container.watchers.notify(|| Context::from(self.get()));
-        } else {
-            let mut temp = self.get();
-
-            handler(&mut temp);
-            self.set(temp);
-        }
     }
 
     /// Sets the binding to a new value with automatic type conversion.
@@ -285,14 +257,13 @@ impl<T: 'static> Binding<T> {
     /// ```
     /// use nami::{binding, Binding};
     ///
-    /// let text: Binding<String> = binding("initial");
+    /// let mut text: Binding<String> = binding("initial");
     ///
     /// // Direct &str usage - no .into() or .to_string() needed
     /// text.set("updated");
     /// assert_eq!(text.get(), "updated");
     ///
-    /// let count: Binding<i64> = binding(0i64);
-    /// count.set(42i32);  // i32 -> i64 conversion
+    /// let mut count: Binding<i64> = binding(0i64);    /// count.set(42i32);  // i32 -> i64 conversion
     /// assert_eq!(count.get(), 42i64);
     /// ```
     pub fn set(&mut self, value: impl Into<T>) {
@@ -377,6 +348,7 @@ impl<T: 'static> Binding<T> {
 type Job<T> = Box<dyn FnOnce(&mut Binding<T>) + 'static + Send>;
 
 /// A handle for interacting with a background mailbox tied to a `Binding`.
+#[derive(Debug)]
 pub struct BindingMailbox<T: 'static> {
     sender: Sender<Job<T>>,
 }
@@ -492,14 +464,12 @@ impl<T: Ord + Clone> Binding<Vec<T>> {
     ///
     /// # Example
     /// ```
-    /// let list = nami::binding(vec![3, 1, 4, 1, 5]);
+    /// let mut list = nami::binding(vec![3, 1, 4, 1, 5]);
     /// list.sort();
     /// assert_eq!(list.get(), vec![1, 1, 3, 4, 5]);
     /// ```
     pub fn sort(&mut self) {
-        self.handle(|value| {
-            value.sort();
-        });
+        self.get_mut().sort();
     }
 }
 
@@ -508,32 +478,6 @@ impl<T: PartialOrd + 'static> Binding<T> {
     #[must_use]
     pub fn range(&self, range: impl RangeBounds<T> + 'static) -> Self {
         self.filter(move |value| range.contains(value))
-    }
-}
-
-impl Binding<f64> {
-    /// Increments the value by the specified amount and notifies watchers.
-    ///
-    /// # Example
-    /// ```
-    /// let value = nami::binding(1.5);
-    /// value.increment(2.5);
-    /// assert_eq!(value.get(), 4.0);
-    /// ```
-    pub fn increment(&mut self, n: f64) {
-        self.handle(|v| *v += n);
-    }
-
-    /// Decrements the value by the specified amount and notifies watchers.
-    ///
-    /// # Example
-    /// ```
-    /// let value = nami::binding(5.5);
-    /// value.decrement(1.5);
-    /// assert_eq!(value.get(), 4.0);
-    /// ```
-    pub fn decrement(&mut self, n: f64) {
-        self.handle(|v| *v -= n);
     }
 }
 
@@ -549,30 +493,6 @@ impl Binding<i32> {
     pub fn int(i: i32) -> Self {
         Self::container(i)
     }
-
-    /// Increments the value by the specified amount and notifies watchers.
-    ///
-    /// # Example
-    /// ```
-    /// let counter = nami::binding(10i32);
-    /// counter.increment(5);
-    /// assert_eq!(counter.get(), 15);
-    /// ```
-    pub fn increment(&mut self, n: i32) {
-        self.handle(|v| *v += n);
-    }
-
-    /// Decrements the value by the specified amount and notifies watchers.
-    ///
-    /// # Example
-    /// ```
-    /// let counter = nami::binding(10i32);
-    /// counter.decrement(3);
-    /// assert_eq!(counter.get(), 7);
-    /// ```
-    pub fn decrement(&mut self, n: i32) {
-        self.handle(|v| *v -= n);
-    }
 }
 
 impl<T: Clone> Binding<T> {
@@ -582,7 +502,7 @@ impl<T: Clone> Binding<T> {
     ///
     /// # Example
     /// ```
-    /// let text: nami::Binding<String> = nami::binding(String::from("Hello"));
+    /// let mut text: nami::Binding<String> = nami::binding(String::from("Hello"));
     /// text.append(" World");
     /// assert_eq!(text.get(), "Hello World");
     /// ```
@@ -590,9 +510,7 @@ impl<T: Clone> Binding<T> {
     where
         T: Extend<Ele>,
     {
-        self.handle(|v| {
-            v.extend([ele]);
-        });
+        self.get_mut().extend([ele]);
     }
 }
 
@@ -705,12 +623,13 @@ impl Binding<bool> {
     ///
     /// # Example
     /// ```
-    /// let flag = nami::binding(false);
+    /// let mut flag = nami::binding(false);
     /// flag.toggle();
     /// assert_eq!(flag.get(), true);
     /// ```
     pub fn toggle(&mut self) {
-        self.handle(|v| *v = !*v);
+        let mut value = self.get_mut();
+        *value = !*value;
     }
 
     /// Creates a conditional binding that returns `Some(value)` when true, `None` when false.
@@ -824,18 +743,6 @@ impl Not for Binding<bool> {
     /// Implements the logical NOT operator for boolean bindings.
     fn not(self) -> Self::Output {
         self.reverse()
-    }
-}
-
-impl<T, R> AddAssign<R> for Binding<T>
-where
-    T: AddAssign<R> + Clone,
-{
-    /// Implements the += operator for bindings.
-    fn add_assign(&mut self, rhs: R) {
-        self.handle(|v| {
-            *v += rhs;
-        });
     }
 }
 
@@ -1018,9 +925,9 @@ mod tests {
         assert_eq!(text.get(), "updated");
 
         let mut counter: Binding<i32> = binding(0);
-        counter.increment(5);
+        counter += 5;
         assert_eq!(counter.get(), 5);
-        counter.decrement(2);
+        counter -= 2;
         assert_eq!(counter.get(), 3);
     }
 

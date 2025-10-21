@@ -70,22 +70,27 @@ impl<T> Context<T> {
         self
     }
 
+    /// Consumes the context and returns the inner value.
     pub fn into_value(self) -> T {
         self.value
     }
 
-    pub fn value(&self) -> &T {
+    /// Returns a reference to the inner value.
+    pub const fn value(&self) -> &T {
         &self.value
     }
 
-    pub fn metadata(&self) -> &Metadata {
+    /// Returns a reference to the metadata.
+    pub const fn metadata(&self) -> &Metadata {
         &self.metadata
     }
 
+    /// Maps the inner value to a new value.
     pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Context<U> {
         Context::new(f(self.value), self.metadata)
     }
 
+    /// Returns a new context with a reference to the inner value.
     pub fn as_ref(&self) -> Context<&T> {
         Context::new(&self.value, self.metadata.clone())
     }
@@ -106,6 +111,7 @@ impl WatcherGuard for () {}
 impl<T1: WatcherGuard, T2: WatcherGuard> WatcherGuard for (T1, T2) {}
 
 /// A utility struct that runs a cleanup function when dropped.
+#[derive(Debug)]
 pub struct OnDrop<F>(Option<F>)
 where
     F: FnOnce();
