@@ -1,6 +1,6 @@
 [package]
 name = "nami-derive"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Lexo Liu <me@lexo.cool>"]
 description = "Derive macros for the nami reactive framework"
