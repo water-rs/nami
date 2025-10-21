@@ -67,7 +67,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('''**/Cargo.lock''') }}
       - name: Publish nami-core
-        run: cargo publish -p nami-core --token ${{ secrets.CARGO_API_TOKEN }}
+        run: cargo publish -p nami-core --token ${{ secrets.CRATES_IO_TOKEN }}
 
   publish-nami-derive:
     name: Publish nami-derive
@@ -87,7 +87,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('''**/Cargo.lock''') }}
       - name: Publish nami-derive
-        run: cargo publish -p nami-derive --token ${{ secrets.CARGO_API_TOKEN }}
+        run: cargo publish -p nami-derive --token ${{ secrets.CRATES_IO_TOKEN }}
 
   publish-nami:
     name: Publish nami
@@ -107,4 +107,4 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('''**/Cargo.lock''') }}
       - name: Publish nami
-        run: cargo publish -p nami --token ${{ secrets.CARGO_API_TOKEN }}
+        run: cargo publish -p nami --token ${{ secrets.CRATES_IO_TOKEN }}
