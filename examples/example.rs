@@ -16,7 +16,7 @@ fn main() {
     println!("Items: {:?}", items.get());
 
     // Update values - set() also accepts Into<T> for ergonomic usage
-    text.set("updated text"); // No .into() needed!
+    text.set_from("updated text"); // No .into() needed!
     counter += 8.0;
     items.push(4);
 

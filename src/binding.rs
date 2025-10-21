@@ -247,6 +247,11 @@ impl<T: 'static> Binding<T> {
         BindingMutGuard::new(self)
     }
 
+    /// Sets the binding to a new value
+    pub fn set(&mut self, value: T) {
+        self.0.set(value);
+    }
+
     /// Sets the binding to a new value with automatic type conversion.
     ///
     /// Accepts any value that implements `Into<T>`, providing the same ergonomic
@@ -260,13 +265,14 @@ impl<T: 'static> Binding<T> {
     /// let mut text: Binding<String> = binding("initial");
     ///
     /// // Direct &str usage - no .into() or .to_string() needed
-    /// text.set("updated");
+    /// text.set_from("updated");
     /// assert_eq!(text.get(), "updated");
     ///
-    /// let mut count: Binding<i64> = binding(0i64);    /// count.set(42i32);  // i32 -> i64 conversion
+    /// let mut count: Binding<i64> = binding(0);   
+    /// count.set(42);
     /// assert_eq!(count.get(), 42i64);
     /// ```
-    pub fn set(&mut self, value: impl Into<T>) {
+    pub fn set_from(&mut self, value: impl Into<T>) {
         self.0.set(value.into());
     }
 
@@ -921,7 +927,7 @@ mod tests {
     #[test]
     fn test_binding_operations() {
         let mut text: Binding<String> = binding("initial");
-        text.set("updated"); // Now works directly with &str!
+        text.set_from("updated"); // Now works directly with &str!
         assert_eq!(text.get(), "updated");
 
         let mut counter: Binding<i32> = binding(0);
@@ -937,7 +943,7 @@ mod tests {
         let mut text: Binding<String> = binding(String::new());
 
         // &str -> String
-        text.set("hello");
+        text.set_from("hello");
         assert_eq!(text.get(), "hello");
 
         // String -> String (owned)
@@ -946,9 +952,9 @@ mod tests {
 
         // Cross-type conversions
         let mut number: Binding<i64> = binding(0i64);
-        number.set(42i32); // i32 -> i64
+        number.set(42); // i32 -> i64
         assert_eq!(number.get(), 42i64);
-        number.set(100i64); // Direct i64
+        number.set(100); // Direct i64
         assert_eq!(number.get(), 100i64);
     }
 }

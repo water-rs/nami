@@ -19,7 +19,7 @@ use syn::{
 /// use nami::{Binding, binding};
 /// use nami_derive::Project;
 ///
-/// #[derive(Project)]
+/// #[derive(Project,Clone,Debug)]
 /// struct Person {
 ///     name: String,
 ///     age: u32,
@@ -30,8 +30,8 @@ use syn::{
 ///     age: 30,
 /// });
 ///
-/// let projected = person_binding.project();
-/// projected.name.set("Bob".to_string());
+/// let mut projected = person_binding.project();
+/// projected.name.set_from("Bob");
 /// projected.age.set(25);
 ///
 /// let person = person_binding.get();

@@ -32,8 +32,8 @@ assert_eq!(doubled.get(), 0);
 counter.set(3);
 assert_eq!(doubled.get(), 6);
 
-// set() also accepts Into<T> for ergonomic updates
-message.set("world");  // &str works directly!
+// set_from() also accepts Into<T> for ergonomic updates
+message.set_from("world");  // &str works directly!
 ```
 
 ## The `Signal` Trait
@@ -57,7 +57,7 @@ pub trait Signal: Clone + 'static {
 
 ## Bindings
 
-`Binding<T>` is two-way reactive state with ergonomic helpers. Both `binding()` and `set()` accept any value implementing `Into<T>`, eliminating the need for manual conversions:
+`Binding<T>` is two-way reactive state with ergonomic helpers. Both `binding()` and `set_from()` accept any value implementing `Into<T>`, eliminating the need for manual conversions:
 
 ```rust
 use nami::{binding, Binding};
@@ -68,15 +68,15 @@ let mut counter: Binding<i32> = binding(0);                 // Direct initializa
 let mut bignum: Binding<i64> = binding(0i64);
 let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);  // Vec<i32> binding
 
-// set() also uses Into<T> for ergonomic updates
-text.set("world");                                // Direct &str, no .into() needed
+// set_from() also uses Into<T> for ergonomic updates
+text.set_from("world");                                // Direct &str, no .into() needed
 counter.set(5);
-counter.increment+=1;
+counter+=1;
 assert_eq!(counter.get(), 6);
 
 // Works with type conversions
-let mut bignum: Binding<i64> = binding(0i64);
-bignum.set(42i32);                               // i32 -> i64 automatic conversion
+let mut bignum: Binding<i64> = binding(0);
+bignum.set(42);
 ```
 
 Common helpers:
@@ -101,7 +101,7 @@ let _guard = name.watch(|ctx: Context<String>| {
     println!("Hello, {}!", ctx.value());
 });
 
-name.set("Universe");
+name.set_from("Universe");
 ```
 
 The `Context` carries typed metadata to power advanced features (e.g., animations).
@@ -149,7 +149,7 @@ let debounced = Debounce::new(input.clone(), Duration::from_millis(300));
 let throttled = Throttle::new(input.clone(), Duration::from_millis(100));
 
 // Both preserve reactivity while controlling update frequency
-input.set("typing...");
+input.set_from("typing...");
 ```
 
 **Debounce vs Throttle:**
@@ -211,7 +211,7 @@ let owned_string: String = mailbox.get_as().await;
 assert_eq!(owned_string, "hello");
 
 // Regular mailbox operations
-mailbox.set("world").await;
+mailbox.set_from("world").await;
 ```
 
 ## Debugging
@@ -255,7 +255,7 @@ struct Person { name: String, age: u32 }
 let p: Binding<Person> = binding(Person { name: "A".into(), age: 1 });
 // The derive generates `PersonProjected`
 let mut projected: PersonProjected = p.project();
-projected.name.set("B");  // Automatic &str -> String conversion
+projected.name.set_from("B");  // Automatic &str -> String conversion
 assert_eq!(p.get().name, "B");
 ```
 

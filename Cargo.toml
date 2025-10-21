@@ -17,6 +17,7 @@ readme = "README.md"
 nami = { path = ".", version = "0.7.0" }
 nami-derive = { path = "derive", version = "0.2.0" }
 nami-core = { path = "core", version = "0.1.0" }
+
 [package]
 name = "nami"
 version = "0.7.0"
@@ -38,7 +39,7 @@ license = { file = "LICENSE" }
 [dependencies]
 paste = "1.0"
 log = "0.4.28"
-nami-derive = { version = "0.2.0", optional = true }
+nami-derive = { workspace = true, optional = true}
 futures-core = "0.3.31"
 pin-project-lite = "0.2.16"
 executor-core = { version = "0.6.0" }
