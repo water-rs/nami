@@ -290,15 +290,7 @@ impl<T: 'static> WatcherManager<T> {
     where
         T: Clone,
     {
-        let this = Rc::downgrade(&self.inner);
-        if let Some(this) = this.upgrade() {
-            this.borrow().notify(ctx);
-        }
-    }
-
-    /// Clears all registered watchers.
-    pub fn clear(&self) {
-        self.inner.borrow_mut().map.clear();
+        self.inner.borrow().notify(ctx);
     }
 
     /// Cancels a previously registered watcher by its identifier.
