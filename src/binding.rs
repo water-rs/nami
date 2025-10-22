@@ -4,7 +4,7 @@
 //! Unlike read-only signals, bindings can be modified and will notify watchers of changes.
 
 use core::{
-    any::type_name,
+    any::{Any, type_name},
     cell::RefCell,
     fmt::Debug,
     marker::PhantomData,
@@ -276,6 +276,32 @@ impl<T: 'static> Binding<T> {
         self.0.set(value.into());
     }
 
+    fn as_container(&self) -> Option<&Container<T>> {
+        let any = (self.0.as_ref()) as &dyn BindingImpl<Output = T> as &dyn Any;
+        any.downcast_ref::<Container<T>>()
+    }
+    /// Applies a function to mutably borrow the binding's value.
+    ///
+    /// This is more efficient than `get_mut()` for container bindings as it avoids
+    /// unnecessary cloning. The function receives a mutable reference to the value
+    /// and any changes will notify watchers when the function completes.
+    pub fn with_mut(&mut self, f: impl FnOnce(&mut T))
+    where
+        T: Clone,
+    {
+        if let Some(container) = self.as_container() {
+            // optimize for container bindings
+            let mut value = container.value.borrow_mut();
+            f(&mut *value);
+            // notify watchers manually
+            container.watchers.notify(|| Context::from(value.clone()));
+        } else {
+            // fallback for non-container bindings
+            let mut guard = self.get_mut();
+            f(&mut *guard);
+        }
+    }
+
     /// Creates a bidirectional mapping between this binding and another type.
     ///
     /// The getter transforms values from this binding's type to the output type.
@@ -286,13 +312,13 @@ impl<T: 'static> Binding<T> {
         setter: Setter,
     ) -> Binding<Output>
     where
-        Getter: 'static + Fn(T) -> Output,
-        Setter: 'static + Fn(&mut Self, Output),
+        Getter: 'static + Clone + Fn(T) -> Output,
+        Setter: 'static + Clone + FnMut(&mut Self, Output),
     {
         Binding::custom(Mapping {
             binding: source.clone(),
-            getter: Rc::new(getter),
-            setter: Rc::new(setter),
+            getter,
+            setter,
             _marker: PhantomData,
         })
     }
@@ -301,7 +327,7 @@ impl<T: 'static> Binding<T> {
     ///
     /// When attempting to set a value that doesn't pass the filter, the operation is ignored.
     #[must_use]
-    pub fn filter(&self, filter: impl 'static + Fn(&T) -> bool) -> Self
+    pub fn filter(&self, filter: impl 'static + Clone + Fn(&T) -> bool) -> Self
     where
         T: 'static,
     {
@@ -326,7 +352,7 @@ impl<T: 'static> Binding<T> {
     /// let is_positive = number.condition(|&n: &i32| n > 0);
     /// assert_eq!(is_positive.get(), true);
     /// ```
-    pub fn condition(&self, condition: impl 'static + Fn(&T) -> bool) -> Binding<bool>
+    pub fn condition(&self, condition: impl 'static + Clone + Fn(&T) -> bool) -> Binding<bool>
     where
         T: 'static,
     {
@@ -345,7 +371,7 @@ impl<T: 'static> Binding<T> {
     /// ```
     pub fn equal_to(&self, other: T) -> Binding<bool>
     where
-        T: PartialEq + 'static,
+        T: Clone + PartialEq + 'static,
     {
         Self::mapping(self, move |value| value == other, move |_, _| {})
     }
@@ -482,7 +508,7 @@ impl<T: Ord + Clone> Binding<Vec<T>> {
 impl<T: PartialOrd + 'static> Binding<T> {
     /// Creates a binding that only allows values within a specified range.
     #[must_use]
-    pub fn range(&self, range: impl RangeBounds<T> + 'static) -> Self {
+    pub fn range(&self, range: impl RangeBounds<T> + Clone + 'static) -> Self {
         self.filter(move |value| range.contains(value))
     }
 }
@@ -531,7 +557,7 @@ impl<T> Binding<Option<T>> {
     /// let text = maybe_text.unwrap_or_else(|| "default".to_string());
     /// assert_eq!(text.get(), "default");
     /// ```
-    pub fn unwrap_or_else(&self, default: impl 'static + Fn() -> T) -> Binding<T>
+    pub fn unwrap_or_else(&self, default: impl 'static + Clone + Fn() -> T) -> Binding<T>
     where
         T: Clone + 'static,
     {
@@ -764,7 +790,7 @@ impl<T> Clone for Binding<T> {
 /// The container is the basic implementation of a binding that holds a value
 /// and notifies watchers when the value changes.
 #[derive(Debug, Clone)]
-pub struct Container<T: 'static + Clone> {
+pub struct Container<T: 'static> {
     /// The contained value, wrapped in Reference-counted [`RefCell`] for interior mutability
     value: Rc<RefCell<T>>,
     /// Manager for watchers that are interested in changes to the value
@@ -833,14 +859,14 @@ struct Mapping<Input: 'static, Output, Getter, Setter> {
     /// The source binding that is being mapped
     binding: Binding<Input>,
     /// Function to convert from input type to output type
-    getter: Rc<Getter>,
+    getter: Getter,
     /// Function to convert from output type back to input type
-    setter: Rc<Setter>,
+    setter: Setter,
     /// Phantom data to keep track of the Output type parameter
     _marker: PhantomData<Output>,
 }
 
-impl<Input, Output, Getter, Setter> Clone for Mapping<Input, Output, Getter, Setter> {
+impl<Input, Output, Getter: Clone, Setter: Clone> Clone for Mapping<Input, Output, Getter, Setter> {
     fn clone(&self) -> Self {
         Self {
             binding: self.binding.clone(),
@@ -855,8 +881,8 @@ impl<Input, Output, Getter, Setter> Signal for Mapping<Input, Output, Getter, Se
 where
     Input: 'static,
     Output: 'static,
-    Getter: 'static + Fn(Input) -> Output,
-    Setter: 'static,
+    Getter: 'static + Clone + Fn(Input) -> Output,
+    Setter: 'static + Clone,
 {
     type Output = Output;
     type Guard = <Binding<Input> as Signal>::Guard;
@@ -873,7 +899,7 @@ where
         let getter = self.getter.clone();
 
         self.binding.watch(move |context| {
-            let context = context.map(|value| (getter)(value));
+            let context = context.map(&(getter));
             watcher(context);
         })
     }
@@ -883,8 +909,8 @@ impl<Input, Output, Getter, Setter> CustomBinding for Mapping<Input, Output, Get
 where
     Input: 'static,
     Output: 'static,
-    Getter: 'static + Fn(Input) -> Output,
-    Setter: 'static + Fn(&mut Binding<Input>, Output),
+    Getter: 'static + Clone + Fn(Input) -> Output,
+    Setter: 'static + Clone + FnMut(&mut Binding<Input>, Output),
 {
     /// Sets a new value by applying the setter to convert from output to input.
     fn set(&mut self, value: Output) {

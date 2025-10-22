@@ -179,9 +179,8 @@ where
 /// Type alias for a boxed watcher guard.
 pub type BoxWatcherGuard = Box<dyn WatcherGuard>;
 
-impl WatcherGuard for Box<dyn WatcherGuard> {}
-
-impl WatcherGuard for Rc<dyn WatcherGuard> {}
+impl<T: WatcherGuard + ?Sized> WatcherGuard for Box<T> {}
+impl<T: WatcherGuard + ?Sized> WatcherGuard for Rc<T> {}
 
 impl<F: FnOnce() + 'static> WatcherGuard for OnDrop<F> {}
 

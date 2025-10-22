@@ -23,8 +23,6 @@
 
 use core::marker::PhantomData;
 
-use alloc::rc::Rc;
-
 use crate::{Signal, watcher::Context};
 
 /// A reactive computation that transforms values from a source computation.
@@ -35,11 +33,11 @@ use crate::{Signal, watcher::Context};
 #[derive(Debug)]
 pub struct Map<C, F, Output> {
     source: C,
-    f: Rc<F>,
+    f: F,
     _marker: PhantomData<Output>,
 }
 
-impl<C: Signal + 'static, F: 'static, Output> Map<C, F, Output> {
+impl<C: Signal + 'static, F: 'static + Clone, Output> Map<C, F, Output> {
     /// Creates a new `Map` that transforms values from `source` using function `f`.
     ///
     /// # Parameters
@@ -50,10 +48,10 @@ impl<C: Signal + 'static, F: 'static, Output> Map<C, F, Output> {
     /// # Returns
     ///
     /// A new `Map` instance that will transform values from the source.
-    pub fn new(source: C, f: F) -> Self {
+    pub const fn new(source: C, f: F) -> Self {
         Self {
             source,
-            f: Rc::new(f),
+            f,
             _marker: PhantomData,
         }
     }
@@ -82,15 +80,15 @@ impl<C: Signal + 'static, F: 'static, Output> Map<C, F, Output> {
 /// let doubled = map(counter, |n: i32| n * 2);
 /// assert_eq!(doubled.get(), 2);
 /// ```
-pub fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
+pub const fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
 where
     C: Signal + 'static,
-    F: 'static + Fn(C::Output) -> Output,
+    F: 'static + Clone + Fn(C::Output) -> Output,
 {
     Map::new(source, f)
 }
 
-impl<C: Clone, F, Output> Clone for Map<C, F, Output> {
+impl<C: Clone, F: Clone, Output> Clone for Map<C, F, Output> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
@@ -103,7 +101,7 @@ impl<C: Clone, F, Output> Clone for Map<C, F, Output> {
 impl<C, F, Output> Signal for Map<C, F, Output>
 where
     C: Signal,
-    F: 'static + Fn(C::Output) -> Output,
+    F: 'static + Clone + Fn(C::Output) -> Output,
     Output: 'static,
 {
     type Output = Output;

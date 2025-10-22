@@ -11,7 +11,7 @@ pub trait SignalExt: Signal + Sized {
     /// Transforms the output of this signal using the provided function.
     fn map<F, Output>(self, f: F) -> Map<Self, F, Output>
     where
-        F: 'static + Fn(Self::Output) -> Output,
+        F: 'static + Clone + Fn(Self::Output) -> Output,
         Self: 'static,
     {
         Map::new(self, f)

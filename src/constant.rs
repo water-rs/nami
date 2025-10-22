@@ -120,56 +120,41 @@ pub fn constant<T>(value: T) -> Constant<T> {
     Constant::from(value)
 }
 
-#[derive(Debug)]
-struct LazyInner<F, T> {
+/// A lazy-evaluated constant that computes its value on first access.
+///
+/// Unlike `Constant<T>`, this type allows for deferred computation of the constant value.
+#[derive(Debug, Clone)]
+pub struct Lazy<F, T> {
     f: F,
     value: RefCell<Option<T>>,
 }
 
-/// A lazy-evaluated constant that computes its value on first access.
-///
-/// Unlike `Constant<T>`, this type allows for deferred computation of the constant value.
-#[derive(Debug)]
-pub struct Lazy<F, T> {
-    inner: Rc<LazyInner<F, T>>,
-}
-
 impl<F, T> Lazy<F, T>
 where
-    F: Fn() -> T,
+    F: Clone + Fn() -> T,
     T: Clone + 'static,
 {
     /// Creates a new lazy constant with the provided computation function.
-    pub fn new(f: F) -> Self {
+    pub const fn new(f: F) -> Self {
         Self {
-            inner: Rc::new(LazyInner {
-                f,
-                value: RefCell::default(),
-            }),
-        }
-    }
-}
-
-impl<F, T> Clone for Lazy<F, T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
+            f,
+            value: RefCell::new(None),
         }
     }
 }
 
 impl<F, T> Signal for Lazy<F, T>
 where
-    F: 'static + Fn() -> T,
+    F: 'static + Clone + Fn() -> T,
     T: Clone + 'static,
 {
     type Output = T;
     type Guard = ();
     fn get(&self) -> Self::Output {
-        self.inner.value.borrow().as_ref().map_or_else(
+        self.value.borrow().as_ref().map_or_else(
             || {
-                let value = (self.inner.f)();
-                *self.inner.value.borrow_mut() = Some(value.clone());
+                let value = (self.f)();
+                *self.value.borrow_mut() = Some(value.clone());
                 value
             },
             Clone::clone,
