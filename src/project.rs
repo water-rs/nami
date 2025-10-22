@@ -204,7 +204,7 @@ macro_rules! tuples {
 /// field in the original tuple.
 macro_rules! impl_project {
     ( $(($ty:ident, $idx:tt)),+ ) => {
-        impl< $( $ty: 'static ),+ > Project for ( $( $ty ),+ ) {
+        impl< $( $ty: 'static+Clone ),+ > Project for ( $( $ty ),+ ) {
             type Projected = ( $( Binding<$ty> ),+ );
 
             fn project(source: &Binding<Self>) -> Self::Projected {
@@ -216,7 +216,9 @@ macro_rules! impl_project {
                                 &source,
                                 |value| value.$idx,
                                 move |binding, value| {
-                                    binding.get_mut().$idx = value;
+                                    binding.with_mut(|b| {
+                                        b.$idx = value;
+                                    });
                                 },
                             )
                         }

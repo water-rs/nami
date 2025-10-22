@@ -7,7 +7,9 @@
 //! The addition is performed using the standard `Add` trait from Rust's core library,
 //! allowing for flexible addition semantics depending on the types involved.
 
-use core::ops::Add;
+use core::ops::{
+    Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub,
+};
 
 use crate::{
     Signal,
@@ -62,6 +64,44 @@ where
     let zip = zip(a, b);
     map(zip, |(a, b)| a.add(b))
 }
+
+macro_rules! define_binary_op {
+    ($fn_name:ident, $trait:ident, $method:ident) => {
+        #[doc = concat!(
+            "Combines two `Signal` sources using the `",
+            stringify!($method),
+            "` operator."
+        )]
+        #[allow(clippy::type_complexity)]
+        pub fn $fn_name<A, B>(
+            a: A,
+            b: B,
+        ) -> Map<
+            Zip<A, B>,
+            fn((A::Output, B::Output)) -> <A::Output as $trait<B::Output>>::Output,
+            <A::Output as $trait<B::Output>>::Output,
+        >
+        where
+            A: Signal + 'static,
+            B: Signal + 'static,
+            A::Output: $trait<B::Output> + Clone,
+            B::Output: Clone,
+        {
+            let zip = zip(a, b);
+            map(zip, |(a, b)| a.$method(b))
+        }
+    };
+}
+
+define_binary_op!(sub, Sub, sub);
+define_binary_op!(mul, Mul, mul);
+define_binary_op!(div, Div, div);
+define_binary_op!(rem, Rem, rem);
+define_binary_op!(bitand, BitAnd, bitand);
+define_binary_op!(bitor, BitOr, bitor);
+define_binary_op!(bitxor, BitXor, bitxor);
+define_binary_op!(shl, Shl, shl);
+define_binary_op!(shr, Shr, shr);
 
 /// Returns the maximum value between two `Signal` values.
 ///

@@ -88,7 +88,9 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
                     &source,
                     |value| value.#field_name.clone(),
                     move |binding, value| {
-                        binding.get_mut().#field_name = value;
+                        binding.with_mut(|b| {
+                            b.#field_name = value;
+                        });
                     },
                 )
             }
@@ -147,7 +149,9 @@ fn derive_project_tuple_struct(input: &DeriveInput, fields: &syn::FieldsUnnamed)
                     &source,
                     |value| value.#idx.clone(),
                     move |binding, value| {
-                        binding.get_mut().#idx = value;
+                        binding.with_mut(|b| {
+                            b.#idx = value;
+                        });
                     },
                 )
             }

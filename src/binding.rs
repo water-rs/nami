@@ -8,7 +8,10 @@ use core::{
     cell::RefCell,
     fmt::Debug,
     marker::PhantomData,
-    ops::{Add, Deref, DerefMut, Not, RangeBounds},
+    ops::{
+        Add, BitAnd, BitOr, BitXor, Deref, DerefMut, Div, Mul, Neg, Not, RangeBounds, Rem, Shl,
+        Shr, Sub,
+    },
 };
 
 mod ops;
@@ -20,7 +23,10 @@ use executor_core::{LocalExecutor, Task};
 use crate::{
     Computed, Signal,
     map::Map,
-    utils::add,
+    utils::{
+        add, bitand as util_bitand, bitor as util_bitor, bitxor as util_bitxor, div as util_div,
+        mul as util_mul, rem as util_rem, shl as util_shl, shr as util_shr, sub as util_sub,
+    },
     watcher::{BoxWatcherGuard, Context, WatcherManager},
     zip::Zip,
 };
@@ -113,7 +119,7 @@ pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
     Binding::container(value.into())
 }
 
-impl<T> Binding<Vec<T>> {
+impl<T: Clone> Binding<Vec<T>> {
     /// Adds a value to the end of the vector and notifies watchers.
     ///
     /// # Example
@@ -123,7 +129,9 @@ impl<T> Binding<Vec<T>> {
     /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
     /// ```
     pub fn push(&mut self, value: T) {
-        self.get_mut().push(value);
+        self.with_mut(|vec| {
+            vec.push(value);
+        });
     }
 
     /// Inserts an element at the specified index and notifies watchers.
@@ -138,7 +146,9 @@ impl<T> Binding<Vec<T>> {
     /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
     /// ```
     pub fn insert(&mut self, index: usize, element: T) {
-        self.get_mut().insert(index, element);
+        self.with_mut(|vec| {
+            vec.insert(index, element);
+        });
     }
 
     /// Removes and returns the last element from the vector, or `None` if empty.
@@ -152,7 +162,7 @@ impl<T> Binding<Vec<T>> {
     /// ```
     #[must_use]
     pub fn pop(&mut self) -> Option<T> {
-        self.get_mut().pop()
+        self.with_mut(alloc::vec::Vec::pop)
     }
 
     /// Removes all elements from the vector and notifies watchers.
@@ -164,26 +174,43 @@ impl<T> Binding<Vec<T>> {
     /// assert!(list.get().is_empty());
     /// ```
     pub fn clear(&mut self) {
-        self.get_mut().clear();
+        self.with_mut(|vec| {
+            vec.clear();
+        });
     }
 }
 
-impl<T, C2> Add<C2> for Binding<T>
-where
-    C2: Signal,
-    T: Add<C2::Output> + Clone + 'static,
-    C2::Output: Clone,
-{
-    type Output = Map<
-        Zip<Self, C2>,
-        fn((T, <C2 as Signal>::Output)) -> <T as Add<<C2 as Signal>::Output>>::Output,
-        <T as Add<<C2 as Signal>::Output>>::Output,
-    >;
+macro_rules! impl_binary_trait {
+    ($trait:ident, $method:ident, $helper:path) => {
+        impl<T, RHS> $trait<RHS> for Binding<T>
+        where
+            RHS: Signal,
+            T: $trait<RHS::Output> + Clone + 'static,
+            RHS::Output: Clone,
+        {
+            type Output = Map<
+                Zip<Self, RHS>,
+                fn((T, RHS::Output)) -> <T as $trait<RHS::Output>>::Output,
+                <T as $trait<RHS::Output>>::Output,
+            >;
 
-    fn add(self, rhs: C2) -> Self::Output {
-        add(self, rhs)
-    }
+            fn $method(self, rhs: RHS) -> Self::Output {
+                $helper(self, rhs)
+            }
+        }
+    };
 }
+
+impl_binary_trait!(Add, add, add);
+impl_binary_trait!(Sub, sub, util_sub);
+impl_binary_trait!(Mul, mul, util_mul);
+impl_binary_trait!(Div, div, util_div);
+impl_binary_trait!(Rem, rem, util_rem);
+impl_binary_trait!(BitAnd, bitand, util_bitand);
+impl_binary_trait!(BitOr, bitor, util_bitor);
+impl_binary_trait!(BitXor, bitxor, util_bitxor);
+impl_binary_trait!(Shl, shl, util_shl);
+impl_binary_trait!(Shr, shr, util_shr);
 
 /// A guard that provides mutable access to a binding's value.
 ///
@@ -244,6 +271,8 @@ impl<T: 'static> Binding<T> {
     /// Gets mutable access to the binding's value through a guard.
     ///
     /// When the guard is dropped, the binding is updated with the modified value.
+    ///
+    /// Tip: For better performance when modifying container bindings, consider using the `with_mut` method instead.
     pub fn get_mut(&mut self) -> BindingMutGuard<'_, T> {
         BindingMutGuard::new(self)
     }
@@ -286,14 +315,14 @@ impl<T: 'static> Binding<T> {
     /// This is more efficient than `get_mut()` for container bindings as it avoids
     /// unnecessary cloning. The function receives a mutable reference to the value
     /// and any changes will notify watchers when the function completes.
-    pub fn with_mut(&mut self, f: impl FnOnce(&mut T))
+    pub fn with_mut<R>(&mut self, f: impl FnOnce(&mut T) -> R) -> R
     where
         T: Clone,
     {
         if let Some(container) = self.as_container() {
             // optimize for container bindings
             let mut value = container.value.borrow_mut();
-            f(&mut *value);
+            let result = f(&mut *value);
             let updated = value.clone();
             drop(value);
             // notify watchers manually after releasing the RefCell borrow
@@ -301,10 +330,11 @@ impl<T: 'static> Binding<T> {
                 let context = Context::from(updated);
                 container.watchers.notify(&context);
             }
+            result
         } else {
             // fallback for non-container bindings
             let mut guard = self.get_mut();
-            f(&mut *guard);
+            f(&mut *guard)
         }
     }
 
@@ -507,7 +537,9 @@ impl<T: Ord + Clone> Binding<Vec<T>> {
     /// assert_eq!(list.get(), vec![1, 1, 3, 4, 5]);
     /// ```
     pub fn sort(&mut self) {
-        self.get_mut().sort();
+        self.with_mut(|vec| {
+            vec.sort();
+        });
     }
 }
 
@@ -548,7 +580,9 @@ impl<T: Clone> Binding<T> {
     where
         T: Extend<Ele>,
     {
-        self.get_mut().extend([ele]);
+        self.with_mut(|value| {
+            value.extend(core::iter::once(ele));
+        });
     }
 }
 
@@ -666,8 +700,9 @@ impl Binding<bool> {
     /// assert_eq!(flag.get(), true);
     /// ```
     pub fn toggle(&mut self) {
-        let mut value = self.get_mut();
-        *value = !*value;
+        self.with_mut(|v| {
+            *v = !*v;
+        });
     }
 
     /// Creates a conditional binding that returns `Some(value)` when true, `None` when false.
@@ -781,6 +816,33 @@ impl Not for Binding<bool> {
     /// Implements the logical NOT operator for boolean bindings.
     fn not(self) -> Self::Output {
         self.reverse()
+    }
+}
+
+impl<T> Binding<T>
+where
+    T: Clone + Neg<Output = T> + 'static,
+{
+    /// Creates a binding that produces the negated value of this binding.
+    ///
+    /// Updating the derived binding will reflect the negated value back to the source.
+    #[must_use]
+    pub fn negate(&self) -> Self {
+        Self::mapping(self, core::ops::Neg::neg, move |binding, value| {
+            binding.set(value.neg());
+        })
+    }
+}
+
+impl<T> Neg for Binding<T>
+where
+    T: Clone + Neg<Output = T> + 'static,
+{
+    type Output = Self;
+
+    /// Implements unary negation for bindings.
+    fn neg(self) -> Self::Output {
+        self.negate()
     }
 }
 
