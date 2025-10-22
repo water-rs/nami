@@ -12,9 +12,9 @@
 //!
 //! Note: the crate is `no_std` and relies on `alloc`.
 
-use core::pin::Pin;
+use core::{cell::RefCell, pin::Pin, task::Waker};
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, rc::Rc};
 use futures_core::Stream;
 use nami_core::watcher::Context;
 use pin_project_lite::pin_project;
@@ -76,8 +76,24 @@ where
     signal: S,
     #[pin]
     guard: Option<Pin<Box<S::Guard>>>,
+    queue: Option<Rc<RefCell<Option<S::Output>>>>,
+    waker: Option<Rc<RefCell<Option<Waker>>>>,
+    initial_sent: bool,
 }
 
+}
+
+impl<S: Signal> SignalStream<S> {
+    /// Creates a new stream view for the provided signal.
+    pub const fn new(signal: S) -> Self {
+        Self {
+            signal,
+            guard: None,
+            queue: None,
+            waker: None,
+            initial_sent: false,
+        }
+    }
 }
 
 impl<S: Signal> Stream for SignalStream<S> {
@@ -86,20 +102,116 @@ impl<S: Signal> Stream for SignalStream<S> {
         self: core::pin::Pin<&mut Self>,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Option<Self::Item>> {
-        let waker = cx.waker().clone();
+        let mut this = self.project();
 
-        let project = self.project();
+        if this.queue.is_none() {
+            *this.queue = Some(Rc::new(RefCell::new(None)));
+        }
+        if this.waker.is_none() {
+            *this.waker = Some(Rc::new(RefCell::new(None)));
+        }
 
-        let mut guard = project.guard;
+        if this.guard.is_none() {
+            let queue = this.queue.as_ref().unwrap().clone();
+            let waker_cell = this.waker.as_ref().unwrap().clone();
+            let guard = this.signal.watch(move |ctx| {
+                *queue.borrow_mut() = Some(ctx.into_value());
+                if let Some(waker) = waker_cell.borrow().as_ref() {
+                    waker.wake_by_ref();
+                }
+            });
+            *this.guard = Some(Box::pin(guard));
+        }
 
-        let signal = project.signal;
+        if let Some(waker_cell) = this.waker.as_ref() {
+            *waker_cell.borrow_mut() = Some(cx.waker().clone());
+        }
 
-        guard.get_or_insert_with(|| {
-            Box::pin(signal.watch(move |_| {
-                waker.wake_by_ref();
-            }))
-        });
+        if !*this.initial_sent {
+            *this.initial_sent = true;
+            return core::task::Poll::Ready(Some(this.signal.get()));
+        }
 
-        core::task::Poll::Ready(Some(signal.get()))
+        let mut queue = this.queue.as_ref().unwrap().borrow_mut();
+        queue.take().map_or_else(
+            || core::task::Poll::Pending,
+            |value| core::task::Poll::Ready(Some(value)),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::binding::{Binding, binding};
+    use core::task::Poll;
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        task::{Context, Wake, Waker},
+    };
+
+    #[derive(Default)]
+    struct FlagWake {
+        flag: AtomicBool,
+    }
+
+    impl FlagWake {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                flag: AtomicBool::new(false),
+            })
+        }
+
+        fn is_woken(self: &Arc<Self>) -> bool {
+            self.flag.load(Ordering::SeqCst)
+        }
+
+        fn reset(self: &Arc<Self>) {
+            self.flag.store(false, Ordering::SeqCst);
+        }
+    }
+
+    impl Wake for FlagWake {
+        fn wake(self: Arc<Self>) {
+            self.flag.store(true, Ordering::SeqCst);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn signal_stream_yields_only_on_updates() {
+        let mut binding: Binding<i32> = binding(1);
+        let stream_binding = binding.clone();
+        let mut stream = Box::pin(SignalStream::new(stream_binding));
+
+        let flag = FlagWake::new();
+        let waker = Waker::from(flag.clone());
+        let mut cx = Context::from_waker(&waker);
+
+        let first = stream.as_mut().poll_next(&mut cx);
+        assert!(matches!(first, Poll::Ready(Some(1))));
+        flag.reset();
+
+        let second = stream.as_mut().poll_next(&mut cx);
+        assert!(matches!(second, Poll::Pending));
+        assert!(!flag.is_woken());
+
+        binding.set(2);
+        assert!(flag.is_woken());
+        flag.reset();
+
+        let third = stream.as_mut().poll_next(&mut cx);
+        assert!(matches!(third, Poll::Ready(Some(2))));
+        assert!(!flag.is_woken());
+
+        let fourth = stream.as_mut().poll_next(&mut cx);
+        assert!(matches!(fourth, Poll::Pending));
+        assert!(!flag.is_woken());
     }
 }

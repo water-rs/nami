@@ -28,7 +28,7 @@ use core::any::type_name;
 
 use crate::{
     Signal,
-    watcher::{BoxWatcherGuard, Context, WatcherGuard},
+    watcher::{BoxWatcherGuard, Context, OnDrop},
 };
 
 /// A debug wrapper for Signal that logs computation events.
@@ -206,23 +206,18 @@ where
         value
     }
     fn watch(&self, watcher: impl Fn(Context<C::Output>) + 'static) -> Self::Guard {
-        enum Or<A, B> {
-            A(A),
-            B(B),
-        }
-
-        impl<A: 'static, B: 'static> WatcherGuard for Or<A, B> {}
-
-        let mut guard = Or::A(self.source.watch(watcher));
+        let guard = self.source.watch(watcher);
         if self.inner.config.should_log_watch() {
             log::debug!("Added watcher");
         }
-        if self.inner.config.should_log_remove_watcher() {
-            guard = Or::B(move || {
-                let _ = guard;
+        let guard: BoxWatcherGuard = if self.inner.config.should_log_remove_watcher() {
+            Box::new(OnDrop::attach(guard, || {
                 log::debug!("Removed watcher");
-            });
-        }
-        Box::new(guard)
+            }))
+        } else {
+            Box::new(guard)
+        };
+
+        guard
     }
 }

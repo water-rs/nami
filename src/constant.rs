@@ -25,8 +25,6 @@
 
 use core::cell::RefCell;
 
-use alloc::rc::Rc;
-
 use crate::{Signal, watcher::Context};
 
 /// A reactive constant value that never changes.

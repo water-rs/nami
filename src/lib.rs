@@ -1,6 +1,9 @@
 #![no_std]
 #![doc = include_str!("../README.md")]
 
+#[cfg(test)]
+extern crate std;
+
 extern crate alloc;
 pub mod binding;
 #[doc(inline)]

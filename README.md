@@ -192,7 +192,7 @@ use executor_core::LocalExecutor;
 ```rust
 use nami::{Signal, stream::SignalStream};
 // let s = /* some Signal */;
-// let mut stream = SignalStream { signal: s, guard: None };
+// let mut stream = SignalStream::new(s);
 // while let Some(value) = stream.next().await { /* ... */ }
 ```
 

@@ -293,8 +293,12 @@ impl<T: 'static> Binding<T> {
             // optimize for container bindings
             let mut value = container.value.borrow_mut();
             f(&mut *value);
-            // notify watchers manually
-            container.watchers.notify(|| Context::from(value.clone()));
+            let updated = value.clone();
+            drop(value);
+            // notify watchers manually after releasing the RefCell borrow
+            container
+                .watchers
+                .notify(move || Context::from(updated.clone()));
         } else {
             // fallback for non-container bindings
             let mut guard = self.get_mut();
@@ -982,5 +986,28 @@ mod tests {
         assert_eq!(number.get(), 42i64);
         number.set(100); // Direct i64
         assert_eq!(number.get(), 100i64);
+    }
+
+    #[test]
+    fn test_with_mut_allows_nested_get() {
+        use alloc::rc::Rc;
+        use core::cell::RefCell;
+
+        let mut binding: Binding<i32> = binding(0);
+        let watcher_binding = binding.clone();
+        let reader_binding = binding.clone();
+
+        let notifications = Rc::new(RefCell::new(0usize));
+        let notifications_clone = notifications.clone();
+
+        let _guard = watcher_binding.watch(move |_| {
+            let _ = reader_binding.get();
+            *notifications_clone.borrow_mut() += 1;
+        });
+
+        binding.with_mut(|value| *value += 1);
+
+        assert_eq!(binding.get(), 1);
+        assert_eq!(*notifications.borrow(), 1);
     }
 }
