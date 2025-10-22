@@ -10,6 +10,7 @@
 //! to work with multiple interdependent values in a reactive context.
 
 use alloc::rc::Rc;
+use core::cell::RefCell;
 
 use crate::{
     Signal,
@@ -100,7 +101,13 @@ where
 }
 
 /// Implementation of the `Signal` trait for `Zip`.
-impl<A: Signal, B: Signal> Signal for Zip<A, B> {
+impl<A, B> Signal for Zip<A, B>
+where
+    A: Signal,
+    B: Signal,
+    A::Output: Clone,
+    B::Output: Clone,
+{
     /// The output type of the zipped computation is a tuple of the outputs of the individual computations.
     type Output = (A::Output, B::Output);
     type Guard = (A::Guard, B::Guard);
@@ -127,18 +134,30 @@ impl<A: Signal, B: Signal> Signal for Zip<A, B> {
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let watcher = Rc::new(watcher);
         let Self { a, b } = self;
+        let latest_a = Rc::new(RefCell::new(a.get()));
+        let latest_b = Rc::new(RefCell::new(b.get()));
+
         let guard_a = {
             let watcher = watcher.clone();
-            let b = b.clone();
+            let latest_a = latest_a.clone();
+            let latest_b = latest_b.clone();
             self.a.watch(move |ctx: Context<A::Output>| {
-                watcher(ctx.map(|value| (value, b.get())));
+                let updated_a = ctx.value().clone();
+                *latest_a.borrow_mut() = updated_a;
+                let other = latest_b.borrow().clone();
+                watcher(ctx.map(|value| (value, other)));
             })
         };
 
         let guard_b = {
-            let a = a.clone();
+            let watcher = watcher;
+            let latest_a = latest_a;
+            let latest_b = latest_b;
             self.b.watch(move |ctx: Context<B::Output>| {
-                watcher(ctx.map(|value| (a.get(), value)));
+                let updated_b = ctx.value().clone();
+                *latest_b.borrow_mut() = updated_b;
+                let other = latest_a.borrow().clone();
+                watcher(ctx.map(|value| (other, value)));
             })
         };
 

@@ -122,9 +122,18 @@ where
                 let watchers = watchers.clone();
                 let timer = timer.clone();
 
+                if watchers.is_empty() {
+                    return;
+                }
+
+                let delayed_context = ctx;
                 let task = executor.spawn_local(async move {
                     sleep(duration).await;
-                    watchers.notify(move || ctx.clone());
+                    if watchers.is_empty() {
+                        return;
+                    }
+                    let context = delayed_context;
+                    watchers.notify(&context);
                 });
 
                 *timer.borrow_mut() = Some(Box::new(task));

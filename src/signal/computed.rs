@@ -58,7 +58,8 @@ impl<C: Signal + 'static> ComputedImpl for C {
 impl<T, C2> Add<C2> for Computed<T>
 where
     C2: Signal,
-    T: Add<C2::Output> + 'static,
+    T: Add<C2::Output> + Clone + 'static,
+    C2::Output: Clone,
 {
     type Output = Map<
         Zip<Self, C2>,

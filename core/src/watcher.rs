@@ -41,6 +41,9 @@ impl MetadataInner {
     ///
     /// If a value of the same type already exists, it will be replaced.
     pub fn insert<T: 'static + Clone>(&mut self, value: T) {
+        // Value are always cheap to clone, for example, `Animation` may only within one machine word.
+        // However, we must erase the type, so we must make a choice between `Rc` and `Box`.
+        // Here we choose `Rc` to allow cheap cloning when retrieving the value.
         self.0.insert(TypeId::of::<T>(), Rc::new(value));
     }
 }
@@ -282,8 +285,11 @@ impl<T: 'static> WatcherManager<T> {
         WatcherManagerGuard { manager: this, id }
     }
 
-    /// Notifies all registered watchers with a value and specific metadata.
-    pub fn notify(&self, ctx: impl Fn() -> Context<T>) {
+    /// Notifies all registered watchers with a preconstructed context.
+    pub fn notify(&self, ctx: &Context<T>)
+    where
+        T: Clone,
+    {
         let this = Rc::downgrade(&self.inner);
         if let Some(this) = this.upgrade() {
             this.borrow().notify(ctx);
@@ -363,10 +369,13 @@ impl<T: 'static> WatcherManagerInner<T> {
         id
     }
 
-    /// Notifies all registered watchers with a value and metadata.
-    pub fn notify(&self, ctx: impl Fn() -> Context<T>) {
+    /// Notifies all registered watchers with a preconstructed context.
+    pub fn notify(&self, ctx: &Context<T>)
+    where
+        T: Clone,
+    {
         for watcher in self.map.values() {
-            watcher(ctx());
+            watcher(ctx.clone());
         }
     }
 

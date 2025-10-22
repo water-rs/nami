@@ -112,7 +112,8 @@ mod tests {
 
         fn set(&self, value: i32) {
             *self.value.borrow_mut() = value;
-            self.watchers.notify(|| Context::from(value));
+            let context = Context::from(value);
+            self.watchers.notify(&context);
         }
 
         fn get_call_count(&self) -> usize {

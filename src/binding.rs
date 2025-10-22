@@ -171,7 +171,8 @@ impl<T> Binding<Vec<T>> {
 impl<T, C2> Add<C2> for Binding<T>
 where
     C2: Signal,
-    T: Add<C2::Output> + 'static,
+    T: Add<C2::Output> + Clone + 'static,
+    C2::Output: Clone,
 {
     type Output = Map<
         Zip<Self, C2>,
@@ -296,9 +297,10 @@ impl<T: 'static> Binding<T> {
             let updated = value.clone();
             drop(value);
             // notify watchers manually after releasing the RefCell borrow
-            container
-                .watchers
-                .notify(move || Context::from(updated.clone()));
+            if !container.watchers.is_empty() {
+                let context = Context::from(updated);
+                container.watchers.notify(&context);
+            }
         } else {
             // fallback for non-container bindings
             let mut guard = self.get_mut();
@@ -836,7 +838,11 @@ impl<T: 'static + Clone> CustomBinding for Container<T> {
     /// Sets a new value and notifies watchers.
     fn set(&mut self, value: T) {
         self.value.replace(value.clone());
-        self.watchers.notify(|| Context::from(value.clone()));
+        if self.watchers.is_empty() {
+            return;
+        }
+        let context = Context::from(value);
+        self.watchers.notify(&context);
     }
 }
 

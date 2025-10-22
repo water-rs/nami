@@ -105,9 +105,12 @@ impl<T: 'static> List<T> {
         T: Clone,
     {
         self.vec.borrow_mut().push(value);
-        let vec_clone = self.vec.clone();
-        self.watchers
-            .notify(|| Context::from(vec_clone.borrow().to_vec()));
+        if self.watchers.is_empty() {
+            return;
+        }
+        let snapshot = self.vec.borrow().clone();
+        let context = Context::from(snapshot);
+        self.watchers.notify(&context);
     }
 
     /// Removes and returns the last element of the list.
@@ -118,9 +121,12 @@ impl<T: 'static> List<T> {
     {
         let result = self.vec.borrow_mut().pop();
         if result.is_some() {
-            let vec_clone = self.vec.clone();
-            self.watchers
-                .notify(|| Context::from(vec_clone.borrow().to_vec()));
+            if self.watchers.is_empty() {
+                return result;
+            }
+            let snapshot = self.vec.borrow().clone();
+            let context = Context::from(snapshot);
+            self.watchers.notify(&context);
         }
         result
     }
@@ -131,9 +137,12 @@ impl<T: 'static> List<T> {
         T: Clone,
     {
         self.vec.borrow_mut().insert(index, value);
-        let vec_clone = self.vec.clone();
-        self.watchers
-            .notify(|| Context::from(vec_clone.borrow().to_vec()));
+        if self.watchers.is_empty() {
+            return;
+        }
+        let snapshot = self.vec.borrow().clone();
+        let context = Context::from(snapshot);
+        self.watchers.notify(&context);
     }
 
     /// Removes and returns the element at the specified index.
@@ -143,9 +152,12 @@ impl<T: 'static> List<T> {
         T: Clone,
     {
         let result = self.vec.borrow_mut().remove(index);
-        let vec_clone = self.vec.clone();
-        self.watchers
-            .notify(|| Context::from(vec_clone.borrow().to_vec()));
+        if self.watchers.is_empty() {
+            return result;
+        }
+        let snapshot = self.vec.borrow().clone();
+        let context = Context::from(snapshot);
+        self.watchers.notify(&context);
         result
     }
 
@@ -157,9 +169,11 @@ impl<T: 'static> List<T> {
         let was_empty = self.vec.borrow().is_empty();
         self.vec.borrow_mut().clear();
         if !was_empty {
-            let vec_clone = self.vec.clone();
-            self.watchers
-                .notify(|| Context::from(vec_clone.borrow().to_vec()));
+            if self.watchers.is_empty() {
+                return;
+            }
+            let context = Context::from(Vec::<T>::new());
+            self.watchers.notify(&context);
         }
     }
 }

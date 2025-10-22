@@ -121,8 +121,12 @@ where
                     return;
                 }
 
+                if watchers.is_empty() {
+                    return;
+                }
+
                 // Immediately emit the update
-                watchers.notify(|| ctx.clone());
+                watchers.notify(&ctx);
 
                 // Set throttled state and start timer
                 throttled.set(true);

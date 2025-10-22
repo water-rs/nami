@@ -56,7 +56,8 @@ pub fn add<A, B>(
 where
     A: Signal + 'static,
     B: Signal + 'static,
-    A::Output: Add<B::Output>,
+    A::Output: Add<B::Output> + Clone,
+    B::Output: Clone,
 {
     let zip = zip(a, b);
     map(zip, |(a, b)| a.add(b))
@@ -98,7 +99,7 @@ pub fn max<A, B, T>(a: A, b: B) -> Map<Zip<A, B>, fn((T, T)) -> T, T>
 where
     A: Signal<Output = T>,
     B: Signal<Output = T>,
-    T: Ord + 'static,
+    T: Ord + Clone + 'static,
 {
     let zip = zip(a, b);
     map(zip, |(a, b)| core::cmp::max(a, b))
@@ -140,7 +141,7 @@ pub fn min<A, B, T>(a: A, b: B) -> Map<Zip<A, B>, fn((T, T)) -> T, T>
 where
     A: Signal<Output = T>,
     B: Signal<Output = T>,
-    T: Ord + 'static,
+    T: Ord + Clone + 'static,
 {
     let zip = zip(a, b);
     map(zip, |(a, b)| core::cmp::min(a, b))
