@@ -100,11 +100,25 @@ impl<T: 'static> List<T> {
     }
 
     /// Adds an element to the end of the list.
-    pub fn push(&self, value: T)
+    pub fn push(&mut self, value: T)
     where
         T: Clone,
     {
         self.vec.borrow_mut().push(value);
+        if self.watchers.is_empty() {
+            return;
+        }
+        let snapshot = self.vec.borrow().clone();
+        let context = Context::from(snapshot);
+        self.watchers.notify(&context);
+    }
+
+    /// Sorts the list in place.
+    pub fn sort(&mut self)
+    where
+        T: Ord + Clone,
+    {
+        self.vec.borrow_mut().sort();
         if self.watchers.is_empty() {
             return;
         }
@@ -315,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_list_push_and_pop() {
-        let list = List::new();
+        let mut list = List::new();
 
         list.push(1);
         list.push(2);
@@ -372,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_list_clone() {
-        let list1 = List::from(vec![1, 2, 3]);
+        let mut list1 = List::from(vec![1, 2, 3]);
         let list2 = Clone::clone(&list1);
 
         assert_eq!(Collection::len(&list1), Collection::len(&list2));
@@ -388,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_list_watcher_notifications() {
-        let list = List::new();
+        let mut list = List::new();
         let notification_count = Rc::new(RefCell::new(0));
 
         let count = notification_count.clone();
@@ -409,7 +423,7 @@ mod tests {
 
     #[test]
     fn test_list_watcher_range() {
-        let list = List::from(vec![1, 2, 3, 4, 5]);
+        let mut list = List::from(vec![1, 2, 3, 4, 5]);
         let notification_count = Rc::new(RefCell::new(0));
 
         let count = notification_count.clone();
@@ -626,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_watcher_guard_cleanup() {
-        let list = List::new();
+        let mut list = List::new();
         let notification_count = Rc::new(RefCell::new(0));
 
         {

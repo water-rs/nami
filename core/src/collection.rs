@@ -30,7 +30,7 @@ pub trait Collection: Clone + 'static {
 
 use core::ops::{Bound, RangeBounds};
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, vec::Vec};
 
 use crate::watcher::{BoxWatcherGuard, Context, WatcherGuard};
 
@@ -87,6 +87,68 @@ impl<T: Clone + 'static, const N: usize> Collection for [T; N] {
         _range: impl RangeBounds<usize>,
         _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
     ) -> Self::Guard {
+    }
+}
+
+impl<T: Clone + 'static> Collection for alloc::rc::Rc<[T]> {
+    type Item = T;
+    type Guard = ();
+
+    fn get(&self, index: usize) -> Option<Self::Item> {
+        self.as_ref().get(index).cloned()
+    }
+    fn len(&self) -> usize {
+        self.as_ref().len()
+    }
+    fn watch(
+        &self,
+        _range: impl RangeBounds<usize>,
+        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+    ) -> Self::Guard {
+    }
+}
+
+impl<C> Collection for Box<C>
+where
+    C: Collection,
+{
+    type Item = C::Item;
+    type Guard = C::Guard;
+
+    fn get(&self, index: usize) -> Option<Self::Item> {
+        (**self).get(index)
+    }
+    fn len(&self) -> usize {
+        (**self).len()
+    }
+    fn watch(
+        &self,
+        range: impl RangeBounds<usize>,
+        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+    ) -> Self::Guard {
+        (**self).watch(range, watcher)
+    }
+}
+
+impl<C> Collection for Rc<C>
+where
+    C: Collection,
+{
+    type Item = C::Item;
+    type Guard = C::Guard;
+
+    fn get(&self, index: usize) -> Option<Self::Item> {
+        (**self).get(index)
+    }
+    fn len(&self) -> usize {
+        (**self).len()
+    }
+    fn watch(
+        &self,
+        range: impl RangeBounds<usize>,
+        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+    ) -> Self::Guard {
+        (**self).watch(range, watcher)
     }
 }
 

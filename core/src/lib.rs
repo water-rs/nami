@@ -8,8 +8,8 @@ use crate::watcher::{Context, WatcherGuard};
 
 /// Collection types for Nami.
 pub mod collection;
+pub mod dictionary;
 pub mod watcher;
-
 /// The core trait for reactive system.
 ///
 /// Types implementing `Signal` represent a computation that can produce a value

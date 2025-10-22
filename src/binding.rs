@@ -16,7 +16,7 @@ use core::{
 
 mod ops;
 
-use alloc::{boxed::Box, rc::Rc, vec::Vec};
+use alloc::{boxed::Box, rc::Rc};
 use async_channel::{Sender, unbounded};
 use executor_core::{LocalExecutor, Task};
 
@@ -119,67 +119,6 @@ pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
     Binding::container(value.into())
 }
 
-impl<T: Clone> Binding<Vec<T>> {
-    /// Adds a value to the end of the vector and notifies watchers.
-    ///
-    /// # Example
-    /// ```
-    /// let mut list = nami::binding(vec![1, 2, 3]);
-    /// list.push(4);
-    /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
-    /// ```
-    pub fn push(&mut self, value: T) {
-        self.with_mut(|vec| {
-            vec.push(value);
-        });
-    }
-
-    /// Inserts an element at the specified index and notifies watchers.
-    ///
-    /// # Panics
-    /// Panics if `index > len`.
-    ///
-    /// # Example
-    /// ```
-    /// let mut list = nami::binding(vec![1, 3, 4]);
-    /// list.insert(1, 2);
-    /// assert_eq!(list.get(), vec![1, 2, 3, 4]);
-    /// ```
-    pub fn insert(&mut self, index: usize, element: T) {
-        self.with_mut(|vec| {
-            vec.insert(index, element);
-        });
-    }
-
-    /// Removes and returns the last element from the vector, or `None` if empty.
-    /// Notifies watchers of the change.
-    ///
-    /// # Example
-    /// ```
-    /// let mut list = nami::binding(vec![1, 2, 3]);
-    /// assert_eq!(list.pop(), Some(3));
-    /// assert_eq!(list.get(), vec![1, 2]);
-    /// ```
-    #[must_use]
-    pub fn pop(&mut self) -> Option<T> {
-        self.with_mut(alloc::vec::Vec::pop)
-    }
-
-    /// Removes all elements from the vector and notifies watchers.
-    ///
-    /// # Example
-    /// ```
-    /// let mut list = nami::binding(vec![1, 2, 3]);
-    /// list.clear();
-    /// assert!(list.get().is_empty());
-    /// ```
-    pub fn clear(&mut self) {
-        self.with_mut(|vec| {
-            vec.clear();
-        });
-    }
-}
-
 macro_rules! impl_binary_trait {
     ($trait:ident, $method:ident, $helper:path) => {
         impl<T, RHS> $trait<RHS> for Binding<T>
@@ -280,6 +219,24 @@ impl<T: 'static> Binding<T> {
     /// Sets the binding to a new value
     pub fn set(&mut self, value: T) {
         self.0.set(value);
+    }
+
+    /// Takes the value out of the binding, replacing it with the default value.
+    ///
+    /// This is equivalent to `std::mem::take` and notifies watchers of the change.
+    ///
+    /// # Example
+    /// ```
+    /// let mut text = nami::binding("hello".to_string());
+    /// let taken = text.take();
+    /// assert_eq!(taken, "hello");
+    /// assert_eq!(text.get(), String::new());
+    /// ```
+    pub fn take(&mut self) -> T
+    where
+        T: Default + Clone,
+    {
+        self.with_mut(|v| core::mem::take(v))
     }
 
     /// Sets the binding to a new value with automatic type conversion.
@@ -527,27 +484,44 @@ impl<T: 'static> Binding<T> {
     }
 }
 
-impl<T: Ord + Clone> Binding<Vec<T>> {
-    /// Sorts the vector in-place and notifies watchers.
-    ///
-    /// # Example
-    /// ```
-    /// let mut list = nami::binding(vec![3, 1, 4, 1, 5]);
-    /// list.sort();
-    /// assert_eq!(list.get(), vec![1, 1, 3, 4, 5]);
-    /// ```
-    pub fn sort(&mut self) {
-        self.with_mut(|vec| {
-            vec.sort();
-        });
-    }
-}
-
 impl<T: PartialOrd + 'static> Binding<T> {
     /// Creates a binding that only allows values within a specified range.
     #[must_use]
     pub fn range(&self, range: impl RangeBounds<T> + Clone + 'static) -> Self {
         self.filter(move |value| range.contains(value))
+    }
+
+    /// Creates a binding that clamps values to the specified range.
+    ///
+    /// Values below the range minimum are clamped to the minimum.
+    /// Values above the range maximum are clamped to the maximum.
+    #[must_use]
+    pub fn clamp(&self, range: impl RangeBounds<T> + Clone + 'static) -> Self
+    where
+        T: Clone,
+    {
+        Self::mapping(
+            self,
+            {
+                let range = range;
+                move |value| {
+                    if let core::ops::Bound::Included(min) = range.start_bound()
+                        && value < *min
+                    {
+                        return min.clone();
+                    }
+                    if let core::ops::Bound::Included(max) = range.end_bound()
+                        && value > *max
+                    {
+                        return max.clone();
+                    }
+                    value
+                }
+            },
+            move |binding, value| {
+                binding.set(value);
+            },
+        )
     }
 }
 

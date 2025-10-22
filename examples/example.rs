@@ -11,17 +11,11 @@ fn main() {
     let mut counter: Binding<f64> = binding(42);
     println!("Counter: {}", counter.get());
 
-    // Works with collections
-    let mut items = binding(vec![1, 2, 3]);
-    println!("Items: {:?}", items.get());
-
     // Update values - set() also accepts Into<T> for ergonomic usage
     text.set_from("updated text"); // No .into() needed!
     counter += 8.0;
-    items.push(4);
 
     println!("\nAfter updates:");
     println!("Text: {}", text.get());
     println!("Counter: {}", counter.get());
-    println!("Items: {:?}", items.get());
 }
