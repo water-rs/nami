@@ -7,9 +7,7 @@
 //! The addition is performed using the standard `Add` trait from Rust's core library,
 //! allowing for flexible addition semantics depending on the types involved.
 
-use core::ops::{
-    Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub,
-};
+use core::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Rem, Shl, Shr, Sub};
 
 use crate::{
     Signal,
@@ -17,61 +15,13 @@ use crate::{
     zip::{Zip, zip},
 };
 
-/// Adds two `Signal` values together.
-///
-/// This function takes two values implementing the `Signal` trait and returns a new
-/// computation that, when executed, will produce the sum of the outputs of the two
-/// input computations.
-///
-/// # Type Parameters
-///
-/// * `A`: The first computation type that implements `Signal`.
-/// * `B`: The second computation type that implements `Signal`.
-///
-/// # Constraints
-///
-/// * `A::Output`: Must implement `Add<B::Output>` to allow addition between the outputs.
-/// * `<A::Output as Add<B::Output>>::Output`: The result type must be `'static`.
-///
-/// # Returns
-///
-/// A new computation that will yield the sum of the outputs from computations `a` and `b`.
-///
-/// # Examples
-///
-/// ```
-/// # use nami::{Signal, utils::add, binding, Binding};
-/// let a: Binding<i32> = binding(5);
-/// let b: Binding<i32> = binding(3);
-/// let sum = add(a, b);
-/// assert_eq!(sum.get(), 8);
-/// ```
-#[allow(clippy::type_complexity)]
-pub fn add<A, B>(
-    a: A,
-    b: B,
-) -> Map<
-    Zip<A, B>,
-    fn((A::Output, B::Output)) -> <A::Output as Add<B::Output>>::Output,
-    <A::Output as Add<B::Output>>::Output,
->
-where
-    A: Signal + 'static,
-    B: Signal + 'static,
-    A::Output: Add<B::Output> + Clone,
-    B::Output: Clone,
-{
-    let zip = zip(a, b);
-    map(zip, |(a, b)| a.add(b))
-}
-
 macro_rules! define_binary_op {
     ($fn_name:ident, $trait:ident, $method:ident) => {
         #[doc = concat!(
-            "Combines two `Signal` sources using the `",
-            stringify!($method),
-            "` operator."
-        )]
+                    "Combines two `Signal` sources using the `",
+                    stringify!($method),
+                    "` operator."
+                )]
         #[allow(clippy::type_complexity)]
         pub fn $fn_name<A, B>(
             a: A,
@@ -93,6 +43,7 @@ macro_rules! define_binary_op {
     };
 }
 
+define_binary_op!(add, Add, add);
 define_binary_op!(sub, Sub, sub);
 define_binary_op!(mul, Mul, mul);
 define_binary_op!(div, Div, div);
