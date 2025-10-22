@@ -80,9 +80,19 @@ impl<T> Context<T> {
         &self.value
     }
 
+    /// Returns a mutable reference to the inner value.
+    pub const fn value_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+
     /// Returns a reference to the metadata.
     pub const fn metadata(&self) -> &Metadata {
         &self.metadata
+    }
+
+    /// Returns a mutable reference to the metadata.
+    pub const fn metadata_mut(&mut self) -> &mut Metadata {
+        &mut self.metadata
     }
 
     /// Maps the inner value to a new value.
@@ -93,6 +103,27 @@ impl<T> Context<T> {
     /// Returns a new context with a reference to the inner value.
     pub fn as_ref(&self) -> Context<&T> {
         Context::new(&self.value, self.metadata.clone())
+    }
+
+    /// Returns a new context with a mutable reference to the inner value.
+    pub fn as_mut(&mut self) -> Context<&mut T> {
+        Context::new(&mut self.value, self.metadata.clone())
+    }
+
+    /// Returns a new context with a reference to the dereferenced inner value.
+    pub fn as_deref(&self) -> Context<&T::Target>
+    where
+        T: core::ops::Deref,
+    {
+        Context::new(&*self.value, self.metadata.clone())
+    }
+
+    /// Returns a new context with a mutable reference to the dereferenced inner value.
+    pub fn as_deref_mut(&mut self) -> Context<&mut T::Target>
+    where
+        T: core::ops::DerefMut,
+    {
+        Context::new(&mut *self.value, self.metadata.clone())
     }
 }
 
