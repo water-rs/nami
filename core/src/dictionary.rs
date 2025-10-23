@@ -95,15 +95,12 @@ impl<K: Ord + Clone + 'static, V: Clone + 'static> Dictionary for Map<K, V> {
 #[cfg(feature = "std")]
 mod std_impls {
     extern crate std;
-    use super::*;
+    use super::{Context, Dictionary};
     use std::collections::HashMap;
     use std::hash::{BuildHasher, Hash};
 
-    impl<
-        K: Hash + Eq + Clone + 'static,
-        V: Clone + 'static,
-        S: BuildHasher + 'static,
-    > Dictionary for HashMap<K, V, S>
+    impl<K: Hash + Eq + Clone + 'static, V: Clone + 'static, S: BuildHasher + 'static> Dictionary
+        for HashMap<K, V, S>
     {
         type Key = K;
         type Value = V;

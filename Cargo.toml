@@ -16,7 +16,7 @@ readme = "README.md"
 [workspace.dependencies]
 nami = { path = ".", version = "0.8.0" }
 nami-derive = { path = "derive", version = "0.2.1" }
-nami-core = { path = "core", version = "0.2.0" }
+nami-core = { path = "core", version = "0.2.0", default-features = false }
 
 [package]
 name = "nami"
@@ -51,7 +51,7 @@ nami-core.workspace = true
 num-traits = "0.2.19"
 
 [features]
-std = ["executor-core/std"]
+std = ["executor-core/std","nami-core/std"]
 default = ["derive", "timer"]
 timer = ["std","dep:async-io","dep:gloo-timers"]
 derive = ["dep:nami-derive"]
