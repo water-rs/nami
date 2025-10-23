@@ -93,25 +93,32 @@ impl<K: Ord + Clone + 'static, V: Clone + 'static> Dictionary for Map<K, V> {
 }
 
 #[cfg(feature = "std")]
-impl<
-    K: core::hash::Hash + Eq + Clone + 'static,
-    V: Clone + 'static,
-    S: core::hash::BuildHasher + 'static,
-> Dictionary for std::collections::HashMap<K, V, S>
-{
-    type Key = K;
-    type Value = V;
-    type Guard = ();
+mod std_impls {
+    extern crate std;
+    use super::*;
+    use std::collections::HashMap;
+    use std::hash::{BuildHasher, Hash};
 
-    fn get(&self, key: &Self::Key) -> Option<Self::Value> {
-        Self::get(self, key).cloned()
-    }
+    impl<
+        K: Hash + Eq + Clone + 'static,
+        V: Clone + 'static,
+        S: BuildHasher + 'static,
+    > Dictionary for HashMap<K, V, S>
+    {
+        type Key = K;
+        type Value = V;
+        type Guard = ();
 
-    fn watch(
-        &self,
-        _key: &Self::Key,
-        _watcher: impl Fn(Context<Option<Self::Value>>) + 'static,
-    ) -> Self::Guard {
-        // HashMap is static - no reactivity, so watch is a no-op
+        fn get(&self, key: &Self::Key) -> Option<Self::Value> {
+            self.get(key).cloned()
+        }
+
+        fn watch(
+            &self,
+            _key: &Self::Key,
+            _watcher: impl Fn(Context<Option<Self::Value>>) + 'static,
+        ) -> Self::Guard {
+            // HashMap is static - no reactivity, so watch is a no-op
+        }
     }
 }

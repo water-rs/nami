@@ -36,6 +36,9 @@ readme.workspace = true
 maintenance = { status = "actively-developed" }
 license = { file = "LICENSE" }
 
+[dev-dependencies]
+nami-derive = { workspace = true }
+
 [dependencies]
 paste = "1.0"
 log = "0.4.28"
@@ -45,6 +48,7 @@ pin-project-lite = "0.2.16"
 executor-core = { version = "0.6.0" }
 async-channel = "2.5.0"
 nami-core.workspace = true
+num-traits = "0.2.19"
 
 [features]
 std = ["executor-core/std"]

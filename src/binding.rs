@@ -19,6 +19,7 @@ mod ops;
 use alloc::{boxed::Box, rc::Rc};
 use async_channel::{Sender, unbounded};
 use executor_core::{LocalExecutor, Task};
+use num_traits::Signed;
 
 use crate::{
     Computed, Signal,
@@ -521,6 +522,38 @@ impl<T: PartialOrd + 'static> Binding<T> {
             },
             move |binding, value| {
                 binding.set(value);
+            },
+        )
+    }
+}
+
+impl<T: Signed> Binding<T> {
+    /// Creates a binding that tracks the sign of this binding's value.
+    ///
+    /// The resulting binding is `true` for positive values and `false` for negative values.
+    /// Setting `true` makes the value positive, setting `false` makes it negative.
+    ///
+    /// > Tip: Zero is considered positive.
+    ///
+    /// # Example
+    /// ```
+    /// use nami::Binding;
+    /// let number = Binding::int(-10i32);
+    /// let sign = number.sign();
+    /// assert_eq!(sign.get(), false);
+    /// ```
+    #[must_use]
+    pub fn sign(&self) -> Binding<bool> {
+        Self::mapping(
+            self,
+            move |value| !value.is_negative(),
+            move |binding, value| {
+                let current = binding.get();
+                if value {
+                    binding.set(current.abs());
+                } else {
+                    binding.set(-current.abs());
+                }
             },
         )
     }
@@ -1052,5 +1085,44 @@ mod tests {
 
         assert_eq!(binding.get(), 1);
         assert_eq!(*notifications.borrow(), 1);
+    }
+
+    #[test]
+    fn test_binding_sign() {
+        let mut number = binding(10i32);
+        let mut sign = number.sign();
+
+        // Test getting the sign
+        assert!(sign.get(), "Positive number should have positive sign");
+        number.set(-10);
+        assert!(!sign.get(), "Negative number should have negative sign");
+        number.set(0);
+        assert!(sign.get(), "Zero should have positive sign");
+
+        // Test setting the sign
+        number.set(20);
+        assert_eq!(number.get(), 20);
+        sign.set(false); // Set to negative
+        assert_eq!(
+            number.get(),
+            -20,
+            "Setting sign to false should make number negative"
+        );
+
+        number.set(-30);
+        assert_eq!(number.get(), -30);
+        sign.set(true); // Set to positive
+        assert_eq!(
+            number.get(),
+            30,
+            "Setting sign to true should make number positive"
+        );
+
+        // Test reactivity
+        let is_positive = number.sign();
+        number.set(-5);
+        assert!(!is_positive.get());
+        number.set(5);
+        assert!(is_positive.get());
     }
 }
