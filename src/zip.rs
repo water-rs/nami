@@ -28,7 +28,13 @@ pub struct Zip<A, B> {
     b: B,
 }
 
-impl<A, B> Zip<A, B> {
+impl<A, B> Zip<A, B>
+where
+    A: Signal,
+    B: Signal,
+    A::Output: Clone,
+    B::Output: Clone,
+{
     /// Creates a new `Zip` instance by combining two computations.
     ///
     /// # Parameters
@@ -76,6 +82,7 @@ impl<C, F, T1, T2, T3, Output> FlattenMap<F, (T1, T2, T3), Output> for C
 where
     C: Signal<Output = ((T1, T2), T3)> + 'static,
     F: 'static + Clone + Fn(T1, T2, T3) -> Output,
+    Output: 'static,
 {
     fn flatten_map(self, f: F) -> Map<C, impl Fn(((T1, T2), T3)) -> Output, Output> {
         map(self, move |((t1, t2), t3)| f(t1, t2, t3))
@@ -96,6 +103,8 @@ pub const fn zip<A, B>(a: A, b: B) -> Zip<A, B>
 where
     A: Signal,
     B: Signal,
+    A::Output: Clone,
+    B::Output: Clone,
 {
     Zip::new(a, b)
 }

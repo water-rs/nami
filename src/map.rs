@@ -37,7 +37,12 @@ pub struct Map<C, F, Output> {
     _marker: PhantomData<Output>,
 }
 
-impl<C: Signal + 'static, F: 'static + Clone, Output> Map<C, F, Output> {
+impl<C, F, Output> Map<C, F, Output>
+where
+    C: Signal,
+    F: 'static + Clone + Fn(C::Output) -> Output,
+    Output: 'static, // Prevents confusing `does implement Signal` errors, but fast fail.
+{
     /// Creates a new `Map` that transforms values from `source` using function `f`.
     ///
     /// # Parameters
@@ -83,6 +88,7 @@ impl<C: Signal + 'static, F: 'static + Clone, Output> Map<C, F, Output> {
 pub const fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
 where
     C: Signal + 'static,
+    Output: 'static,
     F: 'static + Clone + Fn(C::Output) -> Output,
 {
     Map::new(source, f)

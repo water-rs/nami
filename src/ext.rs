@@ -14,13 +14,19 @@ pub trait SignalExt: Signal + Sized {
     fn map<F, Output>(self, f: F) -> Map<Self, F, Output>
     where
         F: 'static + Clone + Fn(Self::Output) -> Output,
+        Output: 'static,
         Self: 'static,
     {
         Map::new(self, f)
     }
 
     /// Combines this signal with another signal into a tuple.
-    fn zip<B: Signal>(self, b: B) -> Zip<Self, B> {
+    fn zip<B>(self, b: B) -> Zip<Self, B>
+    where
+        B: Signal,
+        Self::Output: Clone,
+        B::Output: Clone,
+    {
         Zip::new(self, b)
     }
 
