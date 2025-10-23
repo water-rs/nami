@@ -1,6 +1,8 @@
-use crate::{
-    Computed, Signal, cache::Cached, debounce::Debounce, map::Map, signal::WithMetadata, zip::Zip,
-};
+use crate::{Computed, Signal, cache::Cached, map::Map, signal::WithMetadata, zip::Zip};
+
+#[cfg(feature = "timer")]
+use crate::debounce::Debounce;
+#[cfg(feature = "timer")]
 use core::time::Duration;
 
 /// Extension trait providing convenient methods for all Signal types.
