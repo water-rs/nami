@@ -149,14 +149,8 @@ where
     type Output = T;
     type Guard = ();
     fn get(&self) -> Self::Output {
-        self.value.borrow().as_ref().map_or_else(
-            || {
-                let value = (self.f)();
-                *self.value.borrow_mut() = Some(value.clone());
-                value
-            },
-            Clone::clone,
-        )
+        let mut this = self.value.borrow_mut();
+        this.get_or_insert_with(|| (self.f)()).clone()
     }
     fn watch(&self, _watcher: impl Fn(Context<Self::Output>)) {}
 }

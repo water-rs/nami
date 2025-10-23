@@ -227,7 +227,8 @@ impl<T: 'static> Binding<T> {
     ///
     /// # Example
     /// ```
-    /// let mut text = nami::binding("hello".to_string());
+    /// use nami::{binding, Binding};
+    /// let mut text: Binding<String> = binding("hello");
     /// let taken = text.take();
     /// assert_eq!(taken, "hello");
     /// assert_eq!(text.get(), String::new());
@@ -893,7 +894,7 @@ impl<T: 'static> Signal for Binding<T> {
 
     /// Registers a watcher to be notified when the binding's value changes.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
-        Box::new(self.0.add_watcher(Box::new(watcher)))
+        Box::new(self.0.add_watcher(Rc::new(watcher)))
     }
 }
 

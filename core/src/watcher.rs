@@ -3,7 +3,7 @@
 //! This module provides the infrastructure for managing reactive value watchers,
 //! including metadata handling and notification systems.
 
-use alloc::{boxed::Box, collections::BTreeMap, rc::Rc};
+use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, vec::Vec};
 use core::{
     any::{Any, TypeId, type_name},
     cell::RefCell,
@@ -48,8 +48,8 @@ impl MetadataInner {
     }
 }
 
-/// Type alias for a boxed watcher function.
-pub type BoxWatcher<T> = Box<dyn Fn(Context<T>) + 'static>;
+/// Type alias for a reference-counted watcher function.
+pub type Watcher<T> = Rc<dyn Fn(Context<T>) + 'static>;
 
 /// Context passed to watchers containing the value and associated metadata.
 #[derive(Debug, Clone)]
@@ -290,7 +290,18 @@ impl<T: 'static> WatcherManager<T> {
     where
         T: Clone,
     {
-        self.inner.borrow().notify(ctx);
+        let watchers = {
+            let inner = self.inner.borrow();
+            inner.watchers_snapshot()
+        };
+
+        if watchers.is_empty() {
+            return;
+        }
+
+        for watcher in watchers {
+            watcher(ctx.clone());
+        }
     }
 
     /// Cancels a previously registered watcher by its identifier.
@@ -320,7 +331,7 @@ impl<T: 'static> Drop for WatcherManagerGuard<T> {
 /// Maintains the collection of watchers and handles identifier assignment.
 struct WatcherManagerInner<T> {
     id: WatcherId,
-    map: BTreeMap<WatcherId, BoxWatcher<T>>,
+    map: BTreeMap<WatcherId, Watcher<T>>,
 }
 
 impl<T> Debug for WatcherManagerInner<T> {
@@ -357,18 +368,13 @@ impl<T: 'static> WatcherManagerInner<T> {
     /// Registers a watcher and returns its unique identifier.
     pub fn register(&mut self, watcher: impl Fn(Context<T>) + 'static) -> WatcherId {
         let id = self.assign();
-        self.map.insert(id, Box::new(watcher));
+        self.map.insert(id, Rc::new(watcher));
         id
     }
 
-    /// Notifies all registered watchers with a preconstructed context.
-    pub fn notify(&self, ctx: &Context<T>)
-    where
-        T: Clone,
-    {
-        for watcher in self.map.values() {
-            watcher(ctx.clone());
-        }
+    /// Creates a snapshot of the current watchers for notification.
+    fn watchers_snapshot(&self) -> Vec<Watcher<T>> {
+        self.map.values().cloned().collect()
     }
 
     /// Cancels a watcher registration by its identifier.

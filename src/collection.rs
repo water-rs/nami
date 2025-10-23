@@ -245,11 +245,11 @@ impl<T: Clone + 'static> Collection for List<T> {
             // Calculate start and end indices
             let start = match start_bound {
                 Bound::Included(n) => n,
-                Bound::Excluded(n) => n + 1,
+                Bound::Excluded(n) => n.saturating_add(1),
                 Bound::Unbounded => 0,
             };
             let end = match end_bound {
-                Bound::Included(n) => (n + 1).min(len),
+                Bound::Included(n) => n.saturating_add(1).min(len),
                 Bound::Excluded(n) => n.min(len),
                 Bound::Unbounded => len,
             };
@@ -269,11 +269,11 @@ impl<T: Clone + 'static> Collection for List<T> {
             // Calculate start and end indices
             let start = match start_bound {
                 Bound::Included(n) => n,
-                Bound::Excluded(n) => n + 1,
+                Bound::Excluded(n) => n.saturating_add(1),
                 Bound::Unbounded => 0,
             };
             let end = match end_bound {
-                Bound::Included(n) => (n + 1).min(len),
+                Bound::Included(n) => n.saturating_add(1).min(len),
                 Bound::Excluded(n) => n.min(len),
                 Bound::Unbounded => len,
             };
