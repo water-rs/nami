@@ -528,18 +528,6 @@ mod tests {
     }
 
     #[test]
-    fn test_any_collection_clone() {
-        let list = List::from(vec![1, 2, 3]);
-        let any_collection1 = AnyCollection::new(list);
-        let any_collection2 = any_collection1.clone();
-
-        assert_eq!(any_collection1.len(), any_collection2.len());
-        for i in 0..3 {
-            assert_eq!(any_collection1.get(i), any_collection2.get(i));
-        }
-    }
-
-    #[test]
     fn test_any_collection_watcher() {
         let list = List::from(vec![1, 2, 3, 4, 5]);
         let any_collection = AnyCollection::new(list);

@@ -2,7 +2,7 @@
 ///
 /// This trait provides a common interface for collections that support
 /// reactive programming patterns through watchers.
-pub trait Collection: Clone + 'static {
+pub trait Collection: 'static {
     /// The type of items stored in the collection.
     type Item: 'static;
     /// The type of guard returned when registering a watcher.
@@ -166,13 +166,6 @@ impl<T> core::fmt::Debug for AnyCollection<T> {
         f.debug_struct("AnyCollection").finish()
     }
 }
-impl<T> Clone for AnyCollection<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
 
 /// A boxed collection watcher.
 pub type BoxCollectionWatcher<T> = Box<dyn for<'a> Fn(Context<&'a [T]>) + 'static>;
@@ -188,7 +181,6 @@ trait AnyCollectionImpl {
         range: (Bound<usize>, Bound<usize>),
         watcher: BoxCollectionWatcher<Self::Output>,
     ) -> BoxWatcherGuard;
-    fn clone(&self) -> Box<dyn AnyCollectionImpl<Output = Self::Output>>;
 }
 
 impl<T> AnyCollectionImpl for T
@@ -214,10 +206,6 @@ where
         watcher: Box<dyn for<'a> Fn(Context<&'a [Self::Output]>) + 'static>,
     ) -> BoxWatcherGuard {
         Box::new(<T as Collection>::watch(self, range, watcher))
-    }
-
-    fn clone(&self) -> Box<dyn AnyCollectionImpl<Output = Self::Output>> {
-        Box::new(self.clone())
     }
 }
 
