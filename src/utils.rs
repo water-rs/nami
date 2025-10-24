@@ -18,10 +18,10 @@ use crate::{
 macro_rules! define_binary_op {
     ($fn_name:ident, $trait:ident, $method:ident) => {
         #[doc = concat!(
-                            "Combines two `Signal` sources using the `",
-                            stringify!($method),
-                            "` operator."
-                        )]
+                                            "Combines two `Signal` sources using the `",
+                                            stringify!($method),
+                                            "` operator."
+                                        )]
         #[allow(clippy::type_complexity)]
         pub fn $fn_name<A, B>(
             a: A,
