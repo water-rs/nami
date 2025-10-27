@@ -905,6 +905,15 @@ pub struct Container<T: 'static> {
     watchers: WatcherManager<T>,
 }
 
+impl<T> From<T> for Container<T>
+where
+    T: 'static + Clone,
+{
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
 impl<T: 'static + Clone + Default> Default for Container<T> {
     fn default() -> Self {
         Self::new(T::default())
