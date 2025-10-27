@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn signal_stream_yields_only_on_updates() {
-        let mut binding: Binding<i32> = binding(1);
+        let binding: Binding<i32> = binding(1);
         let stream_binding = binding.clone();
         let mut stream = Box::pin(SignalStream::new(stream_binding));
 

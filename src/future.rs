@@ -43,7 +43,7 @@ where
     {
         let container = Container::default();
         {
-            let mut container = container.clone();
+            let container = container.clone();
             executor
                 .spawn_local(async move {
                     let value = fut.await;

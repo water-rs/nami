@@ -38,7 +38,7 @@ pub trait CustomBinding: Signal {
     /// Sets a new value for this binding.
     ///
     /// This will typically trigger notifications to any watchers.
-    fn set(&mut self, value: Self::Output);
+    fn set(&self, value: Self::Output);
 }
 
 /// Macro to implement the Signal trait for constant types.

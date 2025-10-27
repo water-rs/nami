@@ -100,7 +100,7 @@ impl<T: 'static> List<T> {
     }
 
     /// Adds an element to the end of the list.
-    pub fn push(&mut self, value: T)
+    pub fn push(&self, value: T)
     where
         T: Clone,
     {
@@ -114,7 +114,7 @@ impl<T: 'static> List<T> {
     }
 
     /// Sorts the list in place.
-    pub fn sort(&mut self)
+    pub fn sort(&self)
     where
         T: Ord + Clone,
     {
@@ -129,7 +129,7 @@ impl<T: 'static> List<T> {
 
     /// Removes and returns the last element of the list.
     #[must_use]
-    pub fn pop(&mut self) -> Option<T>
+    pub fn pop(&self) -> Option<T>
     where
         T: Clone,
     {
@@ -146,7 +146,7 @@ impl<T: 'static> List<T> {
     }
 
     /// Inserts an element at the specified index.
-    pub fn insert(&mut self, index: usize, value: T)
+    pub fn insert(&self, index: usize, value: T)
     where
         T: Clone,
     {
@@ -161,7 +161,7 @@ impl<T: 'static> List<T> {
 
     /// Removes and returns the element at the specified index.
     #[must_use]
-    pub fn remove(&mut self, index: usize) -> T
+    pub fn remove(&self, index: usize) -> T
     where
         T: Clone,
     {
@@ -176,7 +176,7 @@ impl<T: 'static> List<T> {
     }
 
     /// Clears all elements from the list.
-    pub fn clear(&mut self)
+    pub fn clear(&self)
     where
         T: Clone,
     {
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_list_push_and_pop() {
-        let mut list = List::new();
+        let list = List::new();
 
         list.push(1);
         list.push(2);
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_list_insert_and_remove() {
-        let mut list = List::from(vec![1, 3, 5]);
+        let list = List::from(vec![1, 3, 5]);
 
         list.insert(1, 2);
         list.insert(3, 4);
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_list_clear() {
-        let mut list = List::from(vec![1, 2, 3, 4, 5]);
+        let list = List::from(vec![1, 2, 3, 4, 5]);
         assert_eq!(Collection::len(&list), 5);
 
         list.clear();
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_list_clone() {
-        let mut list1 = List::from(vec![1, 2, 3]);
+        let list1 = List::from(vec![1, 2, 3]);
         let list2 = Clone::clone(&list1);
 
         assert_eq!(Collection::len(&list1), Collection::len(&list2));
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_list_watcher_notifications() {
-        let mut list = List::new();
+        let list = List::new();
         let notification_count = Rc::new(RefCell::new(0));
 
         let count = notification_count.clone();
@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn test_list_watcher_range() {
-        let mut list = List::from(vec![1, 2, 3, 4, 5]);
+        let list = List::from(vec![1, 2, 3, 4, 5]);
         let notification_count = Rc::new(RefCell::new(0));
 
         let count = notification_count.clone();
@@ -634,7 +634,7 @@ mod tests {
 
     #[test]
     fn test_watcher_guard_cleanup() {
-        let mut list = List::new();
+        let list = List::new();
         let notification_count = Rc::new(RefCell::new(0));
 
         {

@@ -54,8 +54,8 @@ fn test_s_macro_named_args() {
 
 #[test]
 fn test_s_macro_reactivity_positional() {
-    let mut name = binding("Alice".to_string());
-    let s = s!("Hello, {}!", name.clone());
+    let name = binding("Alice".to_string());
+    let s = s!("Hello, {name}!");
 
     assert_eq!(s.get(), "Hello, Alice!");
 
@@ -65,7 +65,7 @@ fn test_s_macro_reactivity_positional() {
 
 #[test]
 fn test_s_macro_reactivity_named() {
-    let mut name = binding("Alice".to_string());
+    let name = binding("Alice".to_string());
     let s = s!("Hello, {name}!");
 
     assert_eq!(s.get(), "Hello, Alice!");

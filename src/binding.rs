@@ -14,8 +14,6 @@ use core::{
     },
 };
 
-mod ops;
-
 use alloc::{boxed::Box, rc::Rc};
 use async_channel::{Sender, unbounded};
 use executor_core::{LocalExecutor, Task};
@@ -46,13 +44,13 @@ pub struct Binding<T: 'static>(Box<dyn BindingImpl<Output = T>>);
 /// the operations that can be performed on it.
 trait BindingImpl: crate::signal::ComputedImpl {
     /// Sets a new value
-    fn set(&mut self, value: Self::Output);
+    fn set(&self, value: Self::Output);
 
     fn cloned_binding(&self) -> Binding<Self::Output>;
 }
 
 impl<T: CustomBinding + Clone + 'static> BindingImpl for T {
-    fn set(&mut self, value: Self::Output) {
+    fn set(&self, value: Self::Output) {
         <T as CustomBinding>::set(self, value);
     }
 
@@ -158,13 +156,13 @@ impl_binary_trait!(Shr, shr, util_shr);
 #[must_use]
 #[derive(Debug)]
 pub struct BindingMutGuard<'a, T: 'static> {
-    binding: &'a mut Binding<T>,
+    binding: &'a Binding<T>,
     value: Option<T>,
 }
 
 impl<'a, T> BindingMutGuard<'a, T> {
     /// Creates a new guard for the given binding.
-    pub fn new(binding: &'a mut Binding<T>) -> Self {
+    pub fn new(binding: &'a Binding<T>) -> Self {
         Self {
             value: Some(binding.get()),
             binding,
@@ -213,12 +211,12 @@ impl<T: 'static> Binding<T> {
     /// When the guard is dropped, the binding is updated with the modified value.
     ///
     /// Tip: For better performance when modifying container bindings, consider using the `with_mut` method instead.
-    pub fn get_mut(&mut self) -> BindingMutGuard<'_, T> {
+    pub fn get_mut(&self) -> BindingMutGuard<'_, T> {
         BindingMutGuard::new(self)
     }
 
     /// Sets the binding to a new value
-    pub fn set(&mut self, value: T) {
+    pub fn set(&self, value: T) {
         self.0.set(value);
     }
 
@@ -234,7 +232,8 @@ impl<T: 'static> Binding<T> {
     /// assert_eq!(taken, "hello");
     /// assert_eq!(text.get(), String::new());
     /// ```
-    pub fn take(&mut self) -> T
+    #[must_use]
+    pub fn take(&self) -> T
     where
         T: Default + Clone,
     {
@@ -261,7 +260,7 @@ impl<T: 'static> Binding<T> {
     /// count.set(42);
     /// assert_eq!(count.get(), 42i64);
     /// ```
-    pub fn set_from(&mut self, value: impl Into<T>) {
+    pub fn set_from(&self, value: impl Into<T>) {
         self.0.set(value.into());
     }
 
@@ -274,7 +273,7 @@ impl<T: 'static> Binding<T> {
     /// This is more efficient than `get_mut()` for container bindings as it avoids
     /// unnecessary cloning. The function receives a mutable reference to the value
     /// and any changes will notify watchers when the function completes.
-    pub fn with_mut<R>(&mut self, f: impl FnOnce(&mut T) -> R) -> R
+    pub fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R
     where
         T: Clone,
     {
@@ -308,7 +307,7 @@ impl<T: 'static> Binding<T> {
     ) -> Binding<Output>
     where
         Getter: 'static + Clone + Fn(T) -> Output,
-        Setter: 'static + Clone + FnMut(&mut Self, Output),
+        Setter: 'static + Clone + Fn(&Self, Output),
     {
         Binding::custom(Mapping {
             binding: source.clone(),
@@ -584,7 +583,7 @@ impl<T: Clone> Binding<T> {
     /// text.append(" World");
     /// assert_eq!(text.get(), "Hello World");
     /// ```
-    pub fn append<Ele>(&mut self, ele: Ele)
+    pub fn append<Ele>(&self, ele: Ele)
     where
         T: Extend<Ele>,
     {
@@ -593,6 +592,30 @@ impl<T: Clone> Binding<T> {
         });
     }
 }
+
+macro_rules! ops {
+    ($trait:ident, $method:ident, $op:tt) => {
+        impl<T: $trait<Output = T> + Clone + 'static> Binding<T> {
+            #[doc = concat!("Applies the `", stringify!($op), "` operation to the binding's current value and the provided value.")]
+            pub fn $method(&self, other: T) {
+                self.with_mut(|value| {
+                    *value = value.clone() $op other;
+                });
+            }
+        }
+    };
+}
+
+ops!(Add, add_assign, +);
+ops!(Sub, sub_assign, -);
+ops!(Mul, mul_assign, *);
+ops!(Div, div_assign, /);
+ops!(Rem, rem_assign, %);
+ops!(BitAnd, bitand_assign, &);
+ops!(BitOr, bitor_assign, |);
+ops!(BitXor, bitxor_assign, ^);
+ops!(Shl, shl_assign, <<);
+ops!(Shr, shr_assign, >>);
 
 impl<T> Binding<Option<T>> {
     /// Creates a binding that unwraps the option or uses a default value from a closure.
@@ -707,7 +730,7 @@ impl Binding<bool> {
     /// flag.toggle();
     /// assert_eq!(flag.get(), true);
     /// ```
-    pub fn toggle(&mut self) {
+    pub fn toggle(&self) {
         self.with_mut(|v| {
             *v = !*v;
         });
@@ -906,7 +929,7 @@ impl<T: 'static + Clone> Signal for Container<T> {
 
 impl<T: 'static + Clone> CustomBinding for Container<T> {
     /// Sets a new value and notifies watchers.
-    fn set(&mut self, value: T) {
+    fn set(&self, value: T) {
         self.value.replace(value.clone());
         if self.watchers.is_empty() {
             return;
@@ -990,11 +1013,11 @@ where
     Input: 'static,
     Output: 'static,
     Getter: 'static + Clone + Fn(Input) -> Output,
-    Setter: 'static + Clone + FnMut(&mut Binding<Input>, Output),
+    Setter: 'static + Clone + Fn(&Binding<Input>, Output),
 {
     /// Sets a new value by applying the setter to convert from output to input.
-    fn set(&mut self, value: Output) {
-        (self.setter)(&mut self.binding, value);
+    fn set(&self, value: Output) {
+        (self.setter)(&self.binding, value);
     }
 }
 
@@ -1032,21 +1055,21 @@ mod tests {
 
     #[test]
     fn test_binding_operations() {
-        let mut text: Binding<String> = binding("initial");
+        let text: Binding<String> = binding("initial");
         text.set_from("updated"); // Now works directly with &str!
         assert_eq!(text.get(), "updated");
 
-        let mut counter: Binding<i32> = binding(0);
-        counter += 5;
+        let counter: Binding<i32> = binding(0);
+        counter.add_assign(5);
         assert_eq!(counter.get(), 5);
-        counter -= 2;
+        counter.sub_assign(2);
         assert_eq!(counter.get(), 3);
     }
 
     #[test]
     fn test_set_with_into_conversion() {
         // Test various Into conversions with set()
-        let mut text: Binding<String> = binding(String::new());
+        let text: Binding<String> = binding(String::new());
 
         // &str -> String
         text.set_from("hello");
@@ -1057,7 +1080,7 @@ mod tests {
         assert_eq!(text.get(), "world");
 
         // Cross-type conversions
-        let mut number: Binding<i64> = binding(0i64);
+        let number: Binding<i64> = binding(0i64);
         number.set(42); // i32 -> i64
         assert_eq!(number.get(), 42i64);
         number.set(100); // Direct i64
@@ -1069,7 +1092,7 @@ mod tests {
         use alloc::rc::Rc;
         use core::cell::RefCell;
 
-        let mut binding: Binding<i32> = binding(0);
+        let binding: Binding<i32> = binding(0);
         let watcher_binding = binding.clone();
         let reader_binding = binding.clone();
 
@@ -1089,8 +1112,8 @@ mod tests {
 
     #[test]
     fn test_binding_sign() {
-        let mut number = binding(10i32);
-        let mut sign = number.sign();
+        let number = binding(10i32);
+        let sign = number.sign();
 
         // Test getting the sign
         assert!(sign.get(), "Positive number should have positive sign");
