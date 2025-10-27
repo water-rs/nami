@@ -210,6 +210,15 @@ impl<T: 'static> Binding<T> {
     ///
     /// When the guard is dropped, the binding is updated with the modified value.
     ///
+    /// > Note: In rust, `let _ = binding.get_mut();` DO NOT immediately drop the guard. Since it just binds to a variable named `_`, the guard will live until the end of the current scope. Please use `*guard` to modify the value in one line.
+    ///
+    /// # Example
+    /// ```
+    /// use nami::Binding;
+    /// let n = Binding::int(10);
+    /// *n.get_mut() += 5; // do not bind the guard to a let pattern...even it is `_`
+    /// ```
+    ///
     /// Tip: For better performance when modifying container bindings, consider using the `with_mut` method instead.
     pub fn get_mut(&self) -> BindingMutGuard<'_, T> {
         BindingMutGuard::new(self)
