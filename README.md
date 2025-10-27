@@ -79,13 +79,6 @@ let mut bignum: Binding<i64> = binding(0);
 bignum.set(42);
 ```
 
-Common helpers:
-
-- `Binding<bool>`: `toggle()`, `then(...)`, `select(a,b)`
-- `Binding<i32>`: `increment(n)`, `decrement(n)`
-- `Binding<String>`: `append(...)`, `clear()`
-- `Binding<Vec<T>>`: `push(...)`, `insert(...)`, `pop()`, `clear()`
-
 ## Watchers
 
 React to changes via `watch`. Keep the returned guard alive to stay subscribed.
