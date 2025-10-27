@@ -190,6 +190,51 @@ impl<T: 'static> List<T> {
             self.watchers.notify(&context);
         }
     }
+    /// Takes a snapshot of the current list contents.
+    #[must_use]
+    pub fn snapshot(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        self.vec.borrow().clone()
+    }
+
+    /// Returns an iterator over the list's items.
+    ///
+    /// Warning: This will clone the entire list, ensuring that modifications during iteration do not affect the iterator.
+    #[must_use]
+    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter
+    where
+        T: Clone,
+    {
+        self.snapshot().into_iter()
+    }
+}
+
+/// Iterator implementation for List<T>
+/// Tip: This method will attempt to avoid cloning the internal Vec if possible. However, if there are multiple references to the List, it will clone the Vec to ensure safety.
+impl<T: Clone + 'static> IntoIterator for List<T> {
+    type Item = T;
+    type IntoIter = alloc::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        // if we can unwrap the Rc, we can avoid cloning
+        match Rc::try_unwrap(self.vec) {
+            Ok(vec) => vec.into_inner().into_iter(),
+            Err(rc) => rc.borrow().clone().into_iter(),
+        }
+    }
+}
+
+/// Iterator implementation for references to List<T>
+/// Warning: This will clone the entire list, ensuring that modifications during iteration do not affect the iterator.
+impl<T: Clone + 'static> IntoIterator for &List<T> {
+    type Item = T;
+    type IntoIter = alloc::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.snapshot().into_iter()
+    }
 }
 
 impl<T> Clone for List<T> {
@@ -242,23 +287,28 @@ impl<T: Clone + 'static> Collection for List<T> {
             let full_slice = borrowed.as_slice();
             let len = full_slice.len();
 
-            // Calculate start and end indices
-            let start = match start_bound {
+            let mut start = match start_bound {
                 Bound::Included(n) => n,
                 Bound::Excluded(n) => n.saturating_add(1),
                 Bound::Unbounded => 0,
             };
-            let end = match end_bound {
-                Bound::Included(n) => n.saturating_add(1).min(len),
-                Bound::Excluded(n) => n.min(len),
+            let mut end = match end_bound {
+                Bound::Included(n) => n.saturating_add(1),
+                Bound::Excluded(n) => n,
                 Bound::Unbounded => len,
             };
 
-            // Only notify if the range is valid and non-empty
-            if start < len && start < end {
-                let range_slice = &full_slice[start..end];
-                watcher(Context::from(range_slice));
+            start = start.min(len);
+            end = end.min(len);
+            if start > end {
+                start = end;
             }
+
+            let slice_data: Vec<T> = full_slice[start..end].to_vec();
+            drop(borrowed);
+
+            let slice_ref = slice_data.as_slice();
+            watcher(Context::from(slice_ref));
         }
 
         self.watchers.register_as_guard(move |ctx| {
@@ -266,23 +316,28 @@ impl<T: Clone + 'static> Collection for List<T> {
             let full_slice = borrowed.as_slice();
             let len = full_slice.len();
 
-            // Calculate start and end indices
-            let start = match start_bound {
+            let mut start = match start_bound {
                 Bound::Included(n) => n,
                 Bound::Excluded(n) => n.saturating_add(1),
                 Bound::Unbounded => 0,
             };
-            let end = match end_bound {
-                Bound::Included(n) => n.saturating_add(1).min(len),
-                Bound::Excluded(n) => n.min(len),
+            let mut end = match end_bound {
+                Bound::Included(n) => n.saturating_add(1),
+                Bound::Excluded(n) => n,
                 Bound::Unbounded => len,
             };
 
-            // Only notify if the range is valid and non-empty
-            if start < len && start < end {
-                let range_slice = &full_slice[start..end];
-                watcher(ctx.map(|_| range_slice));
+            start = start.min(len);
+            end = end.min(len);
+            if start > end {
+                start = end;
             }
+
+            let slice_data: Vec<T> = full_slice[start..end].to_vec();
+            drop(borrowed);
+
+            let slice_ref = slice_data.as_slice();
+            watcher(ctx.map(|_| slice_ref));
         })
     }
 }
@@ -297,7 +352,7 @@ impl<T: 'static> FromIterator<T> for List<T> {
 mod tests {
     use super::*;
     use alloc::{rc::Rc, vec};
-    use core::cell::RefCell;
+    use core::cell::{Cell, RefCell};
 
     #[test]
     fn test_collection_trait_basic_operations() {
@@ -416,6 +471,13 @@ mod tests {
             *count.borrow_mut() += 1;
         });
 
+        // Initial snapshot should fire once with empty data.
+        assert_eq!(*notification_count.borrow(), 1);
+        {
+            let mut count_mut = notification_count.borrow_mut();
+            *count_mut = 0;
+        }
+
         // Push operations should trigger notifications
         list.push(1);
         assert_eq!(*notification_count.borrow(), 1);
@@ -452,13 +514,13 @@ mod tests {
         assert_eq!(Collection::get(&vec, 10), None);
 
         // Vec is static - watch should be a no-op and not call the watcher
-        let called = Rc::new(RefCell::new(false));
+        let called = Rc::new(Cell::new(false));
         let c = called.clone();
         Collection::watch(&vec, 1..3, move |_ctx| {
-            *c.borrow_mut() = true;
+            c.set(true);
         });
 
-        assert!(!*called.borrow()); // Watcher should not be called for static Vec
+        assert!(!called.get()); // Watcher should not be called for static Vec
     }
 
     #[test]
@@ -471,13 +533,13 @@ mod tests {
         assert_eq!(Collection::get(&arr, 10), None);
 
         // Arrays are static - watch should be a no-op and not call the watcher
-        let called = Rc::new(RefCell::new(false));
+        let called = Rc::new(Cell::new(false));
         let c = called.clone();
         Collection::watch(&arr, 0..2, move |_ctx| {
-            *c.borrow_mut() = true;
+            c.set(true);
         });
 
-        assert!(!*called.borrow()); // Watcher should not be called for static array
+        assert!(!called.get()); // Watcher should not be called for static array
     }
 
     #[test]
@@ -489,13 +551,13 @@ mod tests {
         assert_eq!(Collection::get(&arr, 0), None);
 
         // Empty arrays are static - watch should be a no-op
-        let called = Rc::new(RefCell::new(false));
+        let called = Rc::new(Cell::new(false));
         let c = called.clone();
         Collection::watch(&arr, .., move |_ctx| {
-            *c.borrow_mut() = true;
+            c.set(true);
         });
 
-        assert!(!*called.borrow()); // Watcher should not be called for static empty array
+        assert!(!called.get()); // Watcher should not be called for static empty array
     }
 
     #[test]
@@ -607,29 +669,31 @@ mod tests {
     #[test]
     fn test_out_of_bounds_range() {
         let list = List::from(vec![1, 2, 3]);
-        let called = Rc::new(RefCell::new(false));
+        let called = Rc::new(Cell::new(None::<bool>));
 
         let c = called.clone();
-        let _guard = Collection::watch(&list, 10..20, move |_ctx| {
-            *c.borrow_mut() = true;
+        let _guard = Collection::watch(&list, 10..20, move |ctx| {
+            let is_empty = ctx.map(<[i32]>::is_empty).into_value();
+            c.set(Some(is_empty));
         });
 
-        // Should not call watcher for out-of-bounds range
-        assert!(!*called.borrow());
+        // Out-of-bounds range should yield an empty snapshot
+        assert_eq!(called.get(), Some(true));
     }
 
     #[test]
     fn test_empty_range() {
         let list = List::from(vec![1, 2, 3]);
-        let called = Rc::new(RefCell::new(false));
+        let called = Rc::new(Cell::new(None::<bool>));
 
         let c = called.clone();
-        let _guard = Collection::watch(&list, 2..2, move |_ctx| {
-            *c.borrow_mut() = true;
+        let _guard = Collection::watch(&list, 2..2, move |ctx| {
+            let is_empty = ctx.map(<[i32]>::is_empty).into_value();
+            c.set(Some(is_empty));
         });
 
-        // Should not call watcher for empty range
-        assert!(!*called.borrow());
+        // Empty range should snapshot as an empty slice
+        assert_eq!(called.get(), Some(true));
     }
 
     #[test]
@@ -642,6 +706,13 @@ mod tests {
             let _guard = Collection::watch(&list, .., move |_ctx| {
                 *count.borrow_mut() += 1;
             });
+
+            // Initial snapshot
+            assert_eq!(*notification_count.borrow(), 1);
+            {
+                let mut count_mut = notification_count.borrow_mut();
+                *count_mut = 0;
+            }
 
             list.push(1);
             assert_eq!(*notification_count.borrow(), 1);
