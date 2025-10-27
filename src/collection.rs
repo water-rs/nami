@@ -80,21 +80,21 @@ pub struct List<T> {
     watchers: WatcherManager<Vec<T>>,
 }
 
+impl<T: 'static> From<Vec<T>> for List<T> {
+    fn from(value: Vec<T>) -> Self {
+        Self {
+            vec: Rc::new(RefCell::new(value)),
+            watchers: WatcherManager::new(),
+        }
+    }
+}
+
 impl<T: 'static> List<T> {
     /// Creates a new empty reactive list.
     #[must_use]
     pub fn new() -> Self {
         Self {
             vec: Rc::new(RefCell::new(Vec::new())),
-            watchers: WatcherManager::new(),
-        }
-    }
-
-    /// Creates a reactive list from an existing vector.
-    #[must_use]
-    pub fn from(vec: Vec<T>) -> Self {
-        Self {
-            vec: Rc::new(RefCell::new(vec)),
             watchers: WatcherManager::new(),
         }
     }
@@ -129,7 +129,7 @@ impl<T: 'static> List<T> {
 
     /// Removes and returns the last element of the list.
     #[must_use]
-    pub fn pop(&self) -> Option<T>
+    pub fn pop(&mut self) -> Option<T>
     where
         T: Clone,
     {
@@ -146,7 +146,7 @@ impl<T: 'static> List<T> {
     }
 
     /// Inserts an element at the specified index.
-    pub fn insert(&self, index: usize, value: T)
+    pub fn insert(&mut self, index: usize, value: T)
     where
         T: Clone,
     {
@@ -161,7 +161,7 @@ impl<T: 'static> List<T> {
 
     /// Removes and returns the element at the specified index.
     #[must_use]
-    pub fn remove(&self, index: usize) -> T
+    pub fn remove(&mut self, index: usize) -> T
     where
         T: Clone,
     {
@@ -176,7 +176,7 @@ impl<T: 'static> List<T> {
     }
 
     /// Clears all elements from the list.
-    pub fn clear(&self)
+    pub fn clear(&mut self)
     where
         T: Clone,
     {
@@ -287,6 +287,12 @@ impl<T: Clone + 'static> Collection for List<T> {
     }
 }
 
+impl<T: 'static> FromIterator<T> for List<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self::from(iter.into_iter().collect::<Vec<_>>())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_list_insert_and_remove() {
-        let list = List::from(vec![1, 3, 5]);
+        let mut list = List::from(vec![1, 3, 5]);
 
         list.insert(1, 2);
         list.insert(3, 4);
@@ -372,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_list_clear() {
-        let list = List::from(vec![1, 2, 3, 4, 5]);
+        let mut list = List::from(vec![1, 2, 3, 4, 5]);
         assert_eq!(Collection::len(&list), 5);
 
         list.clear();
