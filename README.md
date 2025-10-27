@@ -71,7 +71,7 @@ let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);  // Vec<i32> binding
 // set_from() also uses Into<T> for ergonomic updates
 text.set_from("world");                                // Direct &str, no .into() needed
 counter.set(5);
-counter+=1;
+counter.add_assign(1);
 assert_eq!(counter.get(), 6);
 
 // Works with type conversions
