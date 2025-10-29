@@ -2,6 +2,7 @@
 //!
 //! This module provides two-way reactive bindings that can both produce and consume values.
 //! Unlike read-only signals, bindings can be modified and will notify watchers of changes.
+#![allow(clippy::similar_names)]
 
 use core::{
     any::{Any, type_name},
@@ -524,19 +525,18 @@ impl<T: PartialOrd + 'static> Binding<T> {
             T: Clone + PartialOrd,
             R: RangeBounds<T>,
         {
-            if let core::ops::Bound::Included(min) = range.start_bound() {
-                if value < min.clone() {
-                    return min.clone();
-                }
+            if let core::ops::Bound::Included(min) = range.start_bound()
+                && value < min.clone()
+            {
+                return min.clone();
             }
-            if let core::ops::Bound::Included(max) = range.end_bound() {
-                if value > max.clone() {
-                    return max.clone();
-                }
+            if let core::ops::Bound::Included(max) = range.end_bound()
+                && value > max.clone()
+            {
+                return max.clone();
             }
             value
         }
-
         let range_for_getter = range.clone();
         let range_for_setter = range;
 
@@ -1189,13 +1189,25 @@ mod tests {
         let clamped = source.clamp(0..=10);
 
         clamped.set(-42);
-        assert_eq!(source.get(), 0, "values below range should clamp to lower bound");
+        assert_eq!(
+            source.get(),
+            0,
+            "values below range should clamp to lower bound"
+        );
 
         clamped.set(42);
-        assert_eq!(source.get(), 10, "values above range should clamp to upper bound");
+        assert_eq!(
+            source.get(),
+            10,
+            "values above range should clamp to upper bound"
+        );
 
         clamped.set(7);
-        assert_eq!(source.get(), 7, "in-range values should pass through unchanged");
+        assert_eq!(
+            source.get(),
+            7,
+            "in-range values should pass through unchanged"
+        );
     }
 
     #[test]
