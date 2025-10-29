@@ -158,6 +158,7 @@ impl_binary_trait!(Shr, shr, util_shr);
 pub struct BindingMutGuard<'a, T: 'static> {
     binding: &'a Binding<T>,
     value: Option<T>,
+    dirty: bool,
 }
 
 impl<'a, T> BindingMutGuard<'a, T> {
@@ -166,6 +167,7 @@ impl<'a, T> BindingMutGuard<'a, T> {
         Self {
             value: Some(binding.get()),
             binding,
+            dirty: false,
         }
     }
 }
@@ -182,6 +184,7 @@ impl<T> Deref for BindingMutGuard<'_, T> {
 #[allow(clippy::unwrap_used)]
 impl<T> DerefMut for BindingMutGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        self.dirty = true;
         self.value.as_mut().unwrap()
     }
 }
@@ -190,7 +193,13 @@ impl<T> DerefMut for BindingMutGuard<'_, T> {
 impl<T: 'static> Drop for BindingMutGuard<'_, T> {
     /// When the guard is dropped, updates the binding with the modified value.
     fn drop(&mut self) {
-        self.binding.set(self.value.take().unwrap());
+        if self.dirty {
+            if let Some(value) = self.value.take() {
+                self.binding.set(value);
+            }
+        } else {
+            let _ = self.value.take();
+        }
     }
 }
 
@@ -510,26 +519,33 @@ impl<T: PartialOrd + 'static> Binding<T> {
     where
         T: Clone,
     {
+        fn clamp_value<T, R>(range: &R, value: T) -> T
+        where
+            T: Clone + PartialOrd,
+            R: RangeBounds<T>,
+        {
+            if let core::ops::Bound::Included(min) = range.start_bound() {
+                if value < min.clone() {
+                    return min.clone();
+                }
+            }
+            if let core::ops::Bound::Included(max) = range.end_bound() {
+                if value > max.clone() {
+                    return max.clone();
+                }
+            }
+            value
+        }
+
+        let range_for_getter = range.clone();
+        let range_for_setter = range;
+
         Self::mapping(
             self,
-            {
-                let range = range;
-                move |value| {
-                    if let core::ops::Bound::Included(min) = range.start_bound()
-                        && value < *min
-                    {
-                        return min.clone();
-                    }
-                    if let core::ops::Bound::Included(max) = range.end_bound()
-                        && value > *max
-                    {
-                        return max.clone();
-                    }
-                    value
-                }
-            },
+            move |value| clamp_value(&range_for_getter, value),
             move |binding, value| {
-                binding.set(value);
+                let clamped = clamp_value(&range_for_setter, value);
+                binding.set(clamped);
             },
         )
     }
@@ -1165,5 +1181,43 @@ mod tests {
         assert!(!is_positive.get());
         number.set(5);
         assert!(is_positive.get());
+    }
+
+    #[test]
+    fn test_binding_clamp_enforces_range_on_set() {
+        let source: Binding<i32> = binding(5);
+        let clamped = source.clamp(0..=10);
+
+        clamped.set(-42);
+        assert_eq!(source.get(), 0, "values below range should clamp to lower bound");
+
+        clamped.set(42);
+        assert_eq!(source.get(), 10, "values above range should clamp to upper bound");
+
+        clamped.set(7);
+        assert_eq!(source.get(), 7, "in-range values should pass through unchanged");
+    }
+
+    #[test]
+    fn test_get_mut_without_mutation_does_not_notify() {
+        use alloc::rc::Rc;
+        use core::cell::RefCell;
+
+        let binding: Binding<i32> = binding(1);
+        let notifications = Rc::new(RefCell::new(Vec::new()));
+        let notifications_clone = notifications.clone();
+
+        let _guard = binding.clone().watch(move |ctx| {
+            notifications_clone.borrow_mut().push(ctx.into_value());
+        });
+
+        {
+            let _unused_guard = binding.get_mut();
+        }
+
+        assert!(
+            notifications.borrow().is_empty(),
+            "Dropping guard without mutation should not notify watchers"
+        );
     }
 }

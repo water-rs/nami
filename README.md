@@ -45,8 +45,10 @@ use nami::watcher::{Context, WatcherGuard};
 
 pub trait Signal: Clone + 'static {
     type Output;
+    type Guard: WatcherGuard;
+
     fn get(&self) -> Self::Output;
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> impl WatcherGuard;
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard;
 }
 ```
 
@@ -204,7 +206,7 @@ let owned_string: String = mailbox.get_as().await;
 assert_eq!(owned_string, "hello");
 
 // Regular mailbox operations
-mailbox.set_from("world").await;
+mailbox.set("world").await;
 ```
 
 ## Debugging
