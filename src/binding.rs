@@ -1219,7 +1219,7 @@ mod tests {
         let notifications = Rc::new(RefCell::new(Vec::new()));
         let notifications_clone = notifications.clone();
 
-        let _guard = binding.clone().watch(move |ctx| {
+        let _guard = binding.watch(move |ctx| {
             notifications_clone.borrow_mut().push(ctx.into_value());
         });
 
