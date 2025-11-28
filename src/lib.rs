@@ -19,6 +19,8 @@ pub mod collection;
 #[cfg(feature = "timer")]
 pub mod debounce;
 pub mod debug;
+pub mod distinct;
+
 mod ext;
 pub mod future;
 pub mod map;

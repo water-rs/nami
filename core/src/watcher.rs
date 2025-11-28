@@ -2,6 +2,25 @@
 //!
 //! This module provides the infrastructure for managing reactive value watchers,
 //! including metadata handling and notification systems.
+//!
+//! # When watcher would be called?
+//!
+//! > Watchers are called when the value may have changed.
+//!
+//! This means that even if the new value is equal to the old value, watchers may will still be called.
+//!
+//! # Why not only when value actually changed?
+//!
+//! Since we does not require `Eq` or `PartialEq` bounds on the watched values, so we cannot determine
+//! whether the value actually changed or not.
+//!
+//! # So if upstream user calls `notify`, my watcher will always be called?
+//!
+//! The answer is: Maybe yes, maybe no.
+//!
+//! We preserve the freedom to discard notifications in certain scenarios, as a performance optimization.
+//!
+//! Also, you can use [`nami::distinct`](nami::distinct) to create a distinct signal that only notifies when the value changes manually.
 
 use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, vec::Vec};
 use core::{
