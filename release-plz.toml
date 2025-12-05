@@ -12,11 +12,6 @@ name = "nami"
 git_release_name = "v{{ version }}"
 git_tag_name = "v{{ version }}"
 
-[[package.files_to_update]]
-path = "README.md"
-search = 'nami = "[0-9]+\\.[0-9]+(\\.[0-9]+)?"'
-replace = 'nami = "{{ version }}"'
-
 [[package]]
 name = "nami-core"
 git_tag_name = "core-v{{ version }}"
