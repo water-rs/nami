@@ -49,7 +49,7 @@ impl MetadataInner {
     /// Returns `None` if no value of the requested type is present.
     #[allow(clippy::unwrap_used)]
     pub fn try_get<T: 'static + Clone>(&self) -> Option<T> {
-        // Once `downcast_ref_unchecked` stablized, we will use it here.
+        // Once `downcast_ref_unchecked` stabilized, we will use it here.
         self.0
             .get(&TypeId::of::<T>())
             .map(|v| v.downcast_ref::<T>().unwrap())

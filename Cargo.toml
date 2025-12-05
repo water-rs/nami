@@ -40,7 +40,6 @@ license = { file = "LICENSE" }
 nami-derive = { workspace = true }
 
 [dependencies]
-paste = "1.0"
 log = { version = "0.4.28", default-features = true }
 nami-derive = { workspace = true, optional = true}
 futures-core = "0.3.31"
