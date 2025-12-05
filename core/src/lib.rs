@@ -139,7 +139,7 @@ impl<T: Signal> Signal for Option<T> {
     type Output = Option<T::Output>;
     type Guard = Option<T::Guard>;
     fn get(&self) -> Self::Output {
-        self.as_ref().map(|s| s.get())
+        self.as_ref().map(Signal::get)
     }
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         self.as_ref()

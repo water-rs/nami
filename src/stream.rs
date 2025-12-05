@@ -85,7 +85,7 @@ impl<S: Signal> SignalStream<S> {
     ///
     /// The stream will initially yield `None` until the signal produces a value.
     /// Watchers are notified when the signal updates.
-    pub fn new(signal: S) -> Self {
+    pub const fn new(signal: S) -> Self {
         Self {
             signal: Ok(signal),
             channel: None,
@@ -103,7 +103,7 @@ impl<S: Signal> Stream for SignalStream<S> {
         if let Ok(signal) = &this.signal {
             let (sender, receiver) = async_channel::unbounded();
             let guard = signal.watch(move |ctx| {
-                let _ = sender.send_blocking(ctx.into_value());
+                let _ = sender.try_send(ctx.into_value());
             });
 
             this.signal = Err(guard);
@@ -112,6 +112,6 @@ impl<S: Signal> Stream for SignalStream<S> {
 
         pin!(this.channel.as_ref().unwrap().recv())
             .poll(cx)
-            .map(|result| result.ok())
+            .map(Result::ok)
     }
 }
