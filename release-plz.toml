@@ -1,6 +1,5 @@
 [workspace]
 pr_draft = false
-changelog_config = "cliff.toml"
 pr_labels = ["release"]
 git_release_name = "{{ crate_name }}-v{{ version }}"
 publish = true
