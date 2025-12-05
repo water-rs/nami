@@ -123,7 +123,7 @@ mod impl_constant {
         Cow<'static, str>
     );
 
-    impl_generic_constant!(Vec<T>,BTreeMap<K,V>,Option<T>,Result<T,E>);
+    impl_generic_constant!(Vec<T>,BTreeMap<K,V>);
 
     impl<T: 'static> Signal for &'static [T] {
         type Output = &'static [T];
@@ -132,5 +132,34 @@ mod impl_constant {
             self
         }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
+    }
+}
+
+impl<T: Signal> Signal for Option<T> {
+    type Output = Option<T::Output>;
+    type Guard = Option<T::Guard>;
+    fn get(&self) -> Self::Output {
+        self.as_ref().map(|s| s.get())
+    }
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+        self.as_ref()
+            .map(|s| s.watch(move |context| watcher(context.map(Some))))
+    }
+}
+
+impl<T: Signal, E: Signal> Signal for Result<T, E> {
+    type Output = Result<T::Output, E::Output>;
+    type Guard = Result<T::Guard, E::Guard>;
+    fn get(&self) -> Self::Output {
+        match &self {
+            Ok(s) => Ok(s.get()),
+            Err(e) => Err(e.get()),
+        }
+    }
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+        match &self {
+            Ok(s) => Ok(s.watch(move |context| watcher(context.map(Ok)))),
+            Err(e) => Err(e.watch(move |context| watcher(context.map(Err)))),
+        }
     }
 }

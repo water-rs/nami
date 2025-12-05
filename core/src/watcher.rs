@@ -159,6 +159,10 @@ impl<T> From<T> for Context<T> {
 #[must_use]
 pub trait WatcherGuard: 'static {}
 
+impl<T: 'static> WatcherGuard for Option<T> {}
+
+impl<T: WatcherGuard, E: WatcherGuard> WatcherGuard for Result<T, E> {}
+
 impl WatcherGuard for () {}
 
 impl<T1: WatcherGuard, T2: WatcherGuard> WatcherGuard for (T1, T2) {}
