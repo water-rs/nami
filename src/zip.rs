@@ -12,11 +12,7 @@
 use alloc::rc::Rc;
 use core::cell::RefCell;
 
-use crate::{
-    Signal,
-    map::{Map, map},
-    watcher::Context,
-};
+use crate::{Signal, map::Map, watcher::Context};
 
 /// A structure that combines two `Signal` instances into a single computation
 /// that produces a tuple of their results.
@@ -73,7 +69,7 @@ where
     Output: 'static,
 {
     fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn((T1, T2)) -> Output, Output> {
-        map(self.clone(), move |(t1, t2)| f(t1, t2))
+        Map::new(self.clone(), move |(t1, t2)| f(t1, t2))
     }
 }
 
@@ -85,7 +81,7 @@ where
     Output: 'static,
 {
     fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn(((T1, T2), T3)) -> Output, Output> {
-        map(self.clone(), move |((t1, t2), t3)| f(t1, t2, t3))
+        Map::new(self.clone(), move |((t1, t2), t3)| f(t1, t2, t3))
     }
 }
 

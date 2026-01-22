@@ -68,13 +68,16 @@ pub trait SignalExt: Signal {
     }
 
     /// Applies a side-effect function and returns the original value.
-    fn inspect<F>(&self, f: F) -> Map<Self, impl Clone + Fn(Self::Output) -> Self::Output, Self::Output>
+    fn inspect<F>(
+        &self,
+        f: F,
+    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> Self::Output, Self::Output>
     where
         Self: 'static,
         Self::Output: Clone + 'static,
         F: 'static + Clone + Fn(&Self::Output),
     {
-        self.map(move |value| {
+        Map::new(self.clone(), move |value| {
             f(&value);
             value
         })
@@ -91,33 +94,29 @@ pub trait SignalExt: Signal {
     // ==================== Comparison Methods ====================
 
     /// Returns `true` if the value equals the given value.
-    fn equal_to(&self, other: Self::Output) -> Map<Self, impl Clone + Fn(Self::Output) -> bool, bool>
-    where
-        Self: 'static,
-        Self::Output: Clone + PartialEq + 'static,
-    {
-        self.map(move |value| value == other)
-    }
-
-    /// Returns `true` if the value does not equal the given value.
-    fn not_equal_to(
+    ///
+    /// For inequality checks, use `signal.equal_to(value).not()`.
+    fn equal_to(
         &self,
         other: Self::Output,
-    ) -> Map<Self, impl Clone + Fn(Self::Output) -> bool, bool>
+    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         Self::Output: Clone + PartialEq + 'static,
     {
-        self.map(move |value| value != other)
+        Map::new(self.clone(), move |value| value == other)
     }
 
     /// Returns `true` if the predicate returns `true` for the value.
-    fn condition<F>(&self, predicate: F) -> Map<Self, impl Clone + Fn(Self::Output) -> bool, bool>
+    fn condition<F>(
+        &self,
+        predicate: F,
+    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         F: 'static + Clone + Fn(&Self::Output) -> bool,
     {
-        self.map(move |value| predicate(&value))
+        Map::new(self.clone(), move |value| predicate(&value))
     }
 
     // ==================== Option Methods ====================
@@ -143,22 +142,27 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the contained value or a default.
-    fn unwrap_or<T>(&self, default: T) -> Map<Self, impl Clone + Fn(Option<T>) -> T, T>
+    fn unwrap_or<T>(&self, default: T) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: Clone + 'static,
     {
-        self.map(move |opt| opt.unwrap_or_else(|| default.clone()))
+        Map::new(self.clone(), move |opt| {
+            opt.unwrap_or_else(|| default.clone())
+        })
     }
 
     /// Returns the contained value or computes it from a closure.
-    fn unwrap_or_else<T, F>(&self, default: F) -> Map<Self, impl Clone + Fn(Option<T>) -> T, T>
+    fn unwrap_or_else<T, F>(
+        &self,
+        default: F,
+    ) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
         F: 'static + Clone + Fn() -> T,
     {
-        self.map(move |opt| opt.unwrap_or_else(&default))
+        Map::new(self.clone(), move |opt| opt.unwrap_or_else(&default))
     }
 
     /// Returns the contained value or the default value for that type.
@@ -174,12 +178,14 @@ pub trait SignalExt: Signal {
     fn some_equal_to<T>(
         &self,
         value: T,
-    ) -> Map<Self, impl Clone + Fn(Option<T>) -> bool, bool>
+    ) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> bool, bool>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: Clone + PartialEq + 'static,
     {
-        self.map(move |opt| opt.as_ref().is_some_and(|v| v == &value))
+        Map::new(self.clone(), move |opt| {
+            opt.as_ref().is_some_and(|v| v == &value)
+        })
     }
 
     /// Flattens a nested `Option<Option<T>>` into `Option<T>`.
@@ -196,28 +202,28 @@ pub trait SignalExt: Signal {
     fn map_some<T, U, F>(
         &self,
         f: F,
-    ) -> Map<Self, impl Clone + Fn(Option<T>) -> Option<U>, Option<U>>
+    ) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> Option<U>, Option<U>>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
         U: 'static,
         F: 'static + Clone + Fn(T) -> U,
     {
-        self.map(move |opt| opt.map(&f))
+        Map::new(self.clone(), move |opt| opt.map(&f))
     }
 
     /// Returns `None` if the option is `None`, otherwise calls `f` with the wrapped value and returns the result.
     fn and_then_some<T, U, F>(
         &self,
         f: F,
-    ) -> Map<Self, impl Clone + Fn(Option<T>) -> Option<U>, Option<U>>
+    ) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> Option<U>, Option<U>>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
         U: 'static,
         F: 'static + Clone + Fn(T) -> Option<U>,
     {
-        self.map(move |opt| opt.and_then(&f))
+        Map::new(self.clone(), move |opt| opt.and_then(&f))
     }
 
     // ==================== Bool Methods ====================
@@ -231,21 +237,30 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `Some(value)` if `true`, otherwise `None`.
-    fn then_some<T>(&self, value: T) -> Map<Self, impl Clone + Fn(bool) -> Option<T>, Option<T>>
+    fn then_some<T>(
+        &self,
+        value: T,
+    ) -> Map<Self, impl 'static + Clone + Fn(bool) -> Option<T>, Option<T>>
     where
         Self: Signal<Output = bool> + 'static,
         T: Clone + 'static,
     {
-        self.map(move |b| b.then_some(value.clone()))
+        Map::new(self.clone(), move |b| b.then_some(value.clone()))
     }
 
     /// Returns `if_true` if `true`, otherwise `if_false`.
-    fn select<T>(&self, if_true: T, if_false: T) -> Map<Self, impl Clone + Fn(bool) -> T, T>
+    fn select<T>(
+        &self,
+        if_true: T,
+        if_false: T,
+    ) -> Map<Self, impl 'static + Clone + Fn(bool) -> T, T>
     where
         Self: Signal<Output = bool> + 'static,
         T: Clone + 'static,
     {
-        self.map(move |b| if b { if_true.clone() } else { if_false.clone() })
+        Map::new(self.clone(), move |b| {
+            if b { if_true.clone() } else { if_false.clone() }
+        })
     }
 
     // ==================== Numeric Methods ====================
@@ -357,27 +372,27 @@ pub trait SignalExt: Signal {
     fn unwrap_or_result<T, E>(
         &self,
         default: T,
-    ) -> Map<Self, impl Clone + Fn(Result<T, E>) -> T, T>
+    ) -> Map<Self, impl 'static + Clone + Fn(Result<T, E>) -> T, T>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: Clone + 'static,
         E: 'static,
     {
-        self.map(move |r| r.unwrap_or_else(|_| default.clone()))
+        Map::new(self.clone(), move |r| r.unwrap_or_else(|_| default.clone()))
     }
 
     /// Returns the contained `Ok` value or computes it from the error.
     fn unwrap_or_else_result<T, E, F>(
         &self,
         f: F,
-    ) -> Map<Self, impl Clone + Fn(Result<T, E>) -> T, T>
+    ) -> Map<Self, impl 'static + Clone + Fn(Result<T, E>) -> T, T>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
         E: 'static,
         F: 'static + Clone + Fn(E) -> T,
     {
-        self.map(move |r| r.unwrap_or_else(&f))
+        Map::new(self.clone(), move |r| r.unwrap_or_else(&f))
     }
 
     /// Maps a `Result<T, E>` to `Result<U, E>` using the provided function.
@@ -385,7 +400,7 @@ pub trait SignalExt: Signal {
     fn map_ok<T, E, U, F>(
         &self,
         f: F,
-    ) -> Map<Self, impl Clone + Fn(Result<T, E>) -> Result<U, E>, Result<U, E>>
+    ) -> Map<Self, impl 'static + Clone + Fn(Result<T, E>) -> Result<U, E>, Result<U, E>>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -393,7 +408,7 @@ pub trait SignalExt: Signal {
         U: 'static,
         F: 'static + Clone + Fn(T) -> U,
     {
-        self.map(move |r| r.map(&f))
+        Map::new(self.clone(), move |r| r.map(&f))
     }
 
     /// Maps a `Result<T, E>` to `Result<T, F>` using the provided function.
@@ -401,7 +416,7 @@ pub trait SignalExt: Signal {
     fn map_err<T, E, F, U>(
         &self,
         f: F,
-    ) -> Map<Self, impl Clone + Fn(Result<T, E>) -> Result<T, U>, Result<T, U>>
+    ) -> Map<Self, impl 'static + Clone + Fn(Result<T, E>) -> Result<T, U>, Result<T, U>>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -409,7 +424,7 @@ pub trait SignalExt: Signal {
         U: 'static,
         F: 'static + Clone + Fn(E) -> U,
     {
-        self.map(move |r| r.map_err(&f))
+        Map::new(self.clone(), move |r| r.map_err(&f))
     }
 
     // ==================== Timer Methods ====================
@@ -442,3 +457,265 @@ pub trait SignalExt: Signal {
 }
 
 impl<C: Signal> SignalExt for C {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Binding, binding};
+
+    // ==================== Map Variants ====================
+
+    #[test]
+    fn test_map_into() {
+        let signal: Binding<i32> = binding(42i32);
+        let mapped: Map<_, _, i64> = signal.map_into();
+        assert_eq!(mapped.get(), 42i64);
+    }
+
+    #[test]
+    fn test_distinct() {
+        let signal: Binding<i32> = binding(42);
+        let distinct = signal.distinct();
+        assert_eq!(distinct.get(), 42);
+    }
+
+    // ==================== Comparison Methods ====================
+
+    #[test]
+    fn test_equal_to() {
+        let signal: Binding<i32> = binding(42);
+        let is_42 = signal.equal_to(42);
+        assert!(is_42.get());
+
+        signal.set(10);
+        assert!(!is_42.get());
+    }
+
+    #[test]
+    fn test_not_equal_to() {
+        let signal: Binding<i32> = binding(42);
+        // Use equal_to().not() - direct not_equal_to has RPIT lifetime issues
+        let not_42 = signal.equal_to(42).not();
+        assert!(!not_42.get());
+
+        signal.set(10);
+        assert!(not_42.get());
+    }
+
+    #[test]
+    fn test_condition() {
+        let signal: Binding<i32> = binding(42);
+        let is_even = signal.condition(|x| x % 2 == 0);
+        assert!(is_even.get());
+
+        signal.set(43);
+        assert!(!is_even.get());
+    }
+
+    // ==================== Option Methods ====================
+
+    #[test]
+    fn test_is_some() {
+        let signal: Binding<Option<i32>> = binding(Some(42));
+        assert!(signal.is_some().get());
+
+        signal.set(None);
+        assert!(!signal.is_some().get());
+    }
+
+    #[test]
+    fn test_is_none() {
+        let signal: Binding<Option<i32>> = binding(None);
+        assert!(signal.is_none().get());
+
+        signal.set(Some(42));
+        assert!(!signal.is_none().get());
+    }
+
+    #[test]
+    fn test_unwrap_or() {
+        let signal: Binding<Option<i32>> = binding(Some(42));
+        let unwrapped = signal.unwrap_or(0);
+        assert_eq!(unwrapped.get(), 42);
+
+        signal.set(None);
+        assert_eq!(unwrapped.get(), 0);
+    }
+
+    #[test]
+    fn test_unwrap_or_else() {
+        let signal: Binding<Option<i32>> = binding(Some(42));
+        let unwrapped = signal.unwrap_or_else(|| 100);
+        assert_eq!(unwrapped.get(), 42);
+
+        signal.set(None);
+        assert_eq!(unwrapped.get(), 100);
+    }
+
+    #[test]
+    fn test_unwrap_or_default() {
+        let signal: Binding<Option<i32>> = binding(Some(42));
+        assert_eq!(signal.unwrap_or_default().get(), 42);
+
+        signal.set(None);
+        assert_eq!(signal.unwrap_or_default().get(), 0);
+    }
+
+    #[test]
+    fn test_some_equal_to() {
+        let signal: Binding<Option<i32>> = binding(Some(42));
+        let eq_42 = signal.some_equal_to(42);
+        let eq_0 = signal.some_equal_to(0);
+        assert!(eq_42.get());
+        assert!(!eq_0.get());
+
+        signal.set(None);
+        assert!(!eq_42.get());
+    }
+
+    #[test]
+    fn test_flatten() {
+        let signal: Binding<Option<Option<i32>>> = binding(Some(Some(42)));
+        assert_eq!(signal.flatten().get(), Some(42));
+
+        signal.set(Some(None));
+        assert_eq!(signal.flatten().get(), None);
+
+        signal.set(None);
+        assert_eq!(signal.flatten().get(), None);
+    }
+
+    // ==================== Bool Methods ====================
+
+    #[test]
+    fn test_not() {
+        let signal: Binding<bool> = binding(true);
+        assert!(!signal.not().get());
+
+        signal.set(false);
+        assert!(signal.not().get());
+    }
+
+    #[test]
+    fn test_then_some() {
+        let signal: Binding<bool> = binding(true);
+        let maybe = signal.then_some(42);
+        assert_eq!(maybe.get(), Some(42));
+
+        signal.set(false);
+        assert_eq!(maybe.get(), None);
+    }
+
+    #[test]
+    fn test_select() {
+        let signal: Binding<bool> = binding(true);
+        let selected = signal.select("yes", "no");
+        assert_eq!(selected.get(), "yes");
+
+        signal.set(false);
+        assert_eq!(selected.get(), "no");
+    }
+
+    // ==================== Numeric Methods ====================
+
+    #[test]
+    fn test_negate() {
+        let signal: Binding<i32> = binding(42);
+        assert_eq!(signal.negate().get(), -42);
+
+        signal.set(-10);
+        assert_eq!(signal.negate().get(), 10);
+    }
+
+    #[test]
+    fn test_abs() {
+        let signal: Binding<i32> = binding(-42);
+        assert_eq!(signal.abs().get(), 42);
+
+        signal.set(10);
+        assert_eq!(signal.abs().get(), 10);
+    }
+
+    #[test]
+    fn test_sign() {
+        let signal: Binding<i32> = binding(42);
+        assert!(signal.sign().get()); // positive
+
+        signal.set(-10);
+        assert!(!signal.sign().get()); // negative
+
+        signal.set(0);
+        assert!(signal.sign().get()); // zero is not negative
+    }
+
+    #[test]
+    fn test_is_positive() {
+        let signal: Binding<i32> = binding(42);
+        assert!(signal.is_positive().get());
+
+        signal.set(-10);
+        assert!(!signal.is_positive().get());
+
+        signal.set(0);
+        assert!(!signal.is_positive().get());
+    }
+
+    #[test]
+    fn test_is_negative() {
+        let signal: Binding<i32> = binding(-42);
+        assert!(signal.is_negative().get());
+
+        signal.set(10);
+        assert!(!signal.is_negative().get());
+
+        signal.set(0);
+        assert!(!signal.is_negative().get());
+    }
+
+    #[test]
+    fn test_is_zero() {
+        let signal: Binding<i32> = binding(0);
+        assert!(signal.is_zero().get());
+
+        signal.set(42);
+        assert!(!signal.is_zero().get());
+    }
+
+    // ==================== Result Methods ====================
+
+    #[test]
+    fn test_is_ok() {
+        let signal: Binding<Result<i32, &str>> = binding(Ok(42));
+        assert!(signal.is_ok().get());
+
+        signal.set(Err("error"));
+        assert!(!signal.is_ok().get());
+    }
+
+    #[test]
+    fn test_is_err() {
+        let signal: Binding<Result<i32, &str>> = binding(Err("error"));
+        assert!(signal.is_err().get());
+
+        signal.set(Ok(42));
+        assert!(!signal.is_err().get());
+    }
+
+    #[test]
+    fn test_ok() {
+        let signal: Binding<Result<i32, &str>> = binding(Ok(42));
+        assert_eq!(signal.ok().get(), Some(42));
+
+        signal.set(Err("error"));
+        assert_eq!(signal.ok().get(), None);
+    }
+
+    #[test]
+    fn test_err() {
+        let signal: Binding<Result<i32, &str>> = binding(Err("error"));
+        assert_eq!(signal.err().get(), Some("error"));
+
+        signal.set(Ok(42));
+        assert_eq!(signal.err().get(), None);
+    }
+}
