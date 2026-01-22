@@ -1,3 +1,4 @@
+use alloc::string::String;
 use crate::{
     Computed, Signal, cache::Cached, distinct::Distinct, map::Map, signal::WithMetadata, zip::Zip,
 };
@@ -117,6 +118,54 @@ pub trait SignalExt: Signal {
         F: 'static + Clone + Fn(&Self::Output) -> bool,
     {
         Map::new(self.clone(), move |value| predicate(&value))
+    }
+
+    /// Returns `true` if the value is greater than the given value.
+    fn gt(
+        &self,
+        other: Self::Output,
+    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    where
+        Self: 'static,
+        Self::Output: Clone + PartialOrd + 'static,
+    {
+        Map::new(self.clone(), move |value| value > other)
+    }
+
+    /// Returns `true` if the value is less than the given value.
+    fn lt(
+        &self,
+        other: Self::Output,
+    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    where
+        Self: 'static,
+        Self::Output: Clone + PartialOrd + 'static,
+    {
+        Map::new(self.clone(), move |value| value < other)
+    }
+
+    /// Returns `true` if the value is greater than or equal to the given value.
+    fn ge(
+        &self,
+        other: Self::Output,
+    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    where
+        Self: 'static,
+        Self::Output: Clone + PartialOrd + 'static,
+    {
+        Map::new(self.clone(), move |value| value >= other)
+    }
+
+    /// Returns `true` if the value is less than or equal to the given value.
+    fn le(
+        &self,
+        other: Self::Output,
+    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    where
+        Self: 'static,
+        Self::Output: Clone + PartialOrd + 'static,
+    {
+        Map::new(self.clone(), move |value| value <= other)
     }
 
     // ==================== Option Methods ====================
@@ -454,6 +503,40 @@ pub trait SignalExt: Signal {
     {
         crate::throttle::Throttle::new(self.clone(), duration)
     }
+
+    // ==================== String Methods ====================
+
+    /// Returns `true` if the string is empty.
+    #[allow(clippy::wrong_self_convention)]
+    fn is_empty<T>(&self) -> Map<Self, fn(T) -> bool, bool>
+    where
+        Self: Signal<Output = T> + 'static,
+        T: AsRef<str> + 'static,
+    {
+        self.map(|s| s.as_ref().is_empty())
+    }
+
+    /// Returns the length of the string in bytes.
+    fn str_len<T>(&self) -> Map<Self, fn(T) -> usize, usize>
+    where
+        Self: Signal<Output = T> + 'static,
+        T: AsRef<str> + 'static,
+    {
+        self.map(|s| s.as_ref().len())
+    }
+
+    /// Returns `true` if the string contains the given pattern.
+    fn contains<T>(
+        &self,
+        pattern: impl Into<String>,
+    ) -> Map<Self, impl 'static + Clone + Fn(T) -> bool, bool>
+    where
+        Self: Signal<Output = T> + 'static,
+        T: AsRef<str> + 'static,
+    {
+        let pattern = pattern.into();
+        Map::new(self.clone(), move |s| s.as_ref().contains(&pattern))
+    }
 }
 
 impl<C: Signal> SignalExt for C {}
@@ -461,6 +544,7 @@ impl<C: Signal> SignalExt for C {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
     use crate::{Binding, binding};
 
     // ==================== Map Variants ====================
@@ -510,6 +594,58 @@ mod tests {
 
         signal.set(43);
         assert!(!is_even.get());
+    }
+
+    #[test]
+    fn test_gt() {
+        let signal: Binding<i32> = binding(42);
+        let is_gt_40 = signal.gt(40);
+        assert!(is_gt_40.get());
+
+        signal.set(40);
+        assert!(!is_gt_40.get());
+
+        signal.set(30);
+        assert!(!is_gt_40.get());
+    }
+
+    #[test]
+    fn test_lt() {
+        let signal: Binding<i32> = binding(30);
+        let is_lt_40 = signal.lt(40);
+        assert!(is_lt_40.get());
+
+        signal.set(40);
+        assert!(!is_lt_40.get());
+
+        signal.set(50);
+        assert!(!is_lt_40.get());
+    }
+
+    #[test]
+    fn test_ge() {
+        let signal: Binding<i32> = binding(42);
+        let is_ge_40 = signal.ge(40);
+        assert!(is_ge_40.get());
+
+        signal.set(40);
+        assert!(is_ge_40.get());
+
+        signal.set(30);
+        assert!(!is_ge_40.get());
+    }
+
+    #[test]
+    fn test_le() {
+        let signal: Binding<i32> = binding(30);
+        let is_le_40 = signal.le(40);
+        assert!(is_le_40.get());
+
+        signal.set(40);
+        assert!(is_le_40.get());
+
+        signal.set(50);
+        assert!(!is_le_40.get());
     }
 
     // ==================== Option Methods ====================
@@ -717,5 +853,54 @@ mod tests {
 
         signal.set(Ok(42));
         assert_eq!(signal.err().get(), None);
+    }
+
+    // ==================== String Methods ====================
+
+    #[test]
+    fn test_is_empty_string() {
+        let signal: Binding<String> = binding(String::new());
+        assert!(signal.is_empty().get());
+
+        signal.set("hello".to_string());
+        assert!(!signal.is_empty().get());
+    }
+
+    #[test]
+    fn test_is_empty_str() {
+        let signal: Binding<&str> = binding("");
+        assert!(signal.is_empty().get());
+
+        signal.set("hello");
+        assert!(!signal.is_empty().get());
+    }
+
+    #[test]
+    fn test_str_len() {
+        let signal: Binding<String> = binding("hello".to_string());
+        assert_eq!(signal.str_len().get(), 5);
+
+        signal.set("".to_string());
+        assert_eq!(signal.str_len().get(), 0);
+    }
+
+    #[test]
+    fn test_contains() {
+        let signal: Binding<String> = binding("hello world".to_string());
+        let has_world = signal.contains("world");
+        assert!(has_world.get());
+
+        signal.set("hello".to_string());
+        assert!(!has_world.get());
+    }
+
+    #[test]
+    fn test_contains_str() {
+        let signal: Binding<&str> = binding("hello world");
+        let has_world = signal.contains("world");
+        assert!(has_world.get());
+
+        signal.set("hello");
+        assert!(!has_world.get());
     }
 }
