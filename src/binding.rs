@@ -618,6 +618,18 @@ impl_binding!(
 );
 
 impl_binding!(
+    /// Creates a new usize binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let index = nami::Binding::usize(10);
+    /// assert_eq!(index.get(), 10);
+    /// ```
+    ///
+    usize
+);
+
+impl_binding!(
     /// Creates a new i32 binding with the given value.
     ///
     /// # Example
@@ -637,6 +649,18 @@ impl_binding!(
     /// assert_eq!(counter.get(), 42);
     /// ```
     i64
+);
+
+impl_binding!(
+    /// Create a new isize binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let index = nami::Binding::isize(10);
+    /// assert_eq!(index.get(), 10);
+    /// ```
+    ///
+    isize
 );
 
 impl_binding!(
