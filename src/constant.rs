@@ -17,7 +17,7 @@
 //!
 //! // Use in a reactive computation
 //! let price: Binding<f64> = binding(100.0);
-//! let total = price.clone().zip(tax_rate)
+//! let total = price.zip(&tax_rate)
 //!     .map(|(price, rate)| price * (1.0 + rate));
 //!
 //! assert_eq!(total.get(), 108.0);

@@ -348,7 +348,7 @@ fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
             (quote! {
                 {
                     use ::nami::SignalExt;
-                    SignalExt::map(#arg.clone(), |arg| nami::__format!(#format_str, arg))
+                    (#arg).map(|arg| nami::__format!(#format_str, arg))
                 }
             })
             .into()
@@ -359,7 +359,7 @@ fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
             (quote! {
                 {
                     use nami::{SignalExt, zip::zip};
-                    SignalExt::map(zip(#arg1.clone(), #arg2.clone()), |(arg1, arg2)| {
+                    zip(#arg1.clone(), #arg2.clone()).map(|(arg1, arg2)| {
                         nami::__format!(#format_str, arg1, arg2)
                     })
                 }
@@ -373,8 +373,7 @@ fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
             (quote! {
                 {
                     use ::nami::{SignalExt, zip::zip};
-                    SignalExt::map(
-                        zip(zip(#arg1.clone(), #arg2.clone()), #arg3.clone()),
+                    zip(zip(#arg1.clone(), #arg2.clone()), #arg3.clone()).map(
                         |((arg1, arg2), arg3)| nami::__format!(#format_str, arg1, arg2, arg3)
                     )
                 }
@@ -389,11 +388,10 @@ fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
             (quote! {
                 {
                     use ::nami::{SignalExt, zip::zip};
-                    SignalExt::map(
-                        zip(
-                            zip(#arg1.clone(), #arg2.clone()),
-                            zip(#arg3.clone(), #arg4.clone())
-                        ),
+                    zip(
+                        zip(#arg1.clone(), #arg2.clone()),
+                        zip(#arg3.clone(), #arg4.clone())
+                    ).map(
                         |((arg1, arg2), (arg3, arg4))| nami::__format!(#format_str, arg1, arg2, arg3, arg4)
                     )
                 }
@@ -413,7 +411,7 @@ fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenS
             (quote! {
                 {
                     use ::nami::SignalExt;
-                    SignalExt::map(#var.clone(), |#var| {
+                    (#var).map(|#var| {
                         nami::__format!(#format_str)
                     })
                 }
@@ -426,7 +424,7 @@ fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenS
             (quote! {
                 {
                     use ::nami::{SignalExt, zip::zip};
-                    SignalExt::map(zip(#var1.clone(), #var2.clone()), |(#var1, #var2)| {
+                    zip(#var1.clone(), #var2.clone()).map(|(#var1, #var2)| {
                         nami::__format!(#format_str)
                     })
                 }
@@ -440,8 +438,7 @@ fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenS
             (quote! {
                 {
                     use ::nami::{SignalExt, zip::zip};
-                    SignalExt::map(
-                        zip(zip(#var1.clone(), #var2.clone()), #var3.clone()),
+                    zip(zip(#var1.clone(), #var2.clone()), #var3.clone()).map(
                         |((#var1, #var2), #var3)| {
                             ::nami::__format!(#format_str)
                         }
@@ -458,11 +455,10 @@ fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenS
             (quote! {
                 {
                     use ::nami::{SignalExt, zip::zip};
-                    SignalExt::map(
-                        zip(
-                            zip(#var1.clone(), #var2.clone()),
-                            zip(#var3.clone(), #var4.clone())
-                        ),
+                    zip(
+                        zip(#var1.clone(), #var2.clone()),
+                        zip(#var3.clone(), #var4.clone())
+                    ).map(
                         |((#var1, #var2), (#var3, #var4))| {
                             ::nami::__format!(#format_str)
                         }

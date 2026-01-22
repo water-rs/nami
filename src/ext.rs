@@ -12,52 +12,53 @@ use core::time::Duration;
 ///
 /// This trait adds utility methods to any type implementing Signal,
 /// allowing for easy chaining of operations like mapping, zipping, and caching.
-pub trait SignalExt: Signal + Sized {
+/// All methods take `&self` and clone internally, as cloning is assumed cheap for reactive objects.
+pub trait SignalExt: Signal {
     /// Transforms the output of this signal using the provided function.
-    fn map<F, Output>(self, f: F) -> Map<Self, F, Output>
+    fn map<F, Output>(&self, f: F) -> Map<Self, F, Output>
     where
         F: 'static + Clone + Fn(Self::Output) -> Output,
         Output: 'static,
         Self: 'static,
     {
-        Map::new(self, f)
+        Map::new(self.clone(), f)
     }
 
     /// Combines this signal with another signal into a tuple.
-    fn zip<B>(self, b: B) -> Zip<Self, B>
+    fn zip<B>(&self, b: &B) -> Zip<Self, B>
     where
         B: Signal,
         Self::Output: Clone,
         B::Output: Clone,
     {
-        Zip::new(self, b)
+        Zip::new(self.clone(), b.clone())
     }
 
     /// Wraps this signal with caching to avoid redundant computations.
-    fn cached(self) -> Cached<Self>
+    fn cached(&self) -> Cached<Self>
     where
         Self::Output: Clone,
     {
-        Cached::new(self)
+        Cached::new(self.clone())
     }
 
     /// Converts this signal into a type-erased `Computed` container.
-    fn computed(self) -> Computed<Self::Output>
+    fn computed(&self) -> Computed<Self::Output>
     where
         Self: 'static,
     {
-        Computed::new(self)
+        Computed::new(self.clone())
     }
 
     /// Attaches metadata to this signal's watcher notifications.
-    fn with<T>(self, metadata: T) -> WithMetadata<Self, T> {
-        WithMetadata::new(metadata, self)
+    fn with<T>(&self, metadata: T) -> WithMetadata<Self, T> {
+        WithMetadata::new(metadata, self.clone())
     }
 
     // ==================== Map Variants ====================
 
     /// Transforms the output using `Into::into`.
-    fn map_into<U>(self) -> Map<Self, fn(Self::Output) -> U, U>
+    fn map_into<U>(&self) -> Map<Self, fn(Self::Output) -> U, U>
     where
         Self: 'static,
         Self::Output: Into<U>,
@@ -67,7 +68,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Applies a side-effect function and returns the original value.
-    fn inspect<F>(self, f: F) -> Map<Self, impl Clone + Fn(Self::Output) -> Self::Output, Self::Output>
+    fn inspect<F>(&self, f: F) -> Map<Self, impl Clone + Fn(Self::Output) -> Self::Output, Self::Output>
     where
         Self: 'static,
         Self::Output: Clone + 'static,
@@ -80,17 +81,17 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Creates a distinct signal that only notifies on value changes.
-    fn distinct(self) -> Distinct<Self>
+    fn distinct(&self) -> Distinct<Self>
     where
         Self::Output: PartialEq + Clone,
     {
-        Distinct::new(self)
+        Distinct::new(self.clone())
     }
 
     // ==================== Comparison Methods ====================
 
     /// Returns `true` if the value equals the given value.
-    fn equal_to(self, other: Self::Output) -> Map<Self, impl Clone + Fn(Self::Output) -> bool, bool>
+    fn equal_to(&self, other: Self::Output) -> Map<Self, impl Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         Self::Output: Clone + PartialEq + 'static,
@@ -100,7 +101,7 @@ pub trait SignalExt: Signal + Sized {
 
     /// Returns `true` if the value does not equal the given value.
     fn not_equal_to(
-        self,
+        &self,
         other: Self::Output,
     ) -> Map<Self, impl Clone + Fn(Self::Output) -> bool, bool>
     where
@@ -111,7 +112,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns `true` if the predicate returns `true` for the value.
-    fn condition<F>(self, predicate: F) -> Map<Self, impl Clone + Fn(Self::Output) -> bool, bool>
+    fn condition<F>(&self, predicate: F) -> Map<Self, impl Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         F: 'static + Clone + Fn(&Self::Output) -> bool,
@@ -123,7 +124,7 @@ pub trait SignalExt: Signal + Sized {
 
     /// Returns `true` if the `Option` is `Some`.
     #[allow(clippy::wrong_self_convention)]
-    fn is_some<T>(self) -> Map<Self, fn(Option<T>) -> bool, bool>
+    fn is_some<T>(&self) -> Map<Self, fn(Option<T>) -> bool, bool>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
@@ -133,7 +134,7 @@ pub trait SignalExt: Signal + Sized {
 
     /// Returns `true` if the `Option` is `None`.
     #[allow(clippy::wrong_self_convention)]
-    fn is_none<T>(self) -> Map<Self, fn(Option<T>) -> bool, bool>
+    fn is_none<T>(&self) -> Map<Self, fn(Option<T>) -> bool, bool>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
@@ -142,7 +143,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns the contained value or a default.
-    fn unwrap_or<T>(self, default: T) -> Map<Self, impl Clone + Fn(Option<T>) -> T, T>
+    fn unwrap_or<T>(&self, default: T) -> Map<Self, impl Clone + Fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: Clone + 'static,
@@ -151,7 +152,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns the contained value or computes it from a closure.
-    fn unwrap_or_else<T, F>(self, default: F) -> Map<Self, impl Clone + Fn(Option<T>) -> T, T>
+    fn unwrap_or_else<T, F>(&self, default: F) -> Map<Self, impl Clone + Fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
@@ -161,7 +162,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns the contained value or the default value for that type.
-    fn unwrap_or_default<T>(self) -> Map<Self, fn(Option<T>) -> T, T>
+    fn unwrap_or_default<T>(&self) -> Map<Self, fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: Default + 'static,
@@ -171,7 +172,7 @@ pub trait SignalExt: Signal + Sized {
 
     /// Returns `true` if the `Option` is `Some` and the value equals the given value.
     fn some_equal_to<T>(
-        self,
+        &self,
         value: T,
     ) -> Map<Self, impl Clone + Fn(Option<T>) -> bool, bool>
     where
@@ -182,7 +183,8 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Flattens a nested `Option<Option<T>>` into `Option<T>`.
-    fn flatten<T>(self) -> Map<Self, fn(Option<Option<T>>) -> Option<T>, Option<T>>
+    #[allow(clippy::type_complexity)]
+    fn flatten<T>(&self) -> Map<Self, fn(Option<Option<T>>) -> Option<T>, Option<T>>
     where
         Self: Signal<Output = Option<Option<T>>> + 'static,
         T: 'static,
@@ -192,7 +194,7 @@ pub trait SignalExt: Signal + Sized {
 
     /// Maps an `Option<T>` to `Option<U>` using the provided function.
     fn map_some<T, U, F>(
-        self,
+        &self,
         f: F,
     ) -> Map<Self, impl Clone + Fn(Option<T>) -> Option<U>, Option<U>>
     where
@@ -206,7 +208,7 @@ pub trait SignalExt: Signal + Sized {
 
     /// Returns `None` if the option is `None`, otherwise calls `f` with the wrapped value and returns the result.
     fn and_then_some<T, U, F>(
-        self,
+        &self,
         f: F,
     ) -> Map<Self, impl Clone + Fn(Option<T>) -> Option<U>, Option<U>>
     where
@@ -221,7 +223,7 @@ pub trait SignalExt: Signal + Sized {
     // ==================== Bool Methods ====================
 
     /// Returns the logical negation of the boolean value.
-    fn not(self) -> Map<Self, fn(bool) -> bool, bool>
+    fn not(&self) -> Map<Self, fn(bool) -> bool, bool>
     where
         Self: Signal<Output = bool> + 'static,
     {
@@ -229,7 +231,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns `Some(value)` if `true`, otherwise `None`.
-    fn then_some<T>(self, value: T) -> Map<Self, impl Clone + Fn(bool) -> Option<T>, Option<T>>
+    fn then_some<T>(&self, value: T) -> Map<Self, impl Clone + Fn(bool) -> Option<T>, Option<T>>
     where
         Self: Signal<Output = bool> + 'static,
         T: Clone + 'static,
@@ -238,7 +240,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns `if_true` if `true`, otherwise `if_false`.
-    fn select<T>(self, if_true: T, if_false: T) -> Map<Self, impl Clone + Fn(bool) -> T, T>
+    fn select<T>(&self, if_true: T, if_false: T) -> Map<Self, impl Clone + Fn(bool) -> T, T>
     where
         Self: Signal<Output = bool> + 'static,
         T: Clone + 'static,
@@ -249,7 +251,7 @@ pub trait SignalExt: Signal + Sized {
     // ==================== Numeric Methods ====================
 
     /// Returns the negation of the value.
-    fn negate<T>(self) -> Map<Self, fn(T) -> T, T>
+    fn negate<T>(&self) -> Map<Self, fn(T) -> T, T>
     where
         Self: Signal<Output = T> + 'static,
         T: Signed + 'static,
@@ -258,7 +260,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns the absolute value.
-    fn abs<T>(self) -> Map<Self, fn(T) -> T, T>
+    fn abs<T>(&self) -> Map<Self, fn(T) -> T, T>
     where
         Self: Signal<Output = T> + 'static,
         T: Signed + 'static,
@@ -267,7 +269,7 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns `true` if the value is not negative (i.e., positive or zero).
-    fn sign<T>(self) -> Map<Self, fn(T) -> bool, bool>
+    fn sign<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
         T: Signed + 'static,
@@ -276,7 +278,8 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns `true` if the value is positive.
-    fn is_positive<T>(self) -> Map<Self, fn(T) -> bool, bool>
+    #[allow(clippy::wrong_self_convention)]
+    fn is_positive<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
         T: Signed + 'static,
@@ -285,7 +288,8 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns `true` if the value is negative.
-    fn is_negative<T>(self) -> Map<Self, fn(T) -> bool, bool>
+    #[allow(clippy::wrong_self_convention)]
+    fn is_negative<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
         T: Signed + 'static,
@@ -294,7 +298,8 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns `true` if the value is zero.
-    fn is_zero<T>(self) -> Map<Self, fn(T) -> bool, bool>
+    #[allow(clippy::wrong_self_convention)]
+    fn is_zero<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
         T: Zero + 'static,
@@ -305,7 +310,8 @@ pub trait SignalExt: Signal + Sized {
     // ==================== Result Methods ====================
 
     /// Returns `true` if the `Result` is `Ok`.
-    fn is_ok<T, E>(self) -> Map<Self, fn(Result<T, E>) -> bool, bool>
+    #[allow(clippy::wrong_self_convention, clippy::type_complexity)]
+    fn is_ok<T, E>(&self) -> Map<Self, fn(Result<T, E>) -> bool, bool>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -315,7 +321,8 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Returns `true` if the `Result` is `Err`.
-    fn is_err<T, E>(self) -> Map<Self, fn(Result<T, E>) -> bool, bool>
+    #[allow(clippy::wrong_self_convention, clippy::type_complexity)]
+    fn is_err<T, E>(&self) -> Map<Self, fn(Result<T, E>) -> bool, bool>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -325,7 +332,8 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Converts from `Result<T, E>` to `Option<T>`.
-    fn ok<T, E>(self) -> Map<Self, fn(Result<T, E>) -> Option<T>, Option<T>>
+    #[allow(clippy::type_complexity)]
+    fn ok<T, E>(&self) -> Map<Self, fn(Result<T, E>) -> Option<T>, Option<T>>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -335,7 +343,8 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Converts from `Result<T, E>` to `Option<E>`.
-    fn err<T, E>(self) -> Map<Self, fn(Result<T, E>) -> Option<E>, Option<E>>
+    #[allow(clippy::type_complexity)]
+    fn err<T, E>(&self) -> Map<Self, fn(Result<T, E>) -> Option<E>, Option<E>>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -346,7 +355,7 @@ pub trait SignalExt: Signal + Sized {
 
     /// Returns the contained `Ok` value or a default.
     fn unwrap_or_result<T, E>(
-        self,
+        &self,
         default: T,
     ) -> Map<Self, impl Clone + Fn(Result<T, E>) -> T, T>
     where
@@ -359,7 +368,7 @@ pub trait SignalExt: Signal + Sized {
 
     /// Returns the contained `Ok` value or computes it from the error.
     fn unwrap_or_else_result<T, E, F>(
-        self,
+        &self,
         f: F,
     ) -> Map<Self, impl Clone + Fn(Result<T, E>) -> T, T>
     where
@@ -372,8 +381,9 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Maps a `Result<T, E>` to `Result<U, E>` using the provided function.
+    #[allow(clippy::type_complexity)]
     fn map_ok<T, E, U, F>(
-        self,
+        &self,
         f: F,
     ) -> Map<Self, impl Clone + Fn(Result<T, E>) -> Result<U, E>, Result<U, E>>
     where
@@ -387,8 +397,9 @@ pub trait SignalExt: Signal + Sized {
     }
 
     /// Maps a `Result<T, E>` to `Result<T, F>` using the provided function.
+    #[allow(clippy::type_complexity)]
     fn map_err<T, E, F, U>(
-        self,
+        &self,
         f: F,
     ) -> Map<Self, impl Clone + Fn(Result<T, E>) -> Result<T, U>, Result<T, U>>
     where
@@ -408,11 +419,11 @@ pub trait SignalExt: Signal + Sized {
     ///
     /// The debounced signal will only emit values after the specified duration
     /// has passed without receiving new values.
-    fn debounce(self, duration: Duration) -> Debounce<Self, executor_core::DefaultExecutor>
+    fn debounce(&self, duration: Duration) -> Debounce<Self, executor_core::DefaultExecutor>
     where
         Self::Output: Clone,
     {
-        Debounce::new(self, duration)
+        Debounce::new(self.clone(), duration)
     }
     #[cfg(feature = "timer")]
     /// Creates a throttled version of this signal.
@@ -420,14 +431,14 @@ pub trait SignalExt: Signal + Sized {
     /// The throttled signal will emit values at most once every specified duration,
     /// ignoring any additional values received during that period.
     fn throttle(
-        self,
+        &self,
         duration: Duration,
     ) -> crate::throttle::Throttle<Self, executor_core::DefaultExecutor>
     where
         Self::Output: Clone,
     {
-        crate::throttle::Throttle::new(self, duration)
+        crate::throttle::Throttle::new(self.clone(), duration)
     }
 }
 
-impl<C: Signal + Sized> SignalExt for C {}
+impl<C: Signal> SignalExt for C {}
