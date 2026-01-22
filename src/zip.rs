@@ -51,7 +51,7 @@ where
 
 /// This trait provides a way to apply a function to the individual elements
 /// of a nested tuple structure, flattening the structure in the process.
-pub trait FlattenMap<F, T, Output>: Sized + Signal {
+pub trait FlattenMap<F, T, Output>: Signal {
     /// Maps a function over the flattened elements of a nested tuple.
     ///
     /// # Parameters
@@ -60,7 +60,7 @@ pub trait FlattenMap<F, T, Output>: Sized + Signal {
     ///
     /// # Returns
     /// A new computation that produces the result of applying `f` to the flattened elements.
-    fn flatten_map(self, f: F) -> Map<Self, impl Clone + Fn(Self::Output) -> Output, Output>;
+    fn flatten_map(&self, f: F) -> Map<Self, impl Clone + Fn(Self::Output) -> Output, Output>;
 }
 
 /// Implementation for flattening and mapping a tuple of two elements.
@@ -72,8 +72,8 @@ where
     T2: 'static,
     Output: 'static,
 {
-    fn flatten_map(self, f: F) -> Map<C, impl Clone + Fn((T1, T2)) -> Output, Output> {
-        map(self, move |(t1, t2)| f(t1, t2))
+    fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn((T1, T2)) -> Output, Output> {
+        map(self.clone(), move |(t1, t2)| f(t1, t2))
     }
 }
 
@@ -84,8 +84,8 @@ where
     F: 'static + Clone + Fn(T1, T2, T3) -> Output,
     Output: 'static,
 {
-    fn flatten_map(self, f: F) -> Map<C, impl Clone + Fn(((T1, T2), T3)) -> Output, Output> {
-        map(self, move |((t1, t2), t3)| f(t1, t2, t3))
+    fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn(((T1, T2), T3)) -> Output, Output> {
+        map(self.clone(), move |((t1, t2), t3)| f(t1, t2, t3))
     }
 }
 
