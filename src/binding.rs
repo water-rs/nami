@@ -225,7 +225,7 @@ impl<T: 'static> Binding<T> {
     /// # Example
     /// ```
     /// use nami::Binding;
-    /// let n = Binding::int(10);
+    /// let n = Binding::i32(10);
     /// *n.get_mut() += 5; // do not bind the guard to a let pattern...even it is `_`
     /// ```
     ///
@@ -275,7 +275,7 @@ impl<T: 'static> Binding<T> {
     /// text.set_from("updated");
     /// assert_eq!(text.get(), "updated");
     ///
-    /// let mut count: Binding<i64> = binding(0);   
+    /// let mut count: Binding<i64> = binding(0);
     /// count.set(42);
     /// assert_eq!(count.get(), 42i64);
     /// ```
@@ -438,7 +438,7 @@ impl<T: 'static> BindingMailbox<T> {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// // Convert Str binding to String for cross-thread usage  
+    /// // Convert Str binding to String for cross-thread usage
     /// use nami::{binding, Binding};
     /// use waterui_str::Str;
     /// let text_binding:Binding<Str> = nami::binding("hello world");
@@ -562,7 +562,7 @@ impl<T: Signed> Binding<T> {
     /// # Example
     /// ```
     /// use nami::Binding;
-    /// let number = Binding::int(-10i32);
+    /// let number = Binding::i32(-10i32);
     /// let sign = number.sign();
     /// assert_eq!(sign.get(), false);
     /// ```
@@ -583,20 +583,93 @@ impl<T: Signed> Binding<T> {
     }
 }
 
-impl Binding<i32> {
-    /// Creates a new integer binding with the given value.
+macro_rules! impl_binding {
+    ( $( #[$meta:meta] )* $ty:ident ) => {
+        impl Binding<$ty> {
+            $( #[$meta] )*
+            #[must_use]
+            pub fn $ty(value: $ty) -> Self {
+                Self::container(value)
+            }
+        }
+    };
+}
+
+impl_binding!(
+    /// Creates a new u32 binding with the given value.
     ///
     /// # Example
     /// ```
-    /// let counter = nami::Binding::int(42);
+    /// let counter = nami::Binding::u32(42);
     /// assert_eq!(counter.get(), 42);
     /// ```
-    #[must_use]
-    pub fn int(i: i32) -> Self {
-        Self::container(i)
-    }
-}
+    u32
+);
 
+impl_binding!(
+    /// Creates a new u64 binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let counter = nami::Binding::u64(42);
+    /// assert_eq!(counter.get(), 42);
+    /// ```
+    u64
+);
+
+impl_binding!(
+    /// Creates a new i32 binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let counter = nami::Binding::i32(42);
+    /// assert_eq!(counter.get(), 42);
+    /// ```
+    i32
+);
+
+impl_binding!(
+    /// Creates a new i64 binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let counter = nami::Binding::i64(42);
+    /// assert_eq!(counter.get(), 42);
+    /// ```
+    i64
+);
+
+impl_binding!(
+    /// Creates a new f32 binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let ratio = nami::Binding::f32(3.14);
+    /// assert_eq!(ratio.get(), 3.14);
+    /// ```
+    f32
+);
+
+impl_binding!(
+    /// Creates a new f64 binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let ratio = nami::Binding::f64(3.14);
+    /// assert_eq!(ratio.get(), 3.14);
+    /// ```
+    f64
+);
+impl_binding!(
+    /// Creates a new bool binding with the given value.
+    ///
+    /// # Example
+    /// ```
+    /// let flag = nami::Binding::bool(true);
+    /// assert_eq!(flag.get(), true);
+    /// ```
+    bool
+);
 impl<T: Clone> Binding<T> {
     /// Appends an element to the binding's value and notifies watchers.
     ///
@@ -733,18 +806,6 @@ impl<T> Binding<Option<T>> {
 }
 
 impl Binding<bool> {
-    /// Creates a new boolean binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// let flag = nami::Binding::bool(true);
-    /// assert_eq!(flag.get(), true);
-    /// ```
-    #[must_use]
-    pub fn bool(value: bool) -> Self {
-        Self::container(value)
-    }
-
     /// Toggles the boolean value and notifies watchers.
     ///
     /// True becomes false, false becomes true.
