@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/water-rs/nami/compare/core-v0.3.1...core-v0.3.2) - 2026-01-22
+
+### Other
+
+- release
+- release
+
 ## [0.3.1](https://github.com/water-rs/nami/compare/core-v0.3.0...core-v0.3.1) - 2026-01-22
 
 ### Other
