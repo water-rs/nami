@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0](https://github.com/water-rs/nami/compare/v0.9.1...v0.10.0) - 2026-01-22
+
+### Other
+
+- Add usize and isize bindings
+- Use macro to add typed Binding constructors
+
 ## [0.9.1](https://github.com/water-rs/nami/compare/v0.9.0...v0.9.1) - 2025-12-05
 
 ### Added
