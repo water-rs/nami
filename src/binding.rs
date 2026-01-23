@@ -897,19 +897,22 @@ impl Binding<bool> {
         )
     }
 
-    /// Creates a binding that selects between two values based on this boolean.
+    /// Creates a bidirectional binding that selects between two values based on this boolean.
     ///
     /// Returns `if_true` when this binding is `true`, `if_false` when `false`.
     /// Setting the `if_true` value on the result sets this binding to `true`.
     /// Setting the `if_false` value sets this binding to `false`.
     ///
+    /// This is a two-way binding. For one-way selection (e.g., in animations),
+    /// use [`SignalExt::select`] instead which doesn't require `T: Eq`.
+    ///
     /// # Example
     /// ```
     /// let dark_mode = nami::binding(false);
-    /// let theme = dark_mode.select("dark".to_string(), "light".to_string());
+    /// let theme = dark_mode.bidirectional_select("dark".to_string(), "light".to_string());
     /// assert_eq!(theme.get(), "light");
     /// ```
-    pub fn select<T>(&self, if_true: T, if_false: T) -> Binding<T>
+    pub fn bidirectional_select<T>(&self, if_true: T, if_false: T) -> Binding<T>
     where
         T: Eq + Clone + 'static,
     {

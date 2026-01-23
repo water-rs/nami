@@ -285,6 +285,24 @@ pub trait SignalExt: Signal {
         self.map(core::ops::Not::not)
     }
 
+    /// Returns the logical AND of this signal with another boolean signal.
+    fn and<B>(&self, other: &B) -> Map<Zip<Self, B>, fn((bool, bool)) -> bool, bool>
+    where
+        Self: Signal<Output = bool> + 'static,
+        B: Signal<Output = bool> + 'static,
+    {
+        Zip::new(self.clone(), other.clone()).map(|(a, b)| a && b)
+    }
+
+    /// Returns the logical OR of this signal with another boolean signal.
+    fn or<B>(&self, other: &B) -> Map<Zip<Self, B>, fn((bool, bool)) -> bool, bool>
+    where
+        Self: Signal<Output = bool> + 'static,
+        B: Signal<Output = bool> + 'static,
+    {
+        Zip::new(self.clone(), other.clone()).map(|(a, b)| a || b)
+    }
+
     /// Returns `Some(value)` if `true`, otherwise `None`.
     fn then_some<T>(
         &self,
@@ -730,6 +748,42 @@ mod tests {
 
         signal.set(false);
         assert!(signal.not().get());
+    }
+
+    #[test]
+    fn test_and() {
+        let a: Binding<bool> = binding(true);
+        let b: Binding<bool> = binding(true);
+        let result = a.and(&b);
+        assert!(result.get());
+
+        a.set(false);
+        assert!(!result.get());
+
+        a.set(true);
+        b.set(false);
+        assert!(!result.get());
+
+        a.set(false);
+        assert!(!result.get());
+    }
+
+    #[test]
+    fn test_or() {
+        let a: Binding<bool> = binding(false);
+        let b: Binding<bool> = binding(false);
+        let result = a.or(&b);
+        assert!(!result.get());
+
+        a.set(true);
+        assert!(result.get());
+
+        a.set(false);
+        b.set(true);
+        assert!(result.get());
+
+        a.set(true);
+        assert!(result.get());
     }
 
     #[test]
