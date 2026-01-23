@@ -1,4 +1,4 @@
-//! Example demonstrating SignalExt comparison methods.
+//! Example demonstrating `SignalExt` comparison methods.
 
 use nami::{Binding, Signal, SignalExt, binding};
 

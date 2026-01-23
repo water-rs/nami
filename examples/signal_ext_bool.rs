@@ -1,4 +1,4 @@
-//! Example demonstrating SignalExt methods for bool types.
+//! Example demonstrating `SignalExt` methods for bool types.
 
 use nami::{Binding, Signal, SignalExt, binding};
 

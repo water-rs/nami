@@ -880,7 +880,7 @@ mod tests {
         let signal: Binding<String> = binding("hello".to_string());
         assert_eq!(signal.str_len().get(), 5);
 
-        signal.set("".to_string());
+        signal.set(String::new());
         assert_eq!(signal.str_len().get(), 0);
     }
 

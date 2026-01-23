@@ -1,4 +1,4 @@
-//! Example demonstrating SignalExt methods for string types.
+//! Example demonstrating `SignalExt` methods for string types.
 
 use nami::{Binding, Signal, SignalExt, binding};
 

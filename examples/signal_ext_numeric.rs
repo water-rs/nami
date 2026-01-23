@@ -1,4 +1,4 @@
-//! Example demonstrating SignalExt methods for numeric types.
+//! Example demonstrating `SignalExt` methods for numeric types.
 
 use nami::{Binding, Signal, SignalExt, binding};
 

@@ -1,4 +1,5 @@
-//! Example demonstrating SignalExt methods for Result types.
+//! Example demonstrating `SignalExt` methods for Result types.
+#![allow(clippy::items_after_statements)]
 
 use nami::{Binding, Signal, SignalExt, binding};
 
@@ -81,7 +82,7 @@ fn main() {
     // Get the username if successful, or "Unknown" if error
     let display_name = user_result
         .ok()
-        .map(|opt| opt.map(|u| u.name).unwrap_or_else(|| "Unknown".to_string()));
+        .map(|opt| opt.map_or_else(|| "Unknown".to_string(), |u| u.name));
 
     println!("\nDisplay name: {}", display_name.get()); // Bob
 

@@ -1,4 +1,4 @@
-//! Example demonstrating SignalExt methods for Option types.
+//! Example demonstrating `SignalExt` methods for Option types.
 
 use nami::{Binding, Signal, SignalExt, binding};
 
