@@ -36,12 +36,14 @@ fn main() {
 
     // Practical example: API response handling
     #[derive(Clone, Debug)]
+    #[allow(unused)]
     struct User {
         name: String,
         email: String,
     }
 
     #[derive(Clone, Debug)]
+    #[allow(unused)]
     struct ApiError {
         code: i32,
         message: String,

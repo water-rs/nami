@@ -1,6 +1,6 @@
 //! Example demonstrating SignalExt methods for string types.
 
-use nami::{binding, Binding, Signal, SignalExt};
+use nami::{Binding, Signal, SignalExt, binding};
 
 fn main() {
     // is_empty: Check if string is empty

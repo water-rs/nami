@@ -1,6 +1,6 @@
 //! Example demonstrating SignalExt methods for bool types.
 
-use nami::{binding, Binding, Signal, SignalExt};
+use nami::{Binding, Signal, SignalExt, binding};
 
 fn main() {
     // not: Logical negation
@@ -40,7 +40,9 @@ fn main() {
     let has_permission: Binding<bool> = binding(true);
 
     // Use zip to combine conditions
-    let can_edit = is_admin.zip(&has_permission).map(|(admin, perm)| admin || perm);
+    let can_edit = is_admin
+        .zip(&has_permission)
+        .map(|(admin, perm)| admin || perm);
     println!("Can edit: {}", can_edit.get()); // true (has permission)
 
     has_permission.set(false);

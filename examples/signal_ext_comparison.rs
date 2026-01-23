@@ -1,6 +1,6 @@
 //! Example demonstrating SignalExt comparison methods.
 
-use nami::{binding, Binding, Signal, SignalExt};
+use nami::{Binding, Signal, SignalExt, binding};
 
 fn main() {
     // equal_to: Check if a value equals a specific value

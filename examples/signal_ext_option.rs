@@ -1,6 +1,6 @@
 //! Example demonstrating SignalExt methods for Option types.
 
-use nami::{binding, Binding, Signal, SignalExt};
+use nami::{Binding, Signal, SignalExt, binding};
 
 fn main() {
     // Basic Option checks
