@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1](https://github.com/water-rs/nami/compare/v0.10.0...v0.10.1) - 2026-01-23
+
+### Other
+
+- Polish examples and simplify small code
+- Tidy examples: reorder imports and add attributes
+- Simplify tests and normalize imports
+- Add string and comparison SignalExt methods
+- Refactor SignalExt to use Map::new and add examples
+- Make FlattenMap use &self and remove Sized bound
+- Make SignalExt methods take &self
+- Add convenience adapters and helpers to SignalExt
+- release
+
 ## [0.10.0](https://github.com/water-rs/nami/compare/v0.9.1...v0.10.0) - 2026-01-22
 
 ### Other
