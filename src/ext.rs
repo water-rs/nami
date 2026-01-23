@@ -1,7 +1,7 @@
-use alloc::string::String;
 use crate::{
     Computed, Signal, cache::Cached, distinct::Distinct, map::Map, signal::WithMetadata, zip::Zip,
 };
+use alloc::string::String;
 use num_traits::{Signed, Zero};
 
 #[cfg(feature = "timer")]
@@ -544,8 +544,8 @@ impl<C: Signal> SignalExt for C {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::ToString;
     use crate::{Binding, binding};
+    use alloc::string::ToString;
 
     // ==================== Map Variants ====================
 
@@ -886,11 +886,11 @@ mod tests {
 
     #[test]
     fn test_contains() {
-        let signal: Binding<String> = binding("hello world".to_string());
+        let signal: Binding<&str> = binding("hello world");
         let has_world = signal.contains("world");
         assert!(has_world.get());
 
-        signal.set("hello".to_string());
+        signal.set("hello");
         assert!(!has_world.get());
     }
 

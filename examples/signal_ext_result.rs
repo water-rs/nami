@@ -1,6 +1,6 @@
 //! Example demonstrating SignalExt methods for Result types.
 
-use nami::{binding, Binding, Signal, SignalExt};
+use nami::{Binding, Signal, SignalExt, binding};
 
 fn main() {
     // Basic Result checks
