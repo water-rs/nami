@@ -14,13 +14,13 @@ license = "MIT"
 readme = "README.md"
 
 [workspace.dependencies]
-nami = { path = ".", version = "0.10.0" }
-nami-derive = { path = "derive", version = "0.2.2" }
+nami = { path = ".", version = "0.10.1" }
+nami-derive = { path = "derive", version = "0.2.3" }
 nami-core = { path = "core", version = "0.3.2", default-features = false }
 
 [package]
 name = "nami"
-version = "0.10.0"
+version = "0.10.1"
 edition.workspace = true
 authors.workspace = true
 description = "A powerful, lightweight reactive framework."
