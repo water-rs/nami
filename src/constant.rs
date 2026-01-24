@@ -154,3 +154,6 @@ where
     }
     fn watch(&self, _watcher: impl Fn(Context<Self::Output>)) {}
 }
+
+impl_signal_ops!(Constant<T>, [T], T);
+impl_signal_ops!(Lazy<F, T>, [F, T], T);

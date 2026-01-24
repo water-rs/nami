@@ -212,10 +212,34 @@ fn derive_project_unit_struct(input: &DeriveInput) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// A single argument to the `s!` macro - either positional or named
+enum SArg {
+    /// Positional argument: just an expression
+    Positional(Expr),
+    /// Named argument: `name = expr`
+    Named { name: syn::Ident, value: Expr },
+}
+
+impl Parse for SArg {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        // Try to parse as named argument: `ident = expr`
+        if input.peek(syn::Ident) && input.peek2(Token![=]) {
+            let name: syn::Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            let value: Expr = input.parse()?;
+            Ok(Self::Named { name, value })
+        } else {
+            // Parse as positional expression
+            let expr: Expr = input.parse()?;
+            Ok(Self::Positional(expr))
+        }
+    }
+}
+
 /// Input structure for the `s!` macro
 struct SInput {
     format_str: LitStr,
-    args: Punctuated<Expr, Token![,]>,
+    args: Punctuated<SArg, Token![,]>,
 }
 
 impl Parse for SInput {
@@ -248,6 +272,9 @@ impl Parse for SInput {
 ///
 /// // Positional arguments still work
 /// let msg2 = s!("Hello {}, you are {}", name, age);
+///
+/// // Named arguments with automatic cloning (like println!)
+/// let msg3 = s!("Hello {n}, you are {a} years old", n = name, a = age);
 /// ```
 #[proc_macro]
 #[allow(clippy::similar_names)] // Allow arg1, arg2, etc.
@@ -260,15 +287,85 @@ pub fn s(input: TokenStream) -> TokenStream {
     let (has_positional, has_named, positional_count, named_vars) =
         analyze_format_string(&format_value);
 
-    // If there are explicit arguments, validate and use positional approach
-    if !input.args.is_empty() {
-        // Check for mixed usage errors
+    // Separate named and positional arguments
+    let mut positional_args: Vec<&Expr> = Vec::new();
+    let mut named_args: Vec<(&syn::Ident, &Expr)> = Vec::new();
+
+    for arg in &input.args {
+        match arg {
+            SArg::Positional(expr) => positional_args.push(expr),
+            SArg::Named { name, value } => named_args.push((name, value)),
+        }
+    }
+
+    // Check for mixed named and positional arguments
+    if !positional_args.is_empty() && !named_args.is_empty() {
+        return syn::Error::new_spanned(
+            &format_str,
+            "Cannot mix positional and named arguments. Use either all positional or all named.",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // Handle named arguments (like println! style: `s!("{c}", c = value)`)
+    if !named_args.is_empty() {
+        // Validate that format string has named placeholders
+        if has_positional {
+            return syn::Error::new_spanned(
+                &format_str,
+                "Format string has positional placeholders {{}} but named arguments were provided. \
+                Use named placeholders like {{name}} with named arguments.",
+            )
+            .to_compile_error()
+            .into();
+        }
+
+        // Check that all named placeholders have corresponding arguments
+        let arg_names: Vec<String> = named_args.iter().map(|(n, _)| n.to_string()).collect();
+        for var in &named_vars {
+            if !arg_names.contains(var) {
+                return syn::Error::new_spanned(
+                    &format_str,
+                    format!(
+                        "Named placeholder {{{var}}} in format string has no corresponding argument. \
+                        Add `{var} = <expr>` to the arguments."
+                    ),
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+
+        // Check for unused arguments
+        for (name, _) in &named_args {
+            let name_str = name.to_string();
+            if !named_vars.contains(&name_str) {
+                return syn::Error::new_spanned(
+                    name,
+                    format!("Named argument `{name_str}` is not used in format string"),
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+
+        // Generate code for named arguments with automatic cloning
+        let names: Vec<&syn::Ident> = named_args.iter().map(|(n, _)| *n).collect();
+        let exprs: Vec<&Expr> = named_args.iter().map(|(_, e)| *e).collect();
+        return handle_s_named_args(&format_str, &names, &exprs);
+    }
+
+    // Handle positional arguments
+    if !positional_args.is_empty() {
+        // Check for named placeholders with positional arguments
         if has_named {
             return syn::Error::new_spanned(
                 &format_str,
                 format!(
-                    "Format string contains named arguments like {{{}}} but you provided positional arguments. \
-                    Either use positional placeholders like {{}} or remove the explicit arguments to use automatic variable capture.",
+                    "Format string contains named placeholders like {{{}}} but positional arguments were provided. \
+                    Either use positional placeholders like {{}} or use named arguments like `{} = <expr>`.",
+                    named_vars.first().unwrap_or(&String::new()),
                     named_vars.first().unwrap_or(&String::new())
                 )
             )
@@ -277,21 +374,22 @@ pub fn s(input: TokenStream) -> TokenStream {
         }
 
         // Check argument count matches placeholders
-        if positional_count != input.args.len() {
+        if positional_count != positional_args.len() {
             return syn::Error::new_spanned(
                 &format_str,
                 format!(
                     "Format string has {} positional placeholder(s) but {} arguments were provided",
                     positional_count,
-                    input.args.len()
+                    positional_args.len()
                 ),
             )
             .to_compile_error()
             .into();
         }
-        let args: Vec<_> = input.args.iter().collect();
-        return handle_s_args(&format_str, &args);
+        return handle_s_args(&format_str, &positional_args);
     }
+
+    // No explicit arguments - check for automatic capture
 
     // Check for mixed placeholders when no explicit arguments
     if has_positional && has_named {
@@ -305,7 +403,7 @@ pub fn s(input: TokenStream) -> TokenStream {
     }
 
     // If has positional placeholders but no arguments provided
-    if has_positional && input.args.is_empty() {
+    if has_positional {
         return syn::Error::new_spanned(
             &format_str,
             format!(
@@ -325,7 +423,7 @@ pub fn s(input: TokenStream) -> TokenStream {
         return quote! {
             {
                 use ::nami::constant;
-                constant(nami::__format!(#format_str))
+                constant(::nami::__alloc::format!(#format_str))
             }
         }
         .into();
@@ -348,7 +446,7 @@ fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
             (quote! {
                 {
                     use ::nami::SignalExt;
-                    (#arg).map(|arg| nami::__format!(#format_str, arg))
+                    (#arg).map(|arg| ::nami::__alloc::format!(#format_str, arg))
                 }
             })
             .into()
@@ -360,7 +458,7 @@ fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
                 {
                     use nami::{SignalExt, zip::zip};
                     zip(#arg1.clone(), #arg2.clone()).map(|(arg1, arg2)| {
-                        nami::__format!(#format_str, arg1, arg2)
+                        ::nami::__alloc::format!(#format_str, arg1, arg2)
                     })
                 }
             })
@@ -374,7 +472,7 @@ fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
                 {
                     use ::nami::{SignalExt, zip::zip};
                     zip(zip(#arg1.clone(), #arg2.clone()), #arg3.clone()).map(
-                        |((arg1, arg2), arg3)| nami::__format!(#format_str, arg1, arg2, arg3)
+                        |((arg1, arg2), arg3)| ::nami::__alloc::format!(#format_str, arg1, arg2, arg3)
                     )
                 }
             })
@@ -392,12 +490,104 @@ fn handle_s_args(format_str: &LitStr, args: &[&Expr]) -> TokenStream {
                         zip(#arg1.clone(), #arg2.clone()),
                         zip(#arg3.clone(), #arg4.clone())
                     ).map(
-                        |((arg1, arg2), (arg3, arg4))| nami::__format!(#format_str, arg1, arg2, arg3, arg4)
+                        |((arg1, arg2), (arg3, arg4))| ::nami::__alloc::format!(#format_str, arg1, arg2, arg3, arg4)
                     )
                 }
             }).into()
         }
         _ => syn::Error::new_spanned(format_str, "Too many arguments, maximum 4 supported")
+            .to_compile_error()
+            .into(),
+    }
+}
+
+/// Handle named arguments like `s!("{c}", c = expr)` with automatic cloning
+///
+/// Uses `ToOwned::to_owned()` to properly handle both owned values and references:
+/// - If expr is `&Binding<T>`, to_owned() returns `Binding<T>`
+/// - If expr is `Binding<T>`, to_owned() also returns `Binding<T>`
+#[allow(clippy::similar_names)]
+fn handle_s_named_args(
+    format_str: &LitStr,
+    names: &[&syn::Ident],
+    exprs: &[&Expr],
+) -> TokenStream {
+    match names.len() {
+        1 => {
+            let name = names[0];
+            let expr = exprs[0];
+            (quote! {
+                {
+                    use ::nami::SignalExt;
+                    ::nami::__alloc::borrow::ToOwned::to_owned(#expr).map(|#name| {
+                        ::::nami::__alloc::format!(#format_str)
+                    })
+                }
+            })
+            .into()
+        }
+        2 => {
+            let name1 = names[0];
+            let name2 = names[1];
+            let expr1 = exprs[0];
+            let expr2 = exprs[1];
+            (quote! {
+                {
+                    use ::nami::{SignalExt, zip::zip};
+                    zip(::nami::__alloc::borrow::ToOwned::to_owned(#expr1), ::nami::__alloc::borrow::ToOwned::to_owned(#expr2)).map(|(#name1, #name2)| {
+                        ::::nami::__alloc::format!(#format_str)
+                    })
+                }
+            })
+            .into()
+        }
+        3 => {
+            let name1 = names[0];
+            let name2 = names[1];
+            let name3 = names[2];
+            let expr1 = exprs[0];
+            let expr2 = exprs[1];
+            let expr3 = exprs[2];
+            (quote! {
+                {
+                    use ::nami::{SignalExt, zip::zip};
+                    zip(
+                        zip(::nami::__alloc::borrow::ToOwned::to_owned(#expr1), ::nami::__alloc::borrow::ToOwned::to_owned(#expr2)),
+                        ::nami::__alloc::borrow::ToOwned::to_owned(#expr3)
+                    ).map(
+                        |((#name1, #name2), #name3)| {
+                            ::::nami::__alloc::format!(#format_str)
+                        }
+                    )
+                }
+            })
+            .into()
+        }
+        4 => {
+            let name1 = names[0];
+            let name2 = names[1];
+            let name3 = names[2];
+            let name4 = names[3];
+            let expr1 = exprs[0];
+            let expr2 = exprs[1];
+            let expr3 = exprs[2];
+            let expr4 = exprs[3];
+            (quote! {
+                {
+                    use ::nami::{SignalExt, zip::zip};
+                    zip(
+                        zip(::nami::__alloc::borrow::ToOwned::to_owned(#expr1), ::nami::__alloc::borrow::ToOwned::to_owned(#expr2)),
+                        zip(::nami::__alloc::borrow::ToOwned::to_owned(#expr3), ::nami::__alloc::borrow::ToOwned::to_owned(#expr4))
+                    ).map(
+                        |((#name1, #name2), (#name3, #name4))| {
+                            ::::nami::__alloc::format!(#format_str)
+                        }
+                    )
+                }
+            })
+            .into()
+        }
+        _ => syn::Error::new_spanned(format_str, "Too many named arguments, maximum 4 supported")
             .to_compile_error()
             .into(),
     }
@@ -412,7 +602,7 @@ fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenS
                 {
                     use ::nami::SignalExt;
                     (#var).map(|#var| {
-                        nami::__format!(#format_str)
+                        ::nami::__alloc::format!(#format_str)
                     })
                 }
             })
@@ -425,7 +615,7 @@ fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenS
                 {
                     use ::nami::{SignalExt, zip::zip};
                     zip(#var1.clone(), #var2.clone()).map(|(#var1, #var2)| {
-                        nami::__format!(#format_str)
+                        ::nami::__alloc::format!(#format_str)
                     })
                 }
             })
@@ -440,7 +630,7 @@ fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenS
                     use ::nami::{SignalExt, zip::zip};
                     zip(zip(#var1.clone(), #var2.clone()), #var3.clone()).map(
                         |((#var1, #var2), #var3)| {
-                            ::nami::__format!(#format_str)
+                            ::::nami::__alloc::format!(#format_str)
                         }
                     )
                 }
@@ -460,7 +650,7 @@ fn handle_s_named_vars(format_str: &LitStr, var_idents: &[syn::Ident]) -> TokenS
                         zip(#var3.clone(), #var4.clone())
                     ).map(
                         |((#var1, #var2), (#var3, #var4))| {
-                            ::nami::__format!(#format_str)
+                            ::::nami::__alloc::format!(#format_str)
                         }
                     )
                 }

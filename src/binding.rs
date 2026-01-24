@@ -22,13 +22,7 @@ use num_traits::Signed;
 
 use crate::{
     Computed, Signal,
-    map::Map,
-    utils::{
-        add, bitand as util_bitand, bitor as util_bitor, bitxor as util_bitxor, div as util_div,
-        mul as util_mul, rem as util_rem, shl as util_shl, shr as util_shr, sub as util_sub,
-    },
     watcher::{BoxWatcherGuard, Context, WatcherManager},
-    zip::Zip,
 };
 
 pub use nami_core::CustomBinding;
@@ -119,37 +113,7 @@ pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
     Binding::container(value.into())
 }
 
-macro_rules! impl_binary_trait {
-    ($trait:ident, $method:ident, $helper:path) => {
-        impl<T, RHS> $trait<RHS> for Binding<T>
-        where
-            RHS: Signal,
-            T: $trait<RHS::Output> + Clone + 'static,
-            RHS::Output: Clone,
-        {
-            type Output = Map<
-                Zip<Self, RHS>,
-                fn((T, RHS::Output)) -> <T as $trait<RHS::Output>>::Output,
-                <T as $trait<RHS::Output>>::Output,
-            >;
-
-            fn $method(self, rhs: RHS) -> Self::Output {
-                $helper(self, rhs)
-            }
-        }
-    };
-}
-
-impl_binary_trait!(Add, add, add);
-impl_binary_trait!(Sub, sub, util_sub);
-impl_binary_trait!(Mul, mul, util_mul);
-impl_binary_trait!(Div, div, util_div);
-impl_binary_trait!(Rem, rem, util_rem);
-impl_binary_trait!(BitAnd, bitand, util_bitand);
-impl_binary_trait!(BitOr, bitor, util_bitor);
-impl_binary_trait!(BitXor, bitxor, util_bitxor);
-impl_binary_trait!(Shl, shl, util_shl);
-impl_binary_trait!(Shr, shr, util_shr);
+impl_signal_binary_ops!(Binding<T>, [T], T);
 
 /// A guard that provides mutable access to a binding's value.
 ///

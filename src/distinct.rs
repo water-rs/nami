@@ -62,3 +62,6 @@ where
         })
     }
 }
+
+// Note: Distinct<S> has an additional PartialEq bound, making it incompatible
+// with the generic wrapper macros. Users can convert to Computed for operators.

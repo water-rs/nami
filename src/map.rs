@@ -128,3 +128,5 @@ where
         })
     }
 }
+
+impl_signal_ops!(Map<C, F, Output>, [C, F, Output], Output);

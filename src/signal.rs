@@ -107,3 +107,5 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
             })
     }
 }
+
+impl_signal_wrapper_ops!(WithMetadata<C, T>, [C, T], C);

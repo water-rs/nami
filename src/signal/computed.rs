@@ -1,13 +1,10 @@
-use core::{any::Any, ops::Add};
+use core::any::Any;
 
 use alloc::{boxed::Box, rc::Rc};
 
 use crate::{
     SignalExt, constant,
-    map::Map,
-    utils::add,
     watcher::{BoxWatcherGuard, Context, Watcher},
-    zip::Zip,
 };
 
 use super::Signal;
@@ -55,22 +52,7 @@ impl<C: Signal + 'static> ComputedImpl for C {
     }
 }
 
-impl<T, C2> Add<C2> for Computed<T>
-where
-    C2: Signal,
-    T: Add<C2::Output> + Clone + 'static,
-    C2::Output: Clone,
-{
-    type Output = Map<
-        Zip<Self, C2>,
-        fn((T, <C2 as Signal>::Output)) -> <T as Add<<C2 as Signal>::Output>>::Output,
-        <T as Add<<C2 as Signal>::Output>>::Output,
-    >;
-
-    fn add(self, rhs: C2) -> Self::Output {
-        add(self, rhs)
-    }
-}
+impl_signal_ops!(Computed<T>, [T], T);
 
 /// Implements `Default` for `Computed<T>` when `T` implements `Default`.
 ///

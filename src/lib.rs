@@ -5,6 +5,10 @@
 extern crate std;
 
 extern crate alloc;
+
+#[macro_use]
+mod ops;
+
 pub mod binding;
 #[doc(inline)]
 pub use binding::{Binding, Container, CustomBinding, binding};
@@ -43,6 +47,6 @@ pub use ext::SignalExt;
 pub use nami_derive::{Project, s};
 
 #[doc(hidden)]
-pub use alloc::format as __format;
+pub extern crate alloc as __alloc;
 
 pub use nami_core::impl_constant;

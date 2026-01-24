@@ -85,6 +85,8 @@ where
     Cached::new(source)
 }
 
+impl_signal_wrapper_ops!(Cached<C>, [C], C);
+
 #[cfg(test)]
 mod tests {
     use super::*;
