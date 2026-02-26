@@ -40,11 +40,11 @@ license = { file = "LICENSE" }
 nami-derive = { workspace = true }
 
 [dependencies]
-log = { version = "0.4.28", default-features = true }
+log = { version = "0.4.29", default-features = true }
 nami-derive = { workspace = true, optional = true}
-futures-core = "0.3.31"
+futures-core = "0.3.32"
 pin-project-lite = "0.2.16"
-executor-core = { version = "0.6.0", default-features = false }
+executor-core = { version = "0.7.1", default-features = false }
 async-channel = { version = "2.5.0", default-features = false }
 nami-core.workspace = true
 num-traits = { version = "0.2.19",  default-features = false }

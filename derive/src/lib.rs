@@ -330,7 +330,7 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
                 name: (*name).clone(),
             })
             .collect();
-        generate_s_code(&format_str, &entries, &[])
+        Ok(generate_s_code(&format_str, &entries, &[]))
     } else if !positional_args.is_empty() {
         // Positional argument mode: `s!("{} {}", a, b)`
         let entries: Vec<ZipEntry> = positional_args
@@ -345,7 +345,7 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
             })
             .collect();
         let format_extra: Vec<syn::Ident> = entries.iter().map(|e| e.name.clone()).collect();
-        generate_s_code(&format_str, &entries, &format_extra)
+        Ok(generate_s_code(&format_str, &entries, &format_extra))
     } else if analysis.named_vars.is_empty() {
         // Constant string, no placeholders
         Ok(quote! {
@@ -368,7 +368,7 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
                 name: ident.clone(),
             })
             .collect();
-        generate_s_code(&format_str, &entries, &[])
+        Ok(generate_s_code(&format_str, &entries, &[]))
     }
 }
 
@@ -483,7 +483,7 @@ fn build_zip_tree(exprs: &[&TokenStream2]) -> TokenStream2 {
             quote! { #expr }
         }
         _ => {
-            let mid = (exprs.len() + 1) / 2;
+            let mid = exprs.len().div_ceil(2);
             let left = build_zip_tree(&exprs[..mid]);
             let right = build_zip_tree(&exprs[mid..]);
             quote! { ::nami::zip::zip(#left, #right) }
@@ -500,7 +500,7 @@ fn build_destructure_pattern(names: &[&syn::Ident]) -> TokenStream2 {
             quote! { #name }
         }
         _ => {
-            let mid = (names.len() + 1) / 2;
+            let mid = names.len().div_ceil(2);
             let left = build_destructure_pattern(&names[..mid]);
             let right = build_destructure_pattern(&names[mid..]);
             quote! { (#left, #right) }
@@ -520,7 +520,7 @@ fn generate_s_code(
     format_str: &LitStr,
     entries: &[ZipEntry],
     format_extra_args: &[syn::Ident],
-) -> syn::Result<TokenStream2> {
+) -> TokenStream2 {
     assert!(!entries.is_empty(), "generate_s_code called with 0 entries");
 
     let names: Vec<&syn::Ident> = entries.iter().map(|e| &e.name).collect();
@@ -536,26 +536,26 @@ fn generate_s_code(
         // Single entry: no zip, direct map
         let zip_expr = &entries[0].zip_expr;
         let name = &entries[0].name;
-        Ok(quote! {
+        quote! {
             {
                 use ::nami::SignalExt;
                 (#zip_expr).map(|#name| #format_call)
             }
-        })
+        }
     } else {
         // Multiple entries: build zip tree + destructure pattern
         let zip_exprs: Vec<&TokenStream2> = entries.iter().map(|e| &e.zip_expr).collect();
-        let name_refs: Vec<&syn::Ident> = names.iter().copied().collect();
+        let name_refs: Vec<&syn::Ident> = names.clone();
 
         let zip_tree = build_zip_tree(&zip_exprs);
         let pattern = build_destructure_pattern(&name_refs);
 
-        Ok(quote! {
+        quote! {
             {
                 use ::nami::{SignalExt, zip::zip};
                 #zip_tree.map(|#pattern| #format_call)
             }
-        })
+        }
     }
 }
 

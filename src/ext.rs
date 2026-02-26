@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use crate::{
     Computed, Signal, cache::Cached, distinct::Distinct, map::Map, signal::WithMetadata, zip::Zip,
 };

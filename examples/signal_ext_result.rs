@@ -37,14 +37,12 @@ fn main() {
 
     // Practical example: API response handling
     #[derive(Clone, Debug)]
-    #[allow(unused)]
     struct User {
         name: String,
         email: String,
     }
 
     #[derive(Clone, Debug)]
-    #[allow(unused)]
     struct ApiError {
         code: i32,
         message: String,
@@ -58,10 +56,14 @@ fn main() {
     // Derive signals for different UI states
     let show_content = user_fetch.is_ok();
     let show_error = user_fetch.is_err();
+    let error_details = user_fetch
+        .err()
+        .map(|opt| opt.map(|err| format!("{}: {}", err.code, err.message)));
 
     println!("\n--- User loaded ---");
     println!("Show content: {}", show_content.get()); // true
     println!("Show error: {}", show_error.get()); // false
+    println!("Error details: {:?}", error_details.get()); // None
 
     // Simulate an error
     user_fetch.set(Err(ApiError {
@@ -72,6 +74,7 @@ fn main() {
     println!("\n--- Error occurred ---");
     println!("Show content: {}", show_content.get()); // false
     println!("Show error: {}", show_error.get()); // true
+    println!("Error details: {:?}", error_details.get()); // Some("404: User not found")
 
     // Chain with map to extract specific fields
     let user_result: Binding<Result<User, ApiError>> = binding(Ok(User {
@@ -82,7 +85,7 @@ fn main() {
     // Get the username if successful, or "Unknown" if error
     let display_name = user_result
         .ok()
-        .map(|opt| opt.map_or_else(|| "Unknown".to_string(), |u| u.name));
+        .map(|opt| opt.map_or_else(|| "Unknown".to_string(), |u| format!("{} <{}>", u.name, u.email)));
 
     println!("\nDisplay name: {}", display_name.get()); // Bob
 

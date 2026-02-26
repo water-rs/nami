@@ -42,15 +42,14 @@ pub struct Debug<C> {
 }
 
 struct DebugInner {
-    #[allow(unused)]
-    guard: BoxWatcherGuard,
+    _guard: BoxWatcherGuard,
     config: Config,
 }
 
 impl core::fmt::Debug for DebugInner {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct(type_name::<Self>())
-            .field("guard", &"<opaque guard>")
+            .field("_guard", &"<opaque guard>")
             .field("config", &self.config)
             .finish()
     }
@@ -80,7 +79,7 @@ where
 
         Self {
             source,
-            inner: Rc::new(DebugInner { guard, config }),
+            inner: Rc::new(DebugInner { _guard: guard, config }),
         }
     }
 

@@ -47,12 +47,11 @@ impl MetadataInner {
     /// Attempts to retrieve a value of type `T` from the metadata store.
     ///
     /// Returns `None` if no value of the requested type is present.
-    #[allow(clippy::unwrap_used)]
     pub fn try_get<T: 'static + Clone>(&self) -> Option<T> {
         // Once `downcast_ref_unchecked` stabilized, we will use it here.
         self.0
             .get(&TypeId::of::<T>())
-            .map(|v| v.downcast_ref::<T>().unwrap())
+            .and_then(|value| value.downcast_ref::<T>())
             .cloned()
     }
 
@@ -192,13 +191,15 @@ where
     }
 }
 
-#[allow(clippy::unwrap_used)]
 impl<F> Drop for OnDrop<F>
 where
     F: FnOnce(),
 {
     fn drop(&mut self) {
-        (self.0.take().unwrap())();
+        let Some(callback) = self.0.take() else {
+            panic!("OnDrop::drop called with missing callback");
+        };
+        callback();
     }
 }
 
@@ -223,10 +224,9 @@ impl Metadata {
     ///
     /// Panics if no value of type `T` is present in the metadata.
     #[must_use]
-    #[allow(clippy::expect_used)]
     pub fn get<T: 'static + Clone>(&self) -> T {
         self.try_get()
-            .expect("Value of requested type should be present in metadata")
+            .unwrap_or_else(|| panic!("Metadata::get missing value for requested type"))
     }
 
     /// Attempts to get a value of type `T` from the metadata.

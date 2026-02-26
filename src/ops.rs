@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(quotient.get(), 3);
 
         // Test Rem
-        let remainder = a.clone() % b.clone();
+        let remainder = a % b;
         assert_eq!(remainder.get(), 1);
     }
 
@@ -212,16 +212,16 @@ mod tests {
         assert_eq!(or.get(), 0b1110);
 
         // Test BitXor
-        let xor = a.clone() ^ b.clone();
+        let xor = a.clone() ^ b;
         assert_eq!(xor.get(), 0b0110);
 
         // Test Shl
         let shift: Binding<u32> = binding(2u32);
         let shl = a.clone() << shift.clone();
-        assert_eq!(shl.get(), 0b110000);
+        assert_eq!(shl.get(), 0b11_0000);
 
         // Test Shr
-        let shr = a.clone() >> shift;
+        let shr = a >> shift;
         assert_eq!(shr.get(), 0b11);
     }
 
@@ -233,11 +233,11 @@ mod tests {
         let sum = a.clone() + b.clone();
         assert_eq!(sum.get(), 15);
 
-        let diff = a.clone() - b.clone();
+        let diff = a.clone() - b;
         assert_eq!(diff.get(), 5);
 
         // Test Neg
-        let neg = -a.clone();
+        let neg = -a;
         assert_eq!(neg.get(), -10);
     }
 
@@ -263,7 +263,7 @@ mod tests {
         let a = constant(10i32);
         let b = constant(3i32);
 
-        let sum = a.clone() + b.clone();
+        let sum = a.clone() + b;
         assert_eq!(sum.get(), 13);
 
         let neg = -a;
@@ -287,7 +287,7 @@ mod tests {
         let c: Binding<i32> = binding(2);
 
         // (a + b) * c
-        let result = (a.clone() + b.clone()) * c.clone();
+        let result = (a.clone() + b) * c;
         assert_eq!(result.get(), 30);
 
         // Verify reactivity
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(sum1.get(), 15);
 
         // Binding + Computed
-        let sum2 = binding_val.clone() + computed_val.clone();
+        let sum2 = binding_val + computed_val.clone();
         assert_eq!(sum2.get(), 13);
 
         // Constant + Computed

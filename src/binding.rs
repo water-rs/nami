@@ -9,6 +9,7 @@ use core::{
     cell::RefCell,
     fmt::Debug,
     marker::PhantomData,
+    mem::ManuallyDrop,
     ops::{
         Add, BitAnd, BitOr, BitXor, Deref, DerefMut, Div, Mul, Neg, Not, RangeBounds, Rem, Shl,
         Shr, Sub,
@@ -122,7 +123,7 @@ impl_signal_binary_ops!(Binding<T>, [T], T);
 #[derive(Debug)]
 pub struct BindingMutGuard<'a, T: 'static> {
     binding: &'a Binding<T>,
-    value: Option<T>,
+    value: ManuallyDrop<T>,
     dirty: bool,
 }
 
@@ -130,40 +131,36 @@ impl<'a, T> BindingMutGuard<'a, T> {
     /// Creates a new guard for the given binding.
     pub fn new(binding: &'a Binding<T>) -> Self {
         Self {
-            value: Some(binding.get()),
+            value: ManuallyDrop::new(binding.get()),
             binding,
             dirty: false,
         }
     }
 }
 
-#[allow(clippy::unwrap_used)]
 impl<T> Deref for BindingMutGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.value.as_ref().unwrap()
+        &self.value
     }
 }
 
-#[allow(clippy::unwrap_used)]
 impl<T> DerefMut for BindingMutGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.dirty = true;
-        self.value.as_mut().unwrap()
+        &mut self.value
     }
 }
 
-#[allow(clippy::unwrap_used)]
 impl<T: 'static> Drop for BindingMutGuard<'_, T> {
     /// When the guard is dropped, updates the binding with the modified value.
     fn drop(&mut self) {
         if self.dirty {
-            if let Some(value) = self.value.take() {
-                self.binding.set(value);
-            }
+            let value = unsafe { ManuallyDrop::take(&mut self.value) };
+            self.binding.set(value);
         } else {
-            let _ = self.value.take();
+            unsafe { ManuallyDrop::drop(&mut self.value) }
         }
     }
 }
@@ -367,25 +364,37 @@ impl<T: 'static> BindingMailbox<T> {
     ///
     /// The job will be executed asynchronously and will have access to the binding
     /// for reading or modifying its value.
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::unwrap_used)]
+    ///
+    /// # Panics
+    ///
+    /// Panics when the mailbox receiver is closed and the job cannot be enqueued.
     pub fn handle(&self, job: impl FnOnce(&mut Binding<T>) + 'static + Send) {
-        self.sender.try_send(Box::new(job)).unwrap();
+        if let Err(error) = self.sender.try_send(Box::new(job)) {
+            panic!("BindingMailbox::handle failed to enqueue job: {error}");
+        }
     }
 
     /// Gets the current value of the binding asynchronously via the mailbox.
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::unwrap_used)]
+    ///
+    /// # Panics
+    ///
+    /// Panics when the value request cannot be sent to the mailbox worker
+    /// or when the response channel is unexpectedly closed.
     pub async fn get(&self) -> T
     where
         T: Clone + Send,
     {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
-            sender.try_send(binding.get()).unwrap();
+            if let Err(error) = sender.try_send(binding.get()) {
+                panic!("BindingMailbox::get failed to send response: {error}");
+            }
         });
 
-        receiver.recv().await.unwrap()
+        match receiver.recv().await {
+            Ok(value) => value,
+            Err(error) => panic!("BindingMailbox::get response channel closed: {error}"),
+        }
     }
 
     /// Gets the current value of the binding asynchronously and converts it to type `T2`.
@@ -410,31 +419,46 @@ impl<T: 'static> BindingMailbox<T> {
     /// let owned_string: String = mailbox.get_as().await;
     /// assert_eq!(owned_string, "hello world");
     /// ```
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::unwrap_used)]
+    ///
+    /// # Panics
+    ///
+    /// Panics when the value request cannot be sent to the mailbox worker
+    /// or when the response channel is unexpectedly closed.
     pub async fn get_as<T2>(&self) -> T2
     where
         T2: Send + 'static + From<T>,
     {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
-            sender.try_send(binding.get().into()).unwrap();
+            if let Err(error) = sender.try_send(binding.get().into()) {
+                panic!("BindingMailbox::get_as failed to send response: {error}");
+            }
         });
 
-        receiver.recv().await.unwrap()
+        match receiver.recv().await {
+            Ok(value) => value,
+            Err(error) => panic!("BindingMailbox::get_as response channel closed: {error}"),
+        }
     }
 
     /// Sets a new value on the binding asynchronously via the mailbox.
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::unwrap_used)]
+    ///
+    /// # Panics
+    ///
+    /// Panics when the set request cannot be sent to the mailbox worker
+    /// or when the ack channel is unexpectedly closed.
     pub async fn set(&self, value: impl Into<T> + Send + 'static) {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
             let value = value.into();
             binding.set(value);
-            sender.try_send(()).unwrap();
+            if let Err(error) = sender.try_send(()) {
+                panic!("BindingMailbox::set failed to send ack: {error}");
+            }
         });
-        receiver.recv().await.unwrap();
+        if let Err(error) = receiver.recv().await {
+            panic!("BindingMailbox::set ack channel closed: {error}");
+        }
     }
 }
 
