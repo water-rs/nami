@@ -79,7 +79,10 @@ where
 
         Self {
             source,
-            inner: Rc::new(DebugInner { _guard: guard, config }),
+            inner: Rc::new(DebugInner {
+                _guard: guard,
+                config,
+            }),
         }
     }
 

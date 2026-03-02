@@ -83,9 +83,12 @@ fn main() {
     }));
 
     // Get the username if successful, or "Unknown" if error
-    let display_name = user_result
-        .ok()
-        .map(|opt| opt.map_or_else(|| "Unknown".to_string(), |u| format!("{} <{}>", u.name, u.email)));
+    let display_name = user_result.ok().map(|opt| {
+        opt.map_or_else(
+            || "Unknown".to_string(),
+            |u| format!("{} <{}>", u.name, u.email),
+        )
+    });
 
     println!("\nDisplay name: {}", display_name.get()); // Bob
 
