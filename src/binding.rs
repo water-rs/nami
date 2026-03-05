@@ -369,9 +369,9 @@ impl<T: 'static> BindingMailbox<T> {
     ///
     /// Panics when the mailbox receiver is closed and the job cannot be enqueued.
     pub fn handle(&self, job: impl FnOnce(&mut Binding<T>) + 'static + Send) {
-        if let Err(error) = self.sender.try_send(Box::new(job)) {
-            panic!("BindingMailbox::handle failed to enqueue job: {error}");
-        }
+        self.sender
+            .try_send(Box::new(job))
+            .expect("BindingMailbox::handle failed to enqueue job");
     }
 
     /// Gets the current value of the binding asynchronously via the mailbox.
@@ -386,9 +386,9 @@ impl<T: 'static> BindingMailbox<T> {
     {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
-            if let Err(error) = sender.try_send(binding.get()) {
-                panic!("BindingMailbox::get failed to send response: {error}");
-            }
+            sender
+                .try_send(binding.get())
+                .expect("BindingMailbox::get failed to send response");
         });
 
         match receiver.recv().await {
@@ -430,9 +430,9 @@ impl<T: 'static> BindingMailbox<T> {
     {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
-            if let Err(error) = sender.try_send(binding.get().into()) {
-                panic!("BindingMailbox::get_as failed to send response: {error}");
-            }
+            sender
+                .try_send(binding.get().into())
+                .expect("BindingMailbox::get_as failed to send response");
         });
 
         match receiver.recv().await {
@@ -452,13 +452,14 @@ impl<T: 'static> BindingMailbox<T> {
         self.handle(move |binding| {
             let value = value.into();
             binding.set(value);
-            if let Err(error) = sender.try_send(()) {
-                panic!("BindingMailbox::set failed to send ack: {error}");
-            }
+            sender
+                .try_send(())
+                .expect("BindingMailbox::set failed to send ack");
         });
-        if let Err(error) = receiver.recv().await {
-            panic!("BindingMailbox::set ack channel closed: {error}");
-        }
+        receiver
+            .recv()
+            .await
+            .expect("BindingMailbox::set ack channel closed");
     }
 }
 
