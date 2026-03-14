@@ -16,9 +16,9 @@ use core::{
     },
 };
 
-use alloc::{boxed::Box, rc::Rc};
 #[cfg(feature = "std")]
 use alloc::vec::Vec;
+use alloc::{boxed::Box, rc::Rc};
 use async_channel::{Sender, unbounded};
 use executor_core::{LocalExecutor, Task};
 use num_traits::Signed;
@@ -46,10 +46,7 @@ fn current_local_binding_factory() -> Option<LocalBindingFactory> {
 
 /// Runs `f` with a renderer-provided local binding factory installed on the current thread.
 #[cfg(feature = "std")]
-pub fn with_local_binding_factory<R>(
-    factory: LocalBindingFactory,
-    f: impl FnOnce() -> R,
-) -> R {
+pub fn with_local_binding_factory<R>(factory: LocalBindingFactory, f: impl FnOnce() -> R) -> R {
     struct LocalBindingFactoryGuard;
 
     impl Drop for LocalBindingFactoryGuard {
