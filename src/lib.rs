@@ -3,6 +3,8 @@
 
 #[cfg(test)]
 extern crate std;
+#[cfg(feature = "std")]
+extern crate std;
 
 extern crate alloc;
 
@@ -12,6 +14,9 @@ mod ops;
 pub mod binding;
 #[doc(inline)]
 pub use binding::{Binding, Container, CustomBinding, binding};
+#[cfg(feature = "std")]
+#[doc(inline)]
+pub use binding::{LocalBindingFactory, with_local_binding_factory};
 pub mod constant;
 #[doc(inline)]
 pub use constant::constant;

@@ -5,7 +5,7 @@
 #![allow(clippy::similar_names)]
 
 use core::{
-    any::{Any, type_name},
+    any::{Any, TypeId, type_name},
     cell::RefCell,
     fmt::Debug,
     marker::PhantomData,
@@ -17,6 +17,8 @@ use core::{
 };
 
 use alloc::{boxed::Box, rc::Rc};
+#[cfg(feature = "std")]
+use alloc::vec::Vec;
 use async_channel::{Sender, unbounded};
 use executor_core::{LocalExecutor, Task};
 use num_traits::Signed;
@@ -27,6 +29,45 @@ use crate::{
 };
 
 pub use nami_core::CustomBinding;
+
+/// Type-erased factory used to materialize renderer-managed local bindings.
+#[cfg(feature = "std")]
+pub type LocalBindingFactory = Rc<dyn Fn(TypeId, Box<dyn Fn() -> Rc<dyn Any>>) -> Rc<dyn Any>>;
+
+#[cfg(feature = "std")]
+std::thread_local! {
+    static LOCAL_BINDING_FACTORIES: RefCell<Vec<LocalBindingFactory>> = RefCell::new(Vec::new());
+}
+
+#[cfg(feature = "std")]
+fn current_local_binding_factory() -> Option<LocalBindingFactory> {
+    LOCAL_BINDING_FACTORIES.with(|factories| factories.borrow().last().cloned())
+}
+
+/// Runs `f` with a renderer-provided local binding factory installed on the current thread.
+#[cfg(feature = "std")]
+pub fn with_local_binding_factory<R>(
+    factory: LocalBindingFactory,
+    f: impl FnOnce() -> R,
+) -> R {
+    struct LocalBindingFactoryGuard;
+
+    impl Drop for LocalBindingFactoryGuard {
+        fn drop(&mut self) {
+            LOCAL_BINDING_FACTORIES.with(|factories| {
+                let popped = factories.borrow_mut().pop();
+                assert!(
+                    popped.is_some(),
+                    "local binding factory stack underflow while leaving scope"
+                );
+            });
+        }
+    }
+
+    LOCAL_BINDING_FACTORIES.with(|factories| factories.borrow_mut().push(factory));
+    let _guard = LocalBindingFactoryGuard;
+    f()
+}
 
 /// A `Binding<T>` represents a mutable value of type `T` that can be observed.
 ///
@@ -66,7 +107,38 @@ impl<T: 'static + Clone> Binding<T> {
     ///
     /// The container provides the reactive capabilities for the value.
     pub fn container(value: T) -> Self {
+        #[cfg(feature = "std")]
+        if let Some(factory) = current_local_binding_factory() {
+            return Self::from_local_factory(factory, value);
+        }
         Self::custom(Container::new(value))
+    }
+
+    #[cfg(feature = "std")]
+    fn from_local_factory(factory: LocalBindingFactory, value: T) -> Self {
+        let value = RefCell::new(Some(value));
+        let binding = factory(
+            TypeId::of::<Binding<T>>(),
+            Box::new(move || {
+                let value = value.borrow_mut().take().unwrap_or_else(|| {
+                    panic!(
+                        "local binding initializer was invoked more than once for {}",
+                        type_name::<Binding<T>>()
+                    )
+                });
+                Rc::new(Binding::custom(Container::new(value))) as Rc<dyn Any>
+            }),
+        );
+        binding
+            .downcast::<Binding<T>>()
+            .unwrap_or_else(|_| {
+                panic!(
+                    "local binding factory returned mismatched type for {}",
+                    type_name::<Binding<T>>()
+                )
+            })
+            .as_ref()
+            .clone()
     }
 }
 
