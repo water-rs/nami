@@ -75,6 +75,17 @@ fn test_s_macro_reactivity_named() {
 }
 
 #[test]
+fn test_usize_and_isize_constants_are_signals() {
+    let width = constant(5_usize);
+    let offset = constant(-2_isize);
+    let summary = width
+        .zip(&offset)
+        .map(|(width, offset)| format!("{width}:{offset}"));
+
+    assert_eq!(summary.get(), "5:-2");
+}
+
+#[test]
 fn test_s_macro_escaped_braces() {
     let s = s!("This should have {{escaped}} braces.");
     assert_eq!(s.get(), "This should have {escaped} braces.");
