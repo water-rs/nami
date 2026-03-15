@@ -74,10 +74,13 @@ use nami_core::watcher::Context;
 use crate::watcher::{WatcherManager, WatcherManagerGuard};
 
 /// A reactive list that can be observed for changes.
+///
+/// Notifications use `Rc<[T]>` snapshots so that cloning a `Context` across
+/// multiple watchers is O(1) (reference-count bump) instead of O(n).
 #[derive(Debug)]
 pub struct List<T> {
     vec: Rc<RefCell<Vec<T>>>,
-    watchers: WatcherManager<Vec<T>>,
+    watchers: WatcherManager<Rc<[T]>>,
 }
 
 impl<T: 'static> From<Vec<T>> for List<T> {
@@ -99,18 +102,27 @@ impl<T: 'static> List<T> {
         }
     }
 
+    /// Takes an `Rc<[T]>` snapshot of the current contents and notifies all
+    /// watchers.  The snapshot is shared (O(1) clone) across watchers so each
+    /// notification cycle only pays for one allocation.
+    fn notify(&self)
+    where
+        T: Clone,
+    {
+        if self.watchers.is_empty() {
+            return;
+        }
+        let snapshot: Rc<[T]> = Rc::from(self.vec.borrow().as_slice());
+        self.watchers.notify(&Context::from(snapshot));
+    }
+
     /// Adds an element to the end of the list.
     pub fn push(&self, value: T)
     where
         T: Clone,
     {
         self.vec.borrow_mut().push(value);
-        if self.watchers.is_empty() {
-            return;
-        }
-        let snapshot = self.vec.borrow().clone();
-        let context = Context::from(snapshot);
-        self.watchers.notify(&context);
+        self.notify();
     }
 
     /// Sorts the list in place.
@@ -119,12 +131,7 @@ impl<T: 'static> List<T> {
         T: Ord + Clone,
     {
         self.vec.borrow_mut().sort();
-        if self.watchers.is_empty() {
-            return;
-        }
-        let snapshot = self.vec.borrow().clone();
-        let context = Context::from(snapshot);
-        self.watchers.notify(&context);
+        self.notify();
     }
 
     /// Removes and returns the last element of the list.
@@ -135,12 +142,7 @@ impl<T: 'static> List<T> {
     {
         let result = self.vec.borrow_mut().pop();
         if result.is_some() {
-            if self.watchers.is_empty() {
-                return result;
-            }
-            let snapshot = self.vec.borrow().clone();
-            let context = Context::from(snapshot);
-            self.watchers.notify(&context);
+            self.notify();
         }
         result
     }
@@ -151,12 +153,7 @@ impl<T: 'static> List<T> {
         T: Clone,
     {
         self.vec.borrow_mut().insert(index, value);
-        if self.watchers.is_empty() {
-            return;
-        }
-        let snapshot = self.vec.borrow().clone();
-        let context = Context::from(snapshot);
-        self.watchers.notify(&context);
+        self.notify();
     }
 
     /// Removes and returns the element at the specified index.
@@ -166,12 +163,7 @@ impl<T: 'static> List<T> {
         T: Clone,
     {
         let result = self.vec.borrow_mut().remove(index);
-        if self.watchers.is_empty() {
-            return result;
-        }
-        let snapshot = self.vec.borrow().clone();
-        let context = Context::from(snapshot);
-        self.watchers.notify(&context);
+        self.notify();
         result
     }
 
@@ -183,11 +175,7 @@ impl<T: 'static> List<T> {
         let was_empty = self.vec.borrow().is_empty();
         self.vec.borrow_mut().clear();
         if !was_empty {
-            if self.watchers.is_empty() {
-                return;
-            }
-            let context = Context::from(Vec::<T>::new());
-            self.watchers.notify(&context);
+            self.notify();
         }
     }
     /// Takes a snapshot of the current list contents.
@@ -252,9 +240,30 @@ impl<T: 'static> Default for List<T> {
     }
 }
 
+/// Resolve concrete `(start, end)` offsets from captured `Bound` values and
+/// the current snapshot length, clamping to valid indices.
+fn resolve_range(start_bound: Bound<usize>, end_bound: Bound<usize>, len: usize) -> (usize, usize) {
+    let mut start = match start_bound {
+        Bound::Included(n) => n,
+        Bound::Excluded(n) => n.saturating_add(1),
+        Bound::Unbounded => 0,
+    };
+    let mut end = match end_bound {
+        Bound::Included(n) => n.saturating_add(1),
+        Bound::Excluded(n) => n,
+        Bound::Unbounded => len,
+    };
+    start = start.min(len);
+    end = end.min(len);
+    if start > end {
+        start = end;
+    }
+    (start, end)
+}
+
 impl<T: Clone + 'static> Collection for List<T> {
     type Item = T;
-    type Guard = WatcherManagerGuard<Vec<T>>;
+    type Guard = WatcherManagerGuard<Rc<[T]>>;
 
     fn get(&self, index: usize) -> Option<Self::Item> {
         self.vec.borrow().as_slice().get(index).cloned()
@@ -267,9 +276,7 @@ impl<T: Clone + 'static> Collection for List<T> {
         range: impl RangeBounds<usize>,
         watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
     ) -> Self::Guard {
-        let vec = self.vec.clone();
-
-        // Convert range bounds to concrete start bound and end bound for capture
+        // Convert range bounds to concrete values for capture
         let start_bound = match range.start_bound() {
             Bound::Included(&n) => Bound::Included(n),
             Bound::Excluded(&n) => Bound::Excluded(n),
@@ -283,61 +290,19 @@ impl<T: Clone + 'static> Collection for List<T> {
 
         // Call watcher immediately with current data
         {
-            let borrowed = self.vec.borrow();
-            let full_slice = borrowed.as_slice();
-            let len = full_slice.len();
-
-            let mut start = match start_bound {
-                Bound::Included(n) => n,
-                Bound::Excluded(n) => n.saturating_add(1),
-                Bound::Unbounded => 0,
-            };
-            let mut end = match end_bound {
-                Bound::Included(n) => n.saturating_add(1),
-                Bound::Excluded(n) => n,
-                Bound::Unbounded => len,
-            };
-
-            start = start.min(len);
-            end = end.min(len);
-            if start > end {
-                start = end;
-            }
-
-            let slice_data: Vec<T> = full_slice[start..end].to_vec();
-            drop(borrowed);
-
-            let slice_ref = slice_data.as_slice();
-            watcher(Context::from(slice_ref));
+            let snapshot: Rc<[T]> = Rc::from(self.vec.borrow().as_slice());
+            let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
+            watcher(Context::from(&snapshot[start..end]));
         }
 
+        // Subsequent notifications: slice the Rc<[T]> snapshot carried inside
+        // the Context.  Cloning an Rc is O(1), so this avoids the previous
+        // O(n) re-borrow + range clone per watcher.
         self.watchers.register_as_guard(move |ctx| {
-            let borrowed = vec.borrow();
-            let full_slice = borrowed.as_slice();
-            let len = full_slice.len();
-
-            let mut start = match start_bound {
-                Bound::Included(n) => n,
-                Bound::Excluded(n) => n.saturating_add(1),
-                Bound::Unbounded => 0,
-            };
-            let mut end = match end_bound {
-                Bound::Included(n) => n.saturating_add(1),
-                Bound::Excluded(n) => n,
-                Bound::Unbounded => len,
-            };
-
-            start = start.min(len);
-            end = end.min(len);
-            if start > end {
-                start = end;
-            }
-
-            let slice_data: Vec<T> = full_slice[start..end].to_vec();
-            drop(borrowed);
-
-            let slice_ref = slice_data.as_slice();
-            watcher(ctx.map(|_| slice_ref));
+            let snapshot: Rc<[T]> = ctx.value().clone(); // O(1) ref-count bump
+            let metadata = ctx.metadata().clone();
+            let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
+            watcher(Context::new(&snapshot[start..end], metadata));
         })
     }
 }
