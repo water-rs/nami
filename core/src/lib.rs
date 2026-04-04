@@ -4,6 +4,9 @@
 #![forbid(unsafe_code)]
 extern crate alloc;
 
+use alloc::rc::Rc;
+use core::cell::RefCell;
+
 use crate::watcher::{Context, WatcherGuard};
 
 /// Collection types for Nami.
@@ -98,7 +101,7 @@ macro_rules! impl_generic_constant {
 
 mod impl_constant {
     use alloc::borrow::Cow;
-    use alloc::collections::BTreeMap;
+    use alloc::collections::{BTreeMap, BTreeSet};
     use core::time::Duration;
 
     use crate::Signal;
@@ -125,7 +128,7 @@ mod impl_constant {
         Cow<'static, str>
     );
 
-    impl_generic_constant!(Vec<T>,BTreeMap<K,V>);
+    impl_generic_constant!(Vec<T>,BTreeMap<K,V>,BTreeSet<T>);
 
     impl<T: 'static> Signal for &'static [T] {
         type Output = &'static [T];
@@ -163,5 +166,118 @@ impl<T: Signal, E: Signal> Signal for Result<T, E> {
             Ok(s) => Ok(s.watch(move |context| watcher(context.map(Ok)))),
             Err(e) => Err(e.watch(move |context| watcher(context.map(Err)))),
         }
+    }
+}
+
+impl<T, U> Signal for (T, U)
+where
+    T: Signal,
+    U: Signal,
+    T::Output: Clone,
+    U::Output: Clone,
+{
+    type Output = (T::Output, U::Output);
+    type Guard = (T::Guard, U::Guard);
+
+    fn get(&self) -> Self::Output {
+        (self.0.get(), self.1.get())
+    }
+
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+        let watcher = Rc::new(watcher);
+        let latest_left = Rc::new(RefCell::new(self.0.get()));
+        let latest_right = Rc::new(RefCell::new(self.1.get()));
+
+        let left_guard = {
+            let watcher = watcher.clone();
+            let latest_left = latest_left.clone();
+            let latest_right = latest_right.clone();
+            self.0.watch(move |ctx: Context<T::Output>| {
+                let updated_left = ctx.value().clone();
+                *latest_left.borrow_mut() = updated_left;
+                let right = latest_right.borrow().clone();
+                watcher(ctx.map(|left| (left, right)));
+            })
+        };
+
+        let right_guard = {
+            let watcher = watcher;
+            let latest_left = latest_left;
+            let latest_right = latest_right;
+            self.1.watch(move |ctx: Context<U::Output>| {
+                let updated_right = ctx.value().clone();
+                *latest_right.borrow_mut() = updated_right;
+                let left = latest_left.borrow().clone();
+                watcher(ctx.map(|right| (left, right)));
+            })
+        };
+
+        (left_guard, right_guard)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{rc::Rc, vec, vec::Vec};
+    use core::cell::RefCell;
+
+    use crate::{Signal, watcher::Context};
+
+    #[derive(Clone)]
+    struct TestSignal<T> {
+        value: Rc<RefCell<T>>,
+        watchers: Rc<RefCell<Vec<Watcher<T>>>>,
+    }
+
+    type Watcher<T> = Rc<dyn Fn(Context<T>)>;
+
+    impl<T: Clone + 'static> TestSignal<T> {
+        fn new(value: T) -> Self {
+            Self {
+                value: Rc::new(RefCell::new(value)),
+                watchers: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+
+        fn set(&self, value: T) {
+            *self.value.borrow_mut() = value.clone();
+            for watcher in self.watchers.borrow().iter() {
+                watcher(Context::from(value.clone()));
+            }
+        }
+    }
+
+    impl<T: Clone + 'static> Signal for TestSignal<T> {
+        type Output = T;
+        type Guard = ();
+
+        fn get(&self) -> Self::Output {
+            self.value.borrow().clone()
+        }
+
+        fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+            self.watchers.borrow_mut().push(Rc::new(watcher));
+        }
+    }
+
+    #[test]
+    fn tuple_signal_tracks_both_inputs() {
+        let left = TestSignal::new(1_i32);
+        let right = TestSignal::new(2_i32);
+        let pair = (left.clone(), right.clone());
+        let updates = Rc::new(RefCell::new(Vec::new()));
+
+        let _ = pair.watch({
+            let updates = updates.clone();
+            move |ctx| {
+                updates.borrow_mut().push(ctx.into_value());
+            }
+        });
+
+        left.set(3);
+        right.set(4);
+
+        assert_eq!(pair.get(), (3, 4));
+        assert_eq!(*updates.borrow(), vec![(3, 2), (3, 4)]);
     }
 }
