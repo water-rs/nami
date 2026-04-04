@@ -32,7 +32,8 @@ pub use nami_core::CustomBinding;
 
 /// Type-erased factory used to materialize renderer-managed local bindings.
 #[cfg(feature = "std")]
-pub type LocalBindingFactory = Rc<dyn Fn(TypeId, Box<dyn Fn() -> Rc<dyn Any>>) -> Rc<dyn Any>>;
+pub type LocalBindingFactory =
+    Rc<dyn Fn(TypeId, &'static str, Box<dyn Fn() -> Rc<dyn Any>>) -> Rc<dyn Any>>;
 
 #[cfg(feature = "std")]
 std::thread_local! {
@@ -116,6 +117,7 @@ impl<T: 'static + Clone> Binding<T> {
         let value = RefCell::new(Some(value));
         let binding = factory(
             TypeId::of::<Binding<T>>(),
+            type_name::<Binding<T>>(),
             Box::new(move || {
                 let value = value.borrow_mut().take().unwrap_or_else(|| {
                     panic!(
