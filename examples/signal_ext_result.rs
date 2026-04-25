@@ -1,5 +1,4 @@
 //! Example demonstrating `SignalExt` methods for Result types.
-#![allow(clippy::items_after_statements)]
 
 use nami::{Binding, Signal, SignalExt, binding};
 

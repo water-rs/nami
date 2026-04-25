@@ -1,5 +1,3 @@
-#![allow(missing_docs)]
-
 use nami::*;
 
 #[test]

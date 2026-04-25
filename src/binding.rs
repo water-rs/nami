@@ -2,7 +2,6 @@
 //!
 //! This module provides two-way reactive bindings that can both produce and consume values.
 //! Unlike read-only signals, bindings can be modified and will notify watchers of changes.
-#![allow(clippy::similar_names)]
 
 use core::{
     any::{Any, TypeId, type_name},
