@@ -877,7 +877,7 @@ impl<T> Binding<Option<T>> {
             self,
             {
                 let equal = equal.clone();
-                move |value| value.as_ref().filter(|value| **value == equal).is_some()
+                move |value| value.as_ref().is_some_and(|value| *value == equal)
             },
             move |binding, value| {
                 if value {
