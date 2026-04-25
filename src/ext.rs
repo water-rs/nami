@@ -9,6 +9,8 @@ use crate::debounce::Debounce;
 #[cfg(feature = "timer")]
 use core::time::Duration;
 
+type BoolZipMap<A, B> = Map<Zip<A, B>, fn((bool, bool)) -> bool, bool>;
+
 /// Extension trait providing convenient methods for all Signal types.
 ///
 /// This trait adds utility methods to any type implementing Signal,
@@ -286,7 +288,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the logical AND of this signal with another boolean signal.
-    fn and<B>(&self, other: &B) -> Map<Zip<Self, B>, fn((bool, bool)) -> bool, bool>
+    fn and<B>(&self, other: &B) -> BoolZipMap<Self, B>
     where
         Self: Signal<Output = bool> + 'static,
         B: Signal<Output = bool> + 'static,
@@ -295,7 +297,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the logical OR of this signal with another boolean signal.
-    fn or<B>(&self, other: &B) -> Map<Zip<Self, B>, fn((bool, bool)) -> bool, bool>
+    fn or<B>(&self, other: &B) -> BoolZipMap<Self, B>
     where
         Self: Signal<Output = bool> + 'static,
         B: Signal<Output = bool> + 'static,

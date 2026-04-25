@@ -2,6 +2,18 @@
 
 use nami::{Binding, Signal, SignalExt, binding};
 
+#[derive(Clone, Debug)]
+struct User {
+    name: String,
+    email: String,
+}
+
+#[derive(Clone, Debug)]
+struct ApiError {
+    code: i32,
+    message: String,
+}
+
 fn main() {
     // Basic Result checks
     let api_response: Binding<Result<String, String>> = binding(Ok("Success!".to_string()));
@@ -35,18 +47,6 @@ fn main() {
     println!("Error: {:?}", maybe_error.get()); // None
 
     // Practical example: API response handling
-    #[derive(Clone, Debug)]
-    struct User {
-        name: String,
-        email: String,
-    }
-
-    #[derive(Clone, Debug)]
-    struct ApiError {
-        code: i32,
-        message: String,
-    }
-
     let user_fetch: Binding<Result<User, ApiError>> = binding(Ok(User {
         name: "Alice".to_string(),
         email: "alice@example.com".to_string(),

@@ -1,3 +1,5 @@
+//! Tests for the `s!` reactive formatting macro.
+
 use nami::*;
 
 #[test]

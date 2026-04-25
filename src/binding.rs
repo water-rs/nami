@@ -106,33 +106,33 @@ impl<T: 'static + Clone> Binding<T> {
     pub fn container(value: T) -> Self {
         #[cfg(feature = "std")]
         if let Some(factory) = current_local_binding_factory() {
-            return Self::from_local_factory(factory, value);
+            return Self::from_local_factory(&factory, value);
         }
         Self::custom(Container::new(value))
     }
 
     #[cfg(feature = "std")]
-    fn from_local_factory(factory: LocalBindingFactory, value: T) -> Self {
+    fn from_local_factory(factory: &LocalBindingFactory, value: T) -> Self {
         let value = RefCell::new(Some(value));
         let binding = factory(
-            TypeId::of::<Binding<T>>(),
-            type_name::<Binding<T>>(),
+            TypeId::of::<Self>(),
+            type_name::<Self>(),
             Box::new(move || {
                 let value = value.borrow_mut().take().unwrap_or_else(|| {
                     panic!(
                         "local binding initializer was invoked more than once for {}",
-                        type_name::<Binding<T>>()
+                        type_name::<Self>()
                     )
                 });
-                Rc::new(Binding::custom(Container::new(value))) as Rc<dyn Any>
+                Rc::new(Self::custom(Container::new(value))) as Rc<dyn Any>
             }),
         );
         binding
-            .downcast::<Binding<T>>()
+            .downcast::<Self>()
             .unwrap_or_else(|_| {
                 panic!(
                     "local binding factory returned mismatched type for {}",
-                    type_name::<Binding<T>>()
+                    type_name::<Self>()
                 )
             })
             .as_ref()
@@ -596,14 +596,14 @@ impl<T: PartialOrd + 'static> Binding<T> {
             }
             value
         }
-        let range_for_getter = range.clone();
-        let range_for_setter = range;
+        let read_range = range.clone();
+        let write_range = range;
 
         Self::mapping(
             self,
-            move |value| clamp_value(&range_for_getter, value),
+            move |value| clamp_value(&read_range, value),
             move |binding, value| {
-                let clamped = clamp_value(&range_for_setter, value);
+                let clamped = clamp_value(&write_range, value);
                 binding.set(clamped);
             },
         )
