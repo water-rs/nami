@@ -138,6 +138,18 @@ mod impl_constant {
         }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
     }
+
+    // Fixed-size arrays of `Clone + 'static` elements act as constant signals.
+    // This lets callers pass typed value arrays (e.g. mesh-gradient palettes)
+    // directly into `IntoSignal<[T; N]>`-typed parameters without wrapping.
+    impl<T: Clone + 'static, const N: usize> Signal for [T; N] {
+        type Output = Self;
+        type Guard = ();
+        fn get(&self) -> Self::Output {
+            self.clone()
+        }
+        fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
+    }
 }
 
 impl<T: Signal> Signal for Option<T> {
