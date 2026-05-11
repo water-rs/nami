@@ -199,7 +199,7 @@ impl<T: 'static> List<T> {
     }
 }
 
-/// Iterator implementation for List<T>
+/// Iterator implementation for `List<T>`
 /// Tip: This method will attempt to avoid cloning the internal Vec if possible. However, if there are multiple references to the List, it will clone the Vec to ensure safety.
 impl<T: Clone + 'static> IntoIterator for List<T> {
     type Item = T;
@@ -214,7 +214,7 @@ impl<T: Clone + 'static> IntoIterator for List<T> {
     }
 }
 
-/// Iterator implementation for references to List<T>
+/// Iterator implementation for references to `List<T>`
 /// Warning: This will clone the entire list, ensuring that modifications during iteration do not affect the iterator.
 impl<T: Clone + 'static> IntoIterator for &List<T> {
     type Item = T;

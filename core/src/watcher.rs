@@ -20,7 +20,7 @@
 //!
 //! We preserve the freedom to discard notifications in certain scenarios, as a performance optimization.
 //!
-//! Also, you can use [`nami::distinct`](nami::distinct) to create a distinct signal that only notifies when the value changes manually.
+//! Also, you can use `nami::SignalExt::distinct` to create a distinct signal that only notifies when the value changes manually.
 
 use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, vec::Vec};
 use core::{

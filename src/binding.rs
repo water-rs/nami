@@ -963,7 +963,7 @@ impl Binding<bool> {
     /// Setting the `if_false` value sets this binding to `false`.
     ///
     /// This is a two-way binding. For one-way selection (e.g., in animations),
-    /// use [`SignalExt::select`] instead which doesn't require `T: Eq`.
+    /// use [`SignalExt::select`](crate::SignalExt::select) instead which doesn't require `T: Eq`.
     ///
     /// # Example
     /// ```
