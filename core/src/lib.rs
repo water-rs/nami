@@ -9,6 +9,39 @@ use core::cell::RefCell;
 
 use crate::watcher::{Context, WatcherGuard};
 
+/// Stable identity for reactive signal instances that own observable state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct SignalIdentity(usize);
+
+impl SignalIdentity {
+    /// Creates an identity from a shared allocation pointer.
+    ///
+    /// The allocation must be tied to the semantic signal instance and be cloned
+    /// together with that instance.
+    #[must_use]
+    pub fn from_rc<T>(value: &Rc<T>) -> Self {
+        Self::from_ptr(Rc::as_ptr(value))
+    }
+
+    /// Creates an identity from a stable allocation pointer.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the pointer is null.
+    #[must_use]
+    pub fn from_ptr<T>(value: *const T) -> Self {
+        let value = value.cast::<()>() as usize;
+        assert!(value != 0, "signal identity pointer must not be null");
+        Self(value)
+    }
+
+    /// Raw value for renderer-local key composition.
+    #[must_use]
+    pub const fn raw(self) -> usize {
+        self.0
+    }
+}
+
 /// Collection types for Nami.
 pub mod collection;
 pub mod dictionary;
@@ -25,6 +58,14 @@ pub trait Signal: Clone + 'static {
 
     /// Execute the computation and return the current value.
     fn get(&self) -> Self::Output;
+
+    /// Returns the stable semantic identity of this signal, when one exists.
+    ///
+    /// Constant signals intentionally return `None` because they do not own
+    /// observable state.
+    fn identity(&self) -> Option<SignalIdentity> {
+        None
+    }
 
     /// Register a watcher to be notified when the computed value changes.
     ///
@@ -158,6 +199,9 @@ impl<T: Signal> Signal for Option<T> {
     fn get(&self) -> Self::Output {
         self.as_ref().map(Signal::get)
     }
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.as_ref().and_then(Signal::identity)
+    }
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         self.as_ref()
             .map(|s| s.watch(move |context| watcher(context.map(Some))))
@@ -171,6 +215,12 @@ impl<T: Signal, E: Signal> Signal for Result<T, E> {
         match &self {
             Ok(s) => Ok(s.get()),
             Err(e) => Err(e.get()),
+        }
+    }
+    fn identity(&self) -> Option<SignalIdentity> {
+        match &self {
+            Ok(s) => s.identity(),
+            Err(e) => e.identity(),
         }
     }
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {

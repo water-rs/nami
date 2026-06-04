@@ -13,12 +13,14 @@
 mod computed;
 pub use computed::*;
 
+use alloc::rc::Rc;
+
 use crate::{
     map::{Map, map},
     watcher::Context,
 };
 
-pub use nami_core::Signal;
+pub use nami_core::{Signal, SignalIdentity};
 
 /// A trait for converting a value into a computation.
 pub trait IntoSignal<Output> {
@@ -76,12 +78,17 @@ pub struct WithMetadata<C, T> {
 
     /// The underlying computation.
     signal: C,
+    identity: Rc<()>,
 }
 
 impl<C, T> WithMetadata<C, T> {
     /// Create a new computation with associated metadata.
-    pub const fn new(metadata: T, signal: C) -> Self {
-        Self { metadata, signal }
+    pub fn new(metadata: T, signal: C) -> Self {
+        Self {
+            metadata,
+            signal,
+            identity: Rc::new(()),
+        }
     }
 }
 
@@ -96,6 +103,12 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
     /// Execute the underlying computation.
     fn get(&self) -> Self::Output {
         self.signal.get()
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.signal
+            .identity()
+            .map(|_| SignalIdentity::from_rc(&self.identity))
     }
 
     /// Register a watcher, enriching notifications with the metadata.

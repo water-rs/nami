@@ -9,7 +9,7 @@ use core::cell::RefCell;
 use alloc::rc::Rc;
 use nami_core::watcher::Context;
 
-use crate::signal::Signal;
+use crate::signal::{Signal, SignalIdentity};
 
 /// A distinct signal that only notifies on value changes.
 #[derive(Debug, Clone)]
@@ -43,6 +43,10 @@ where
 
     fn get(&self) -> Self::Output {
         self.signal.get()
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.signal.identity()
     }
 
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {

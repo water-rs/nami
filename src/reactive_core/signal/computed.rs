@@ -3,7 +3,7 @@ use core::any::Any;
 use alloc::{boxed::Box, rc::Rc};
 
 use crate::{
-    SignalExt, constant,
+    SignalExt, SignalIdentity, constant,
     watcher::{BoxWatcherGuard, Context, Watcher},
 };
 
@@ -30,6 +30,9 @@ pub(crate) trait ComputedImpl: Any {
     /// Registers a watcher that will be notified when the computed value changes
     fn add_watcher(&self, watcher: Watcher<Self::Output>) -> BoxWatcherGuard;
 
+    /// Stable identity propagated from the underlying signal, when available.
+    fn identity(&self) -> Option<SignalIdentity>;
+
     fn cloned(&self) -> Computed<Self::Output>;
 }
 
@@ -46,6 +49,9 @@ impl<C: Signal + 'static> ComputedImpl for C {
 
     fn add_watcher(&self, watcher: Watcher<Self::Output>) -> BoxWatcherGuard {
         Box::new(<Self as Signal>::watch(self, move |ctx| watcher(ctx)))
+    }
+    fn identity(&self) -> Option<SignalIdentity> {
+        <Self as Signal>::identity(self)
     }
     fn cloned(&self) -> Computed<Self::Output> {
         self.clone().computed()
@@ -81,6 +87,10 @@ impl<T: 'static> Signal for Computed<T> {
 
     fn get(&self) -> Self::Output {
         self.0.compute()
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.0.identity()
     }
 
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {

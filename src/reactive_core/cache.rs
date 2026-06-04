@@ -7,7 +7,7 @@ use core::{any::Any, cell::RefCell};
 
 use alloc::rc::Rc;
 
-use crate::{Signal, watcher::Context};
+use crate::{Signal, SignalIdentity, watcher::Context};
 
 /// A cached wrapper around a Signal that stores the last computed value.
 ///
@@ -67,6 +67,10 @@ where
             *cache = Some(value.clone());
             value
         }
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.source.identity()
     }
 
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {

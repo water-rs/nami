@@ -23,7 +23,7 @@ use executor_core::{LocalExecutor, Task};
 use num_traits::Signed;
 
 use crate::{
-    Computed, Signal,
+    Computed, Signal, SignalIdentity,
     watcher::{BoxWatcherGuard, Context, WatcherManager},
 };
 
@@ -363,6 +363,7 @@ impl<T: 'static> Binding<T> {
             binding: source.clone(),
             getter,
             setter,
+            identity: Rc::new(()),
             _marker: PhantomData,
         })
     }
@@ -1102,6 +1103,10 @@ impl<T: 'static + Clone> Signal for Container<T> {
         self.value.borrow().deref().clone()
     }
 
+    fn identity(&self) -> Option<SignalIdentity> {
+        Some(SignalIdentity::from_rc(&self.value))
+    }
+
     /// Registers a watcher to be notified when the value changes.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         Box::new(self.watchers.register_as_guard(watcher))
@@ -1129,6 +1134,10 @@ impl<T: 'static> Signal for Binding<T> {
         self.get()
     }
 
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.0.identity()
+    }
+
     /// Registers a watcher to be notified when the binding's value changes.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         Box::new(self.0.add_watcher(Rc::new(watcher)))
@@ -1146,6 +1155,7 @@ struct Mapping<Input: 'static, Output, Getter, Setter> {
     getter: Getter,
     /// Function to convert from output type back to input type
     setter: Setter,
+    identity: Rc<()>,
     /// Phantom data to keep track of the Output type parameter
     _marker: PhantomData<Output>,
 }
@@ -1156,6 +1166,7 @@ impl<Input, Output, Getter: Clone, Setter: Clone> Clone for Mapping<Input, Outpu
             binding: self.binding.clone(),
             getter: self.getter.clone(),
             setter: self.setter.clone(),
+            identity: Rc::clone(&self.identity),
             _marker: PhantomData,
         }
     }
@@ -1174,6 +1185,12 @@ where
     /// Computes the output value by applying the getter to the input value.
     fn get(&self) -> Self::Output {
         (self.getter)(self.binding.get())
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.binding
+            .identity()
+            .map(|_| SignalIdentity::from_rc(&self.identity))
     }
 
     /// Registers a watcher that will be notified when the input binding changes.

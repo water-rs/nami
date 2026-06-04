@@ -12,7 +12,7 @@
 use alloc::rc::Rc;
 use core::cell::RefCell;
 
-use crate::{Signal, map::Map, watcher::Context};
+use crate::{Signal, SignalIdentity, map::Map, watcher::Context};
 
 /// A structure that combines two `Signal` instances into a single computation
 /// that produces a tuple of their results.
@@ -22,6 +22,7 @@ pub struct Zip<A, B> {
     a: A,
     /// The second computation to be zipped.
     b: B,
+    identity: Rc<()>,
 }
 
 impl<A, B> Zip<A, B>
@@ -40,8 +41,12 @@ where
     /// # Returns
     /// A new `Zip` instance containing both computations.
     /// Creates a new `Zip` that combines two signals.
-    pub const fn new(a: A, b: B) -> Self {
-        Self { a, b }
+    pub fn new(a: A, b: B) -> Self {
+        Self {
+            a,
+            b,
+            identity: Rc::new(()),
+        }
     }
 }
 
@@ -95,7 +100,7 @@ where
 ///
 /// # Returns
 /// A new `Zip` instance that computes both values and returns them as a tuple.
-pub const fn zip<A, B>(a: A, b: B) -> Zip<A, B>
+pub fn zip<A, B>(a: A, b: B) -> Zip<A, B>
 where
     A: Signal,
     B: Signal,
@@ -122,8 +127,14 @@ where
     /// # Returns
     /// A tuple containing the results of computing `a` and `b`.
     fn get(&self) -> Self::Output {
-        let Self { a, b } = self;
+        let Self { a, b, .. } = self;
         (a.get(), b.get())
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.a.identity()?;
+        self.b.identity()?;
+        Some(SignalIdentity::from_rc(&self.identity))
     }
 
     /// Adds a watcher to the zipped computation.
@@ -138,7 +149,7 @@ where
     /// A `WatcherGuard` that, when dropped, will remove the watchers from both computations.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let watcher = Rc::new(watcher);
-        let Self { a, b } = self;
+        let Self { a, b, .. } = self;
         let latest_a = Rc::new(RefCell::new(a.get()));
         let latest_b = Rc::new(RefCell::new(b.get()));
 

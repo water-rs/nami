@@ -31,7 +31,7 @@ pub use project::Project;
 #[doc(inline)]
 pub use reactive_core::SignalExt;
 #[doc(inline)]
-pub use signal::{Computed, Signal};
+pub use signal::{Computed, Signal, SignalIdentity};
 
 #[cfg(feature = "derive")]
 #[doc(inline)]
