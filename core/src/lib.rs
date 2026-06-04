@@ -5,7 +5,12 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
-use core::cell::RefCell;
+use core::{
+    any::TypeId,
+    cell::RefCell,
+    hash::{Hash, Hasher},
+    panic::Location,
+};
 
 use crate::watcher::{Context, WatcherGuard};
 
@@ -39,6 +44,61 @@ impl SignalIdentity {
     #[must_use]
     pub const fn raw(self) -> usize {
         self.0
+    }
+
+    /// Creates a stable derived identity for a property of this signal.
+    #[must_use]
+    pub fn with_discriminator(self, discriminator: usize) -> Self {
+        Self(
+            self.0.wrapping_mul(0x9E37_79B9usize).rotate_left(7)
+                ^ discriminator.wrapping_add(0x517C_C1B7usize),
+        )
+    }
+
+    /// Combines two stable signal identities into one deterministic identity.
+    #[must_use]
+    pub fn combine(self, other: Self) -> Self {
+        self.with_discriminator(other.0)
+    }
+
+    /// Creates a stable discriminator from a call site and semantic wrapper type.
+    #[must_use]
+    pub fn call_site_discriminator<T: 'static>(caller: &'static Location<'static>) -> usize {
+        let mut hasher = IdentityDiscriminatorHasher::new();
+        TypeId::of::<T>().hash(&mut hasher);
+        caller.file().hash(&mut hasher);
+        caller.line().hash(&mut hasher);
+        caller.column().hash(&mut hasher);
+        hasher.value()
+    }
+}
+
+struct IdentityDiscriminatorHasher(usize);
+
+impl IdentityDiscriminatorHasher {
+    const OFFSET: usize = 0x811C_9DC5;
+    const PRIME: usize = 0x0100_0193;
+
+    const fn new() -> Self {
+        Self(Self::OFFSET)
+    }
+
+    const fn value(&self) -> usize {
+        self.0
+    }
+}
+
+impl Hasher for IdentityDiscriminatorHasher {
+    fn finish(&self) -> u64 {
+        self.0 as u64
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= usize::from(*byte);
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+            self.0 = self.0.rotate_left(5);
+        }
     }
 }
 

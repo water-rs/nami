@@ -21,8 +21,7 @@
 //! doubled.get(); // Uses cached value, doesn't recompute
 //! ```
 
-use alloc::rc::Rc;
-use core::marker::PhantomData;
+use core::{marker::PhantomData, panic::Location};
 
 use crate::{Signal, SignalIdentity, watcher::Context};
 
@@ -35,7 +34,7 @@ use crate::{Signal, SignalIdentity, watcher::Context};
 pub struct Map<C, F, Output> {
     source: C,
     f: F,
-    identity: Rc<()>,
+    discriminator: usize,
     _marker: PhantomData<Output>,
 }
 
@@ -55,11 +54,14 @@ where
     /// # Returns
     ///
     /// A new `Map` instance that will transform values from the source.
+    #[track_caller]
     pub fn new(source: C, f: F) -> Self {
         Self {
             source,
             f,
-            identity: Rc::new(()),
+            discriminator: SignalIdentity::call_site_discriminator::<(F, Output)>(
+                Location::caller(),
+            ),
             _marker: PhantomData,
         }
     }
@@ -88,6 +90,7 @@ where
 /// let doubled = map(counter, |n: i32| n * 2);
 /// assert_eq!(doubled.get(), 2);
 /// ```
+#[track_caller]
 pub fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
 where
     C: Signal + 'static,
@@ -102,7 +105,7 @@ impl<C: Clone, F: Clone, Output> Clone for Map<C, F, Output> {
         Self {
             source: self.source.clone(),
             f: self.f.clone(),
-            identity: Rc::clone(&self.identity),
+            discriminator: self.discriminator,
             _marker: PhantomData,
         }
     }
@@ -125,7 +128,7 @@ where
     fn identity(&self) -> Option<SignalIdentity> {
         self.source
             .identity()
-            .map(|_| SignalIdentity::from_rc(&self.identity))
+            .map(|identity| identity.with_discriminator(self.discriminator))
     }
 
     /// Registers a watcher to be notified when the transformed value changes.

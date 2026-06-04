@@ -13,6 +13,7 @@ use core::{
         Add, BitAnd, BitOr, BitXor, Deref, DerefMut, Div, Mul, Neg, Not, RangeBounds, Rem, Shl,
         Shr, Sub,
     },
+    panic::Location,
 };
 
 #[cfg(feature = "std")]
@@ -350,6 +351,7 @@ impl<T: 'static> Binding<T> {
     ///
     /// The getter transforms values from this binding's type to the output type.
     /// The setter transforms values from the output type back to this binding's type.
+    #[track_caller]
     pub fn mapping<Output, Getter, Setter>(
         source: &Self,
         getter: Getter,
@@ -363,7 +365,9 @@ impl<T: 'static> Binding<T> {
             binding: source.clone(),
             getter,
             setter,
-            identity: Rc::new(()),
+            discriminator: SignalIdentity::call_site_discriminator::<(Getter, Setter, Output)>(
+                Location::caller(),
+            ),
             _marker: PhantomData,
         })
     }
@@ -1155,7 +1159,7 @@ struct Mapping<Input: 'static, Output, Getter, Setter> {
     getter: Getter,
     /// Function to convert from output type back to input type
     setter: Setter,
-    identity: Rc<()>,
+    discriminator: usize,
     /// Phantom data to keep track of the Output type parameter
     _marker: PhantomData<Output>,
 }
@@ -1166,7 +1170,7 @@ impl<Input, Output, Getter: Clone, Setter: Clone> Clone for Mapping<Input, Outpu
             binding: self.binding.clone(),
             getter: self.getter.clone(),
             setter: self.setter.clone(),
-            identity: Rc::clone(&self.identity),
+            discriminator: self.discriminator,
             _marker: PhantomData,
         }
     }
@@ -1190,7 +1194,7 @@ where
     fn identity(&self) -> Option<SignalIdentity> {
         self.binding
             .identity()
-            .map(|_| SignalIdentity::from_rc(&self.identity))
+            .map(|identity| identity.with_discriminator(self.discriminator))
     }
 
     /// Registers a watcher that will be notified when the input binding changes.

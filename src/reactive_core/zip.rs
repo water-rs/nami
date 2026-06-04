@@ -10,7 +10,7 @@
 //! to work with multiple interdependent values in a reactive context.
 
 use alloc::rc::Rc;
-use core::cell::RefCell;
+use core::{cell::RefCell, panic::Location};
 
 use crate::{Signal, SignalIdentity, map::Map, watcher::Context};
 
@@ -22,7 +22,7 @@ pub struct Zip<A, B> {
     a: A,
     /// The second computation to be zipped.
     b: B,
-    identity: Rc<()>,
+    discriminator: usize,
 }
 
 impl<A, B> Zip<A, B>
@@ -41,11 +41,12 @@ where
     /// # Returns
     /// A new `Zip` instance containing both computations.
     /// Creates a new `Zip` that combines two signals.
+    #[track_caller]
     pub fn new(a: A, b: B) -> Self {
         Self {
             a,
             b,
-            identity: Rc::new(()),
+            discriminator: SignalIdentity::call_site_discriminator::<(A, B)>(Location::caller()),
         }
     }
 }
@@ -61,6 +62,7 @@ pub trait FlattenMap<F, T, Output>: Signal {
     ///
     /// # Returns
     /// A new computation that produces the result of applying `f` to the flattened elements.
+    #[track_caller]
     fn flatten_map(&self, f: F) -> Map<Self, impl Clone + Fn(Self::Output) -> Output, Output>;
 }
 
@@ -73,6 +75,7 @@ where
     T2: 'static,
     Output: 'static,
 {
+    #[track_caller]
     fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn((T1, T2)) -> Output, Output> {
         Map::new(self.clone(), move |(t1, t2)| f(t1, t2))
     }
@@ -85,6 +88,7 @@ where
     F: 'static + Clone + Fn(T1, T2, T3) -> Output,
     Output: 'static,
 {
+    #[track_caller]
     fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn(((T1, T2), T3)) -> Output, Output> {
         Map::new(self.clone(), move |((t1, t2), t3)| f(t1, t2, t3))
     }
@@ -100,6 +104,7 @@ where
 ///
 /// # Returns
 /// A new `Zip` instance that computes both values and returns them as a tuple.
+#[track_caller]
 pub fn zip<A, B>(a: A, b: B) -> Zip<A, B>
 where
     A: Signal,
@@ -132,9 +137,12 @@ where
     }
 
     fn identity(&self) -> Option<SignalIdentity> {
-        self.a.identity()?;
-        self.b.identity()?;
-        Some(SignalIdentity::from_rc(&self.identity))
+        Some(
+            self.a
+                .identity()?
+                .combine(self.b.identity()?)
+                .with_discriminator(self.discriminator),
+        )
     }
 
     /// Adds a watcher to the zipped computation.

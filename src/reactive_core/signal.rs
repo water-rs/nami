@@ -10,10 +10,10 @@
 //! re-execute when their dependencies change, similar to reactive programming models
 //! found in front-end frameworks.
 
+use core::panic::Location;
+
 mod computed;
 pub use computed::*;
-
-use alloc::rc::Rc;
 
 use crate::{
     map::{Map, map},
@@ -78,16 +78,17 @@ pub struct WithMetadata<C, T> {
 
     /// The underlying computation.
     signal: C,
-    identity: Rc<()>,
+    discriminator: usize,
 }
 
-impl<C, T> WithMetadata<C, T> {
+impl<C, T: 'static> WithMetadata<C, T> {
     /// Create a new computation with associated metadata.
+    #[track_caller]
     pub fn new(metadata: T, signal: C) -> Self {
         Self {
             metadata,
             signal,
-            identity: Rc::new(()),
+            discriminator: SignalIdentity::call_site_discriminator::<T>(Location::caller()),
         }
     }
 }
@@ -108,7 +109,7 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
     fn identity(&self) -> Option<SignalIdentity> {
         self.signal
             .identity()
-            .map(|_| SignalIdentity::from_rc(&self.identity))
+            .map(|identity| identity.with_discriminator(self.discriminator))
     }
 
     /// Register a watcher, enriching notifications with the metadata.
