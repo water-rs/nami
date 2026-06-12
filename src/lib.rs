@@ -23,7 +23,6 @@ pub use support::{debug, utils};
 pub use binding::{Binding, Container, CustomBinding, binding};
 #[cfg(feature = "std")]
 #[doc(inline)]
-pub use binding::{LocalBindingFactory, with_local_binding_factory};
 #[doc(inline)]
 pub use constant::constant;
 #[doc(inline)]
