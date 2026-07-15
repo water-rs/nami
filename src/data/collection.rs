@@ -178,6 +178,20 @@ impl<T: 'static> List<T> {
             self.notify();
         }
     }
+
+    /// Atomically replaces the complete list and returns the previous contents.
+    ///
+    /// Watchers observe only the final replacement snapshot, regardless of how
+    /// many items differ between the old and new collections.
+    pub fn replace(&self, value: Vec<T>) -> Vec<T>
+    where
+        T: Clone,
+    {
+        let previous = core::mem::replace(&mut *self.vec.borrow_mut(), value);
+        self.notify();
+        previous
+    }
+
     /// Takes a snapshot of the current list contents.
     #[must_use]
     pub fn snapshot(&self) -> Vec<T>
@@ -329,6 +343,23 @@ mod tests {
         assert_eq!(Collection::get(&list, 1), Some(2));
         assert_eq!(Collection::get(&list, 2), Some(3));
         assert_eq!(Collection::get(&list, 3), None);
+    }
+
+    #[test]
+    fn replace_notifies_only_the_final_snapshot() {
+        let list = List::from(vec![1, 2]);
+        let observed = Rc::new(RefCell::new(Vec::<Vec<i32>>::new()));
+        let observed_for_watcher = Rc::clone(&observed);
+        let _guard = list.watch(.., move |context| {
+            observed_for_watcher
+                .borrow_mut()
+                .push(context.into_value().to_vec());
+        });
+
+        let previous = list.replace(vec![3, 4, 5]);
+
+        assert_eq!(previous, vec![1, 2]);
+        assert_eq!(*observed.borrow(), vec![vec![1, 2], vec![3, 4, 5]]);
     }
 
     #[test]
