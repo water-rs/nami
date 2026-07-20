@@ -48,7 +48,7 @@ impl SignalIdentity {
 
     /// Creates a stable derived identity for a property of this signal.
     #[must_use]
-    pub fn with_discriminator(self, discriminator: usize) -> Self {
+    pub const fn with_discriminator(self, discriminator: usize) -> Self {
         Self(
             self.0.wrapping_mul(0x9E37_79B9usize).rotate_left(7)
                 ^ discriminator.wrapping_add(0x517C_C1B7usize),
@@ -57,7 +57,7 @@ impl SignalIdentity {
 
     /// Combines two stable signal identities into one deterministic identity.
     #[must_use]
-    pub fn combine(self, other: Self) -> Self {
+    pub const fn combine(self, other: Self) -> Self {
         self.with_discriminator(other.0)
     }
 

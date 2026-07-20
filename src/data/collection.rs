@@ -183,6 +183,7 @@ impl<T: 'static> List<T> {
     ///
     /// Watchers observe only the final replacement snapshot, regardless of how
     /// many items differ between the old and new collections.
+    #[must_use]
     pub fn replace(&self, value: Vec<T>) -> Vec<T>
     where
         T: Clone,

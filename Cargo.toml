@@ -40,10 +40,10 @@ license = { file = "LICENSE" }
 nami-derive = { workspace = true }
 
 [dependencies]
-log = { version = "0.4.29", default-features = true }
+log = { version = "0.4.33", default-features = true }
 nami-derive = { workspace = true, optional = true}
-futures-core = "0.3.32"
-pin-project-lite = "0.2.16"
+futures-core = "0.3.33"
+pin-project-lite = "0.2.17"
 executor-core = { version = "0.7.1", default-features = false }
 async-channel = { version = "2.5.0", default-features = false }
 nami-core.workspace = true
@@ -59,7 +59,7 @@ derive = ["dep:nami-derive"]
 async-io = { version = "2.6.0", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+gloo-timers = { version = "0.4", features = ["futures"], optional = true }
 
 [workspace.lints]
 rust.missing_docs = "warn"
