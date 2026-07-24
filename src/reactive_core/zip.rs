@@ -25,6 +25,12 @@ pub struct Zip<A, B> {
     discriminator: usize,
 }
 
+struct ZipWatchState<L, R, W> {
+    latest_left: RefCell<L>,
+    latest_right: RefCell<R>,
+    watcher: W,
+}
+
 impl<A, B> Zip<A, B>
 where
     A: Signal,
@@ -156,34 +162,29 @@ where
     /// # Returns
     /// A `WatcherGuard` that, when dropped, will remove the watchers from both computations.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
-        let watcher = Rc::new(watcher);
         let Self { a, b, .. } = self;
-        let latest_a = Rc::new(RefCell::new(a.get()));
-        let latest_b = Rc::new(RefCell::new(b.get()));
+        let state = Rc::new(ZipWatchState {
+            latest_left: RefCell::new(a.get()),
+            latest_right: RefCell::new(b.get()),
+            watcher,
+        });
 
         let guard_a = {
-            let watcher = watcher.clone();
-            let latest_a = latest_a.clone();
-            let latest_b = latest_b.clone();
+            let state = Rc::clone(&state);
             self.a.watch(move |ctx: Context<A::Output>| {
                 let updated_a = ctx.value().clone();
-                *latest_a.borrow_mut() = updated_a;
-                let other = latest_b.borrow().clone();
-                watcher(ctx.map(|value| (value, other)));
+                *state.latest_left.borrow_mut() = updated_a;
+                let other = state.latest_right.borrow().clone();
+                (state.watcher)(ctx.map(|value| (value, other)));
             })
         };
 
-        let guard_b = {
-            let watcher = watcher;
-            let latest_a = latest_a;
-            let latest_b = latest_b;
-            self.b.watch(move |ctx: Context<B::Output>| {
-                let updated_b = ctx.value().clone();
-                *latest_b.borrow_mut() = updated_b;
-                let other = latest_a.borrow().clone();
-                watcher(ctx.map(|value| (other, value)));
-            })
-        };
+        let guard_b = self.b.watch(move |ctx: Context<B::Output>| {
+            let updated_b = ctx.value().clone();
+            *state.latest_right.borrow_mut() = updated_b;
+            let other = state.latest_left.borrow().clone();
+            (state.watcher)(ctx.map(|value| (other, value)));
+        });
 
         (guard_a, guard_b)
     }

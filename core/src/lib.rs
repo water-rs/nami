@@ -291,6 +291,12 @@ impl<T: Signal, E: Signal> Signal for Result<T, E> {
     }
 }
 
+struct TupleWatchState<L, R, W> {
+    latest_left: RefCell<L>,
+    latest_right: RefCell<R>,
+    watcher: W,
+}
+
 impl<T, U> Signal for (T, U)
 where
     T: Signal,
@@ -306,33 +312,28 @@ where
     }
 
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
-        let watcher = Rc::new(watcher);
-        let latest_left = Rc::new(RefCell::new(self.0.get()));
-        let latest_right = Rc::new(RefCell::new(self.1.get()));
+        let state = Rc::new(TupleWatchState {
+            latest_left: RefCell::new(self.0.get()),
+            latest_right: RefCell::new(self.1.get()),
+            watcher,
+        });
 
         let left_guard = {
-            let watcher = watcher.clone();
-            let latest_left = latest_left.clone();
-            let latest_right = latest_right.clone();
+            let state = Rc::clone(&state);
             self.0.watch(move |ctx: Context<T::Output>| {
                 let updated_left = ctx.value().clone();
-                *latest_left.borrow_mut() = updated_left;
-                let right = latest_right.borrow().clone();
-                watcher(ctx.map(|left| (left, right)));
+                *state.latest_left.borrow_mut() = updated_left;
+                let right = state.latest_right.borrow().clone();
+                (state.watcher)(ctx.map(|left| (left, right)));
             })
         };
 
-        let right_guard = {
-            let watcher = watcher;
-            let latest_left = latest_left;
-            let latest_right = latest_right;
-            self.1.watch(move |ctx: Context<U::Output>| {
-                let updated_right = ctx.value().clone();
-                *latest_right.borrow_mut() = updated_right;
-                let left = latest_left.borrow().clone();
-                watcher(ctx.map(|right| (left, right)));
-            })
-        };
+        let right_guard = self.1.watch(move |ctx: Context<U::Output>| {
+            let updated_right = ctx.value().clone();
+            *state.latest_right.borrow_mut() = updated_right;
+            let left = state.latest_left.borrow().clone();
+            (state.watcher)(ctx.map(|right| (left, right)));
+        });
 
         (left_guard, right_guard)
     }
