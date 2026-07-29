@@ -1,7 +1,6 @@
 //! Debounce utilities for throttling signal updates.
 //!
-//! This module provides (or will provide) helpers to debounce and throttle
-//! reactive updates. It is currently a placeholder.
+//! This module provides helpers that debounce reactive updates.
 use alloc::{boxed::Box, rc::Rc};
 use core::{cell::RefCell, fmt::Debug, time::Duration};
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
