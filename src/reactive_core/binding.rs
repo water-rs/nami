@@ -25,6 +25,7 @@ use crate::{
     Computed, Signal, SignalIdentity,
     watcher::{BoxWatcherGuard, Context, WatcherManager},
 };
+use nami_core::observe::Origin;
 
 pub use nami_core::CustomBinding;
 
@@ -65,6 +66,7 @@ impl<T: 'static + Clone> Binding<T> {
     /// Creates a new binding from a value by wrapping it in a container.
     ///
     /// The container provides the reactive capabilities for the value.
+    #[track_caller]
     pub fn container(value: T) -> Self {
         Self::custom(Container::new(value))
     }
@@ -72,6 +74,7 @@ impl<T: 'static + Clone> Binding<T> {
 
 impl<T: Default + Clone + 'static> Default for Binding<T> {
     /// Creates a binding with the default value for type T.
+    #[track_caller]
     fn default() -> Self {
         Self::container(T::default())
     }
@@ -110,6 +113,7 @@ impl<T: Default + Clone + 'static> Default for Binding<T> {
 /// ```
 ///
 /// This is equivalent to `Binding::container(value.into())`.
+#[track_caller]
 pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
     Binding::container(value.into())
 }
@@ -581,6 +585,7 @@ macro_rules! impl_binding {
         impl Binding<$ty> {
             $( #[$meta] )*
             #[must_use]
+            #[track_caller]
             pub fn $ty(value: $ty) -> Self {
                 Self::container(value)
             }
@@ -1006,12 +1011,14 @@ impl<T> From<T> for Container<T>
 where
     T: 'static + Clone,
 {
+    #[track_caller]
     fn from(value: T) -> Self {
         Self::new(value)
     }
 }
 
 impl<T: 'static + Clone + Default> Default for Container<T> {
+    #[track_caller]
     fn default() -> Self {
         Self::new(T::default())
     }
@@ -1019,10 +1026,13 @@ impl<T: 'static + Clone + Default> Default for Container<T> {
 
 impl<T: 'static + Clone> Container<T> {
     /// Creates a new container with the given value.
+    #[track_caller]
     pub fn new(value: T) -> Self {
+        let value = Rc::new(RefCell::new(value));
+        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&value));
         Self {
-            value: Rc::new(RefCell::new(value)),
-            watchers: WatcherManager::default(),
+            value,
+            watchers: WatcherManager::with_origin(origin),
         }
     }
 }

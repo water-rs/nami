@@ -7,6 +7,7 @@ use core::{
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
 use nami_core::watcher::Context;
 
+use nami_core::{SignalIdentity, observe::Origin};
 use crate::{
     Signal,
     utils::sleep,
@@ -69,13 +70,16 @@ where
     S: Signal,
 {
     /// Creates a new throttle wrapper with a custom executor.
+    #[track_caller]
     pub fn with_executor(signal: S, duration: Duration, executor: E) -> Self {
+        let timer = Rc::default();
+        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&timer));
         Self {
             signal,
-            watchers: WatcherManager::new(),
+            watchers: WatcherManager::with_origin(origin),
             duration,
             executor,
-            timer: Rc::default(),
+            timer,
             guard: Rc::default(),
             throttled: Rc::default(),
         }

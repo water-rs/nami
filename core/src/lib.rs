@@ -3,6 +3,10 @@
 #![no_std]
 #![forbid(unsafe_code)]
 extern crate alloc;
+// Observability scopes its observer to one reactive graph with a thread-local,
+// which needs `std`. The crate stays `no_std` in every other configuration.
+#[cfg(feature = "observability")]
+extern crate std;
 
 use alloc::rc::Rc;
 use core::{
@@ -105,6 +109,7 @@ impl Hasher for IdentityDiscriminatorHasher {
 /// Collection types for Nami.
 pub mod collection;
 pub mod dictionary;
+pub mod observe;
 pub mod watcher;
 /// The core trait for reactive system.
 ///

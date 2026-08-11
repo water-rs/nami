@@ -54,6 +54,8 @@ std = ["executor-core/std","nami-core/std"]
 default = ["derive", "timer"]
 timer = ["std","dep:async-io","dep:gloo-timers"]
 derive = ["dep:nami-derive"]
+# Reactive-graph introspection for development tooling. See `nami_core::observe`.
+observability = ["std", "nami-core/observability"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 async-io = { version = "2.6.0", optional = true }

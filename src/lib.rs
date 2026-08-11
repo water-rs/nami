@@ -39,4 +39,4 @@ pub use nami_derive::{Project, s};
 #[doc(hidden)]
 pub extern crate alloc as __alloc;
 
-pub use nami_core::{impl_constant, watcher};
+pub use nami_core::{impl_constant, observe, watcher};

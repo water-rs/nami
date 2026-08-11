@@ -18,3 +18,7 @@ workspace = true
 [features]
 default = ["std"]
 std = []
+# Reactive-graph introspection for development tooling. Adds an `Origin` to every
+# state-owning signal node and dispatches lifecycle/notification events to a
+# thread-local observer. Off by default; requires `std` for the thread-local.
+observability = ["std"]

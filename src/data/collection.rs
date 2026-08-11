@@ -69,7 +69,11 @@ use core::{
 pub use nami_core::collection::*;
 
 use alloc::{rc::Rc, vec::Vec};
-use nami_core::watcher::{Context, Metadata};
+use nami_core::{
+    SignalIdentity,
+    observe::Origin,
+    watcher::{Context, Metadata},
+};
 
 use crate::{
     Signal,
@@ -104,21 +108,28 @@ pub struct List<T> {
 }
 
 impl<T: 'static> From<Vec<T>> for List<T> {
+    #[track_caller]
     fn from(value: Vec<T>) -> Self {
-        Self {
-            vec: Rc::new(RefCell::new(value)),
-            watchers: WatcherManager::new(),
-        }
+        Self::from_vec(value)
     }
 }
 
 impl<T: 'static> List<T> {
     /// Creates a new empty reactive list.
     #[must_use]
+    #[track_caller]
     pub fn new() -> Self {
+        Self::from_vec(Vec::new())
+    }
+
+    /// Builds a list around `value`, attributing the node to the caller.
+    #[track_caller]
+    fn from_vec(value: Vec<T>) -> Self {
+        let vec = Rc::new(RefCell::new(value));
+        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&vec));
         Self {
-            vec: Rc::new(RefCell::new(Vec::new())),
-            watchers: WatcherManager::new(),
+            vec,
+            watchers: WatcherManager::with_origin(origin),
         }
     }
 

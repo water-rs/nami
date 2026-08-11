@@ -30,6 +30,8 @@ use core::{
     num::NonZeroUsize,
 };
 
+use crate::observe::{self, Origin};
+
 /// A type-erased container for metadata that can be associated with computation results.
 ///
 /// `Metadata` allows attaching arbitrary typed information to computation results
@@ -281,10 +283,24 @@ impl<T> Default for WatcherManager<T> {
 }
 
 impl<T: 'static> WatcherManager<T> {
-    /// Creates a new, empty watcher manager.
+    /// Creates a new, empty watcher manager with no provenance.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a watcher manager attributed to a state-owning signal node.
+    ///
+    /// State owners should use this rather than [`Self::new`] so development
+    /// tooling can attribute subscriptions and notifications to the node and to
+    /// the source location that created it. [`Origin`] is zero-sized unless the
+    /// `observability` feature is enabled.
+    #[must_use]
+    pub fn with_origin(origin: Origin) -> Self {
+        observe::on_create(origin);
+        Self {
+            inner: Rc::new(RefCell::new(WatcherManagerInner::with_origin(origin))),
+        }
     }
 
     /// Checks if the manager has any registered watchers.
@@ -295,7 +311,13 @@ impl<T: 'static> WatcherManager<T> {
 
     /// Registers a new watcher and returns its unique identifier.
     pub fn register(&self, watcher: impl Fn(Context<T>) + 'static) -> WatcherId {
-        self.inner.borrow_mut().register(watcher)
+        let (id, origin, subscribers) = {
+            let mut inner = self.inner.borrow_mut();
+            let id = inner.register(watcher);
+            (id, inner.origin, inner.len())
+        };
+        observe::on_subscribe(origin, subscribers);
+        id
     }
 
     /// Registers a watcher and returns a guard that will unregister it when dropped.
@@ -313,14 +335,16 @@ impl<T: 'static> WatcherManager<T> {
     where
         T: Clone,
     {
-        let watchers = {
+        let (watchers, origin) = {
             let inner = self.inner.borrow();
-            inner.watchers_snapshot()
+            (inner.watchers_snapshot(), inner.origin)
         };
 
         if watchers.is_empty() {
             return;
         }
+
+        observe::on_notify(origin, watchers.len());
 
         for watcher in watchers {
             watcher(ctx.clone());
@@ -329,7 +353,12 @@ impl<T: 'static> WatcherManager<T> {
 
     /// Cancels a previously registered watcher by its identifier.
     pub fn cancel(&self, id: WatcherId) {
-        self.inner.borrow_mut().cancel(id);
+        let (origin, subscribers) = {
+            let mut inner = self.inner.borrow_mut();
+            inner.cancel(id);
+            (inner.origin, inner.len())
+        };
+        observe::on_unsubscribe(origin, subscribers);
     }
 }
 
@@ -355,6 +384,7 @@ impl<T: 'static> Drop for WatcherManagerGuard<T> {
 struct WatcherManagerInner<T> {
     id: WatcherId,
     map: BTreeMap<WatcherId, Watcher<T>>,
+    origin: Origin,
 }
 
 impl<T> Debug for WatcherManagerInner<T> {
@@ -368,14 +398,35 @@ impl<T> Default for WatcherManagerInner<T> {
         Self {
             id: WatcherId::MIN,
             map: BTreeMap::new(),
+            origin: Origin::default(),
         }
     }
 }
 
+impl<T> Drop for WatcherManagerInner<T> {
+    fn drop(&mut self) {
+        observe::on_drop(self.origin);
+    }
+}
+
 impl<T: 'static> WatcherManagerInner<T> {
+    /// Creates an inner manager attributed to a signal node.
+    fn with_origin(origin: Origin) -> Self {
+        Self {
+            id: WatcherId::MIN,
+            map: BTreeMap::new(),
+            origin,
+        }
+    }
+
     /// Checks if there are any registered watchers.
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
+    }
+
+    /// Number of currently registered watchers.
+    fn len(&self) -> usize {
+        self.map.len()
     }
 
     /// Assigns a new unique identifier for a watcher.
