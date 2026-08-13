@@ -567,9 +567,13 @@ pub trait SignalExt: Signal {
     // ==================== String Methods ====================
 
     /// Returns `true` if the string is empty.
-    #[allow(clippy::wrong_self_convention)]
+    ///
+    /// Named `str_`, like [`SignalExt::str_len`] and
+    /// [`SignalExt::str_contains`], because every type that can be a constant
+    /// signal gains these methods — including `Vec<T>`, whose own `is_empty`
+    /// would otherwise be shadowed by this one at the call site.
     #[track_caller]
-    fn is_empty<T>(&self) -> Map<Self, fn(T) -> bool, bool>
+    fn str_is_empty<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
         T: AsRef<str> + 'static,
@@ -588,8 +592,11 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the string contains the given pattern.
+    ///
+    /// Named `str_` for the reason given on [`SignalExt::str_is_empty`]: a bare
+    /// `contains` here shadows `<[T]>::contains` on any `Vec<T>` in scope.
     #[track_caller]
-    fn contains<T>(
+    fn str_contains<T>(
         &self,
         pattern: impl Into<String>,
     ) -> Map<Self, impl 'static + Clone + Fn(T) -> bool, bool>
@@ -999,19 +1006,19 @@ mod tests {
     #[test]
     fn test_is_empty_string() {
         let signal: Binding<String> = binding(String::new());
-        assert!(signal.is_empty().get());
+        assert!(signal.str_is_empty().get());
 
         signal.set("hello".to_string());
-        assert!(!signal.is_empty().get());
+        assert!(!signal.str_is_empty().get());
     }
 
     #[test]
     fn test_is_empty_str() {
         let signal: Binding<&str> = binding("");
-        assert!(signal.is_empty().get());
+        assert!(signal.str_is_empty().get());
 
         signal.set("hello");
-        assert!(!signal.is_empty().get());
+        assert!(!signal.str_is_empty().get());
     }
 
     #[test]
@@ -1026,7 +1033,7 @@ mod tests {
     #[test]
     fn test_contains() {
         let signal: Binding<&str> = binding("hello world");
-        let has_world = signal.contains("world");
+        let has_world = signal.str_contains("world");
         assert!(has_world.get());
 
         signal.set("hello");
@@ -1036,7 +1043,7 @@ mod tests {
     #[test]
     fn test_contains_str() {
         let signal: Binding<&str> = binding("hello world");
-        let has_world = signal.contains("world");
+        let has_world = signal.str_contains("world");
         assert!(has_world.get());
 
         signal.set("hello");

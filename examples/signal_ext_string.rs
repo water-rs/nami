@@ -5,8 +5,8 @@ use nami::{Binding, Signal, SignalExt, binding};
 fn main() {
     // is_empty: Check if string is empty
     let username: Binding<String> = binding(String::new());
-    let is_empty = username.is_empty();
-    let is_valid = username.is_empty().not();
+    let is_empty = username.str_is_empty();
+    let is_valid = username.str_is_empty().not();
 
     println!("Username empty: {}", is_empty.get()); // true
     println!("Username valid: {}", is_valid.get()); // false
@@ -26,8 +26,8 @@ fn main() {
 
     // contains: Check if string contains a pattern
     let search_query: Binding<String> = binding("rust programming language".to_string());
-    let has_rust = search_query.contains("rust");
-    let has_python = search_query.contains("python");
+    let has_rust = search_query.str_contains("rust");
+    let has_python = search_query.str_contains("python");
 
     println!("Contains 'rust': {}", has_rust.get()); // true
     println!("Contains 'python': {}", has_python.get()); // false
@@ -38,8 +38,8 @@ fn main() {
 
     // Works with &str too
     let status: Binding<&str> = binding("loading...");
-    let is_loading = status.contains("loading");
-    let is_done = status.is_empty().not();
+    let is_loading = status.str_contains("loading");
+    let is_done = status.str_is_empty().not();
 
     println!("Is loading: {}", is_loading.get()); // true
     println!("Has status: {}", is_done.get()); // true
@@ -51,7 +51,7 @@ fn main() {
     let input: Binding<String> = binding(String::new());
 
     // Validation: non-empty and at least 3 characters
-    let is_not_empty = input.is_empty().not();
+    let is_not_empty = input.str_is_empty().not();
     let is_long_enough = input.str_len().ge(3);
     let is_valid_input = is_not_empty.zip(&is_long_enough).map(|(a, b)| a && b);
 
