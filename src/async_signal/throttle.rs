@@ -7,12 +7,12 @@ use core::{
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
 use nami_core::watcher::Context;
 
-use nami_core::{SignalIdentity, observe::Origin};
 use crate::{
     Signal,
     utils::sleep,
     watcher::{WatcherManager, WatcherManagerGuard},
 };
+use nami_core::{SignalIdentity, observe::Origin};
 
 /// A throttle wrapper that limits the rate of signal updates to at most once per duration.
 ///

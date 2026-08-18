@@ -6,12 +6,12 @@ use core::{cell::RefCell, fmt::Debug, time::Duration};
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
 use nami_core::watcher::Context;
 
-use nami_core::{SignalIdentity, observe::Origin};
 use crate::{
     Signal,
     utils::sleep,
     watcher::{WatcherManager, WatcherManagerGuard},
 };
+use nami_core::{SignalIdentity, observe::Origin};
 
 /// A debounce wrapper that delays signal updates until a specified duration has passed
 /// without new updates. This helps reduce the frequency of updates for rapidly changing signals.
