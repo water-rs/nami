@@ -615,7 +615,10 @@ impl<C: Signal> SignalExt for C {}
 mod tests {
     use super::*;
     use crate::{Binding, binding};
+    use alloc::rc::Rc;
     use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     // ==================== Map Variants ====================
 
@@ -671,6 +674,24 @@ mod tests {
         let signal: Binding<i32> = binding(42);
         let distinct = signal.distinct();
         assert_eq!(distinct.get(), 42);
+    }
+
+    #[test]
+    fn test_distinct_watch_notifies_only_on_change() {
+        use core::cell::RefCell;
+
+        let signal: Binding<i32> = binding(0);
+        let distinct = signal.distinct();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let seen_in_watch = seen.clone();
+        let _guard = distinct.watch(move |ctx| {
+            seen_in_watch.borrow_mut().push(*ctx.value());
+        });
+
+        signal.set(1);
+        signal.set(1);
+        signal.set(2);
+        assert_eq!(*seen.borrow(), vec![1, 2]);
     }
 
     // ==================== Comparison Methods ====================

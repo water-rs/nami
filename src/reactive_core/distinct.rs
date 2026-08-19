@@ -52,14 +52,8 @@ where
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let last_value_store = self.last_value.clone();
         self.signal.watch(move |ctx: Context<S::Output>| {
-            let last_value = last_value_store.borrow();
-            if let Some(last_value) = &*last_value {
-                if last_value != ctx.value() {
-                    *last_value_store.borrow_mut() = Some(ctx.value().clone());
-                    watcher(ctx);
-                }
-            } else {
-                // First time watching, set the last value
+            let changed = last_value_store.borrow().as_ref() != Some(ctx.value());
+            if changed {
                 *last_value_store.borrow_mut() = Some(ctx.value().clone());
                 watcher(ctx);
             }
