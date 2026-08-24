@@ -145,7 +145,6 @@ mod enabled {
 
     impl ObserverScope {
         /// Installs `observer`, returning a guard that restores the previous one.
-        #[must_use]
         pub fn install(observer: Rc<dyn SignalObserver>) -> Self {
             let previous = OBSERVER.with(|slot| slot.borrow_mut().replace(observer));
             Self { previous }
@@ -155,7 +154,9 @@ mod enabled {
     impl Drop for ObserverScope {
         fn drop(&mut self) {
             let previous = self.previous.take();
-            OBSERVER.with(|slot| {
+            // Restoring a slot that thread teardown has already destroyed is a
+            // no-op, and panicking here would abort — see `dispatch`.
+            let _ = OBSERVER.try_with(|slot| {
                 *slot.borrow_mut() = previous;
             });
         }
@@ -167,12 +168,18 @@ mod enabled {
         let Some(node) = origin.0 else {
             return;
         };
-        if DISPATCHING.with(Cell::get) {
+        // A signal can outlive these thread-locals: anything the application
+        // parks in a thread-local of its own is dropped during thread teardown,
+        // by which time an observer registered later has already been
+        // destroyed. There is nothing left to report to, and `with` would
+        // panic — which is fatal rather than catchable, because a panic in a
+        // destructor during teardown aborts the process.
+        let Ok(false) = DISPATCHING.try_with(Cell::get) else {
             return;
-        }
+        };
         // Clone the handle out before calling, so an observer that installs or
         // uninstalls a scope cannot invalidate a live borrow.
-        let Some(observer) = OBSERVER.with(|slot| slot.borrow().clone()) else {
+        let Ok(Some(observer)) = OBSERVER.try_with(|slot| slot.borrow().clone()) else {
             return;
         };
         DISPATCHING.with(|flag| flag.set(true));

@@ -190,3 +190,29 @@ fn nothing_is_reported_without_an_installed_observer() {
     }
     assert!(recorder.events().is_empty());
 }
+
+/// A signal parked in a thread-local outlives the observability thread-locals:
+/// teardown destroys them in reverse order of first use, and this one is used
+/// before the first signal is ever created. Dropping the signal then reports to
+/// storage that is already gone. Reporting nothing is the only answer available
+/// — and the only survivable one, because a panic in a destructor during thread
+/// teardown aborts the whole process rather than failing this test.
+#[test]
+fn a_signal_dropped_during_thread_teardown_reports_nothing() {
+    thread_local! {
+        static PARKED: RefCell<Option<Binding<i32>>> = const { RefCell::new(None) };
+    }
+
+    std::thread::spawn(|| {
+        PARKED.with(|slot| {
+            // Registers this thread-local's destructor first, then — inside the
+            // closure, so strictly afterwards — observability's own.
+            *slot.borrow_mut() = Some(Binding::i32(0));
+        });
+        let recorder = Rc::new(Recorder::default());
+        let scope = ObserverScope::install(recorder);
+        drop(scope);
+    })
+    .join()
+    .expect("the parked signal must not take the thread down with it");
+}
