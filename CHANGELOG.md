@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/water-rs/nami/compare/v0.10.1...v0.11.0) - 2026-08-25
+
+### Added
+
+- *(core)* Observe the reactive graph behind an opt-in feature.
+- Add atomic list replacement and signal-backed reactive collections.
+- Implement `Signal` for fixed-size arrays.
+
+### Changed
+
+- **Breaking:** Rename the string signal helpers so they no longer shadow slice methods.
+- Upgrade the executor and reactive dependency stack.
+- Remove renderer-owned local-binding hooks in favor of explicit signal state.
+
+### Fixed
+
+- Keep graph observation safe when a signal is dropped during thread teardown.
+- Prevent `Distinct::watch` from double-borrowing its watcher state.
+
 ## [0.10.0](https://github.com/water-rs/nami/compare/v0.9.1...v0.10.0) - 2026-01-22
 
 ### Other
