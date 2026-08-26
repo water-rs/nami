@@ -73,7 +73,7 @@ fn combinators_are_edges_and_only_state_owners_are_nodes() {
 
     let count = Binding::i32(0); // node
     // `map` owns no watchers of its own, so it must not appear as a node.
-    let doubled = count.clone().map(|n| n * 2);
+    let doubled = count.map(|n| n * 2);
     let guard = doubled.watch(|_| {});
 
     count.set(21);
@@ -159,7 +159,7 @@ fn observer_traffic_is_not_itself_observed() {
     }
 
     let scratch = Binding::i32(0);
-    let _scratch_guard = scratch.clone().watch(|_| {});
+    let _scratch_guard = scratch.watch(|_| {});
     let observer = Rc::new(ReentrantObserver {
         scratch: scratch.clone(),
         notifications: RefCell::new(0),
@@ -167,7 +167,7 @@ fn observer_traffic_is_not_itself_observed() {
     let _scope = ObserverScope::install(observer.clone());
 
     let subject = Binding::i32(0);
-    let _guard = subject.clone().watch(|_| {});
+    let _guard = subject.watch(|_| {});
     subject.set(1);
 
     assert_eq!(
@@ -185,7 +185,7 @@ fn nothing_is_reported_without_an_installed_observer() {
     let recorder = Rc::new(Recorder::default());
     {
         let value = Binding::i32(0);
-        let _guard = value.clone().watch(|_| {});
+        let _guard = value.watch(|_| {});
         value.set(1);
     }
     assert!(recorder.events().is_empty());

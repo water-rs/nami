@@ -21,8 +21,6 @@ pub use support::{debug, utils};
 
 #[doc(inline)]
 pub use binding::{Binding, Container, CustomBinding, binding};
-#[cfg(feature = "std")]
-#[doc(inline)]
 #[doc(inline)]
 pub use constant::constant;
 #[doc(inline)]
