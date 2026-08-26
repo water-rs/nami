@@ -1,7 +1,6 @@
 //! Debounce utilities for throttling signal updates.
 //!
-//! This module provides (or will provide) helpers to debounce and throttle
-//! reactive updates. It is currently a placeholder.
+//! This module provides helpers that debounce reactive updates.
 use alloc::{boxed::Box, rc::Rc};
 use core::{cell::RefCell, fmt::Debug, time::Duration};
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
@@ -12,6 +11,7 @@ use crate::{
     utils::sleep,
     watcher::{WatcherManager, WatcherManagerGuard},
 };
+use nami_core::{SignalIdentity, observe::Origin};
 
 /// A debounce wrapper that delays signal updates until a specified duration has passed
 /// without new updates. This helps reduce the frequency of updates for rapidly changing signals.
@@ -67,13 +67,16 @@ where
     S: Signal,
 {
     /// Creates a new debounce wrapper.
+    #[track_caller]
     pub fn with_executor(signal: S, duration: Duration, executor: E) -> Self {
+        let timer = Rc::default();
+        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&timer));
         Self {
             signal,
-            watchers: WatcherManager::new(),
+            watchers: WatcherManager::with_origin(origin),
             duration,
             executor,
-            timer: Rc::default(),
+            timer,
             guard: Rc::default(),
         }
     }

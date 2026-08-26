@@ -2,17 +2,18 @@
 //!
 //! This module provides two-way reactive bindings that can both produce and consume values.
 //! Unlike read-only signals, bindings can be modified and will notify watchers of changes.
-#![allow(clippy::similar_names)]
 
 use core::{
     any::{Any, type_name},
     cell::RefCell,
     fmt::Debug,
     marker::PhantomData,
+    mem::ManuallyDrop,
     ops::{
         Add, BitAnd, BitOr, BitXor, Deref, DerefMut, Div, Mul, Neg, Not, RangeBounds, Rem, Shl,
         Shr, Sub,
     },
+    panic::Location,
 };
 
 use alloc::{boxed::Box, rc::Rc};
@@ -21,15 +22,10 @@ use executor_core::{LocalExecutor, Task};
 use num_traits::Signed;
 
 use crate::{
-    Computed, Signal,
-    map::Map,
-    utils::{
-        add, bitand as util_bitand, bitor as util_bitor, bitxor as util_bitxor, div as util_div,
-        mul as util_mul, rem as util_rem, shl as util_shl, shr as util_shr, sub as util_sub,
-    },
+    Computed, Signal, SignalIdentity,
     watcher::{BoxWatcherGuard, Context, WatcherManager},
-    zip::Zip,
 };
+use nami_core::observe::Origin;
 
 pub use nami_core::CustomBinding;
 
@@ -70,6 +66,7 @@ impl<T: 'static + Clone> Binding<T> {
     /// Creates a new binding from a value by wrapping it in a container.
     ///
     /// The container provides the reactive capabilities for the value.
+    #[track_caller]
     pub fn container(value: T) -> Self {
         Self::custom(Container::new(value))
     }
@@ -77,6 +74,7 @@ impl<T: 'static + Clone> Binding<T> {
 
 impl<T: Default + Clone + 'static> Default for Binding<T> {
     /// Creates a binding with the default value for type T.
+    #[track_caller]
     fn default() -> Self {
         Self::container(T::default())
     }
@@ -115,41 +113,12 @@ impl<T: Default + Clone + 'static> Default for Binding<T> {
 /// ```
 ///
 /// This is equivalent to `Binding::container(value.into())`.
+#[track_caller]
 pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
     Binding::container(value.into())
 }
 
-macro_rules! impl_binary_trait {
-    ($trait:ident, $method:ident, $helper:path) => {
-        impl<T, RHS> $trait<RHS> for Binding<T>
-        where
-            RHS: Signal,
-            T: $trait<RHS::Output> + Clone + 'static,
-            RHS::Output: Clone,
-        {
-            type Output = Map<
-                Zip<Self, RHS>,
-                fn((T, RHS::Output)) -> <T as $trait<RHS::Output>>::Output,
-                <T as $trait<RHS::Output>>::Output,
-            >;
-
-            fn $method(self, rhs: RHS) -> Self::Output {
-                $helper(self, rhs)
-            }
-        }
-    };
-}
-
-impl_binary_trait!(Add, add, add);
-impl_binary_trait!(Sub, sub, util_sub);
-impl_binary_trait!(Mul, mul, util_mul);
-impl_binary_trait!(Div, div, util_div);
-impl_binary_trait!(Rem, rem, util_rem);
-impl_binary_trait!(BitAnd, bitand, util_bitand);
-impl_binary_trait!(BitOr, bitor, util_bitor);
-impl_binary_trait!(BitXor, bitxor, util_bitxor);
-impl_binary_trait!(Shl, shl, util_shl);
-impl_binary_trait!(Shr, shr, util_shr);
+impl_signal_binary_ops!(Binding<T>, [T], T);
 
 /// A guard that provides mutable access to a binding's value.
 ///
@@ -158,7 +127,7 @@ impl_binary_trait!(Shr, shr, util_shr);
 #[derive(Debug)]
 pub struct BindingMutGuard<'a, T: 'static> {
     binding: &'a Binding<T>,
-    value: Option<T>,
+    value: ManuallyDrop<T>,
     dirty: bool,
 }
 
@@ -166,40 +135,36 @@ impl<'a, T> BindingMutGuard<'a, T> {
     /// Creates a new guard for the given binding.
     pub fn new(binding: &'a Binding<T>) -> Self {
         Self {
-            value: Some(binding.get()),
+            value: ManuallyDrop::new(binding.get()),
             binding,
             dirty: false,
         }
     }
 }
 
-#[allow(clippy::unwrap_used)]
 impl<T> Deref for BindingMutGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.value.as_ref().unwrap()
+        &self.value
     }
 }
 
-#[allow(clippy::unwrap_used)]
 impl<T> DerefMut for BindingMutGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.dirty = true;
-        self.value.as_mut().unwrap()
+        &mut self.value
     }
 }
 
-#[allow(clippy::unwrap_used)]
 impl<T: 'static> Drop for BindingMutGuard<'_, T> {
     /// When the guard is dropped, updates the binding with the modified value.
     fn drop(&mut self) {
         if self.dirty {
-            if let Some(value) = self.value.take() {
-                self.binding.set(value);
-            }
+            let value = unsafe { ManuallyDrop::take(&mut self.value) };
+            self.binding.set(value);
         } else {
-            let _ = self.value.take();
+            unsafe { ManuallyDrop::drop(&mut self.value) }
         }
     }
 }
@@ -319,6 +284,7 @@ impl<T: 'static> Binding<T> {
     ///
     /// The getter transforms values from this binding's type to the output type.
     /// The setter transforms values from the output type back to this binding's type.
+    #[track_caller]
     pub fn mapping<Output, Getter, Setter>(
         source: &Self,
         getter: Getter,
@@ -332,6 +298,9 @@ impl<T: 'static> Binding<T> {
             binding: source.clone(),
             getter,
             setter,
+            discriminator: SignalIdentity::call_site_discriminator::<(Getter, Setter, Output)>(
+                Location::caller(),
+            ),
             _marker: PhantomData,
         })
     }
@@ -403,25 +372,37 @@ impl<T: 'static> BindingMailbox<T> {
     ///
     /// The job will be executed asynchronously and will have access to the binding
     /// for reading or modifying its value.
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::unwrap_used)]
+    ///
+    /// # Panics
+    ///
+    /// Panics when the mailbox receiver is closed and the job cannot be enqueued.
     pub fn handle(&self, job: impl FnOnce(&mut Binding<T>) + 'static + Send) {
-        self.sender.try_send(Box::new(job)).unwrap();
+        self.sender
+            .try_send(Box::new(job))
+            .expect("BindingMailbox::handle failed to enqueue job");
     }
 
     /// Gets the current value of the binding asynchronously via the mailbox.
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::unwrap_used)]
+    ///
+    /// # Panics
+    ///
+    /// Panics when the value request cannot be sent to the mailbox worker
+    /// or when the response channel is unexpectedly closed.
     pub async fn get(&self) -> T
     where
         T: Clone + Send,
     {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
-            sender.try_send(binding.get()).unwrap();
+            sender
+                .try_send(binding.get())
+                .expect("BindingMailbox::get failed to send response");
         });
 
-        receiver.recv().await.unwrap()
+        match receiver.recv().await {
+            Ok(value) => value,
+            Err(error) => panic!("BindingMailbox::get response channel closed: {error}"),
+        }
     }
 
     /// Gets the current value of the binding asynchronously and converts it to type `T2`.
@@ -446,31 +427,47 @@ impl<T: 'static> BindingMailbox<T> {
     /// let owned_string: String = mailbox.get_as().await;
     /// assert_eq!(owned_string, "hello world");
     /// ```
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::unwrap_used)]
+    ///
+    /// # Panics
+    ///
+    /// Panics when the value request cannot be sent to the mailbox worker
+    /// or when the response channel is unexpectedly closed.
     pub async fn get_as<T2>(&self) -> T2
     where
         T2: Send + 'static + From<T>,
     {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
-            sender.try_send(binding.get().into()).unwrap();
+            sender
+                .try_send(binding.get().into())
+                .expect("BindingMailbox::get_as failed to send response");
         });
 
-        receiver.recv().await.unwrap()
+        match receiver.recv().await {
+            Ok(value) => value,
+            Err(error) => panic!("BindingMailbox::get_as response channel closed: {error}"),
+        }
     }
 
     /// Sets a new value on the binding asynchronously via the mailbox.
-    #[allow(clippy::missing_panics_doc)]
-    #[allow(clippy::unwrap_used)]
+    ///
+    /// # Panics
+    ///
+    /// Panics when the set request cannot be sent to the mailbox worker
+    /// or when the ack channel is unexpectedly closed.
     pub async fn set(&self, value: impl Into<T> + Send + 'static) {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
             let value = value.into();
             binding.set(value);
-            sender.try_send(()).unwrap();
+            sender
+                .try_send(())
+                .expect("BindingMailbox::set failed to send ack");
         });
-        receiver.recv().await.unwrap();
+        receiver
+            .recv()
+            .await
+            .expect("BindingMailbox::set ack channel closed");
     }
 }
 
@@ -537,14 +534,14 @@ impl<T: PartialOrd + 'static> Binding<T> {
             }
             value
         }
-        let range_for_getter = range.clone();
-        let range_for_setter = range;
+        let read_range = range.clone();
+        let write_range = range;
 
         Self::mapping(
             self,
-            move |value| clamp_value(&range_for_getter, value),
+            move |value| clamp_value(&read_range, value),
             move |binding, value| {
-                let clamped = clamp_value(&range_for_setter, value);
+                let clamped = clamp_value(&write_range, value);
                 binding.set(clamped);
             },
         )
@@ -588,6 +585,7 @@ macro_rules! impl_binding {
         impl Binding<$ty> {
             $( #[$meta] )*
             #[must_use]
+            #[track_caller]
             pub fn $ty(value: $ty) -> Self {
                 Self::container(value)
             }
@@ -818,7 +816,7 @@ impl<T> Binding<Option<T>> {
             self,
             {
                 let equal = equal.clone();
-                move |value| value.as_ref().filter(|value| **value == equal).is_some()
+                move |value| value.as_ref().is_some_and(|value| *value == equal)
             },
             move |binding, value| {
                 if value {
@@ -897,19 +895,22 @@ impl Binding<bool> {
         )
     }
 
-    /// Creates a binding that selects between two values based on this boolean.
+    /// Creates a bidirectional binding that selects between two values based on this boolean.
     ///
     /// Returns `if_true` when this binding is `true`, `if_false` when `false`.
     /// Setting the `if_true` value on the result sets this binding to `true`.
     /// Setting the `if_false` value sets this binding to `false`.
     ///
+    /// This is a two-way binding. For one-way selection (e.g., in animations),
+    /// use [`SignalExt::select`](crate::SignalExt::select) instead which doesn't require `T: Eq`.
+    ///
     /// # Example
     /// ```
     /// let dark_mode = nami::binding(false);
-    /// let theme = dark_mode.select("dark".to_string(), "light".to_string());
+    /// let theme = dark_mode.bidirectional_select("dark".to_string(), "light".to_string());
     /// assert_eq!(theme.get(), "light");
     /// ```
-    pub fn select<T>(&self, if_true: T, if_false: T) -> Binding<T>
+    pub fn bidirectional_select<T>(&self, if_true: T, if_false: T) -> Binding<T>
     where
         T: Eq + Clone + 'static,
     {
@@ -1010,12 +1011,14 @@ impl<T> From<T> for Container<T>
 where
     T: 'static + Clone,
 {
+    #[track_caller]
     fn from(value: T) -> Self {
         Self::new(value)
     }
 }
 
 impl<T: 'static + Clone + Default> Default for Container<T> {
+    #[track_caller]
     fn default() -> Self {
         Self::new(T::default())
     }
@@ -1023,10 +1026,13 @@ impl<T: 'static + Clone + Default> Default for Container<T> {
 
 impl<T: 'static + Clone> Container<T> {
     /// Creates a new container with the given value.
+    #[track_caller]
     pub fn new(value: T) -> Self {
+        let value = Rc::new(RefCell::new(value));
+        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&value));
         Self {
-            value: Rc::new(RefCell::new(value)),
-            watchers: WatcherManager::default(),
+            value,
+            watchers: WatcherManager::with_origin(origin),
         }
     }
 }
@@ -1038,6 +1044,10 @@ impl<T: 'static + Clone> Signal for Container<T> {
     /// Retrieves the current value.
     fn get(&self) -> Self::Output {
         self.value.borrow().deref().clone()
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        Some(SignalIdentity::from_rc(&self.value))
     }
 
     /// Registers a watcher to be notified when the value changes.
@@ -1067,6 +1077,10 @@ impl<T: 'static> Signal for Binding<T> {
         self.get()
     }
 
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.0.identity()
+    }
+
     /// Registers a watcher to be notified when the binding's value changes.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         Box::new(self.0.add_watcher(Rc::new(watcher)))
@@ -1084,6 +1098,7 @@ struct Mapping<Input: 'static, Output, Getter, Setter> {
     getter: Getter,
     /// Function to convert from output type back to input type
     setter: Setter,
+    discriminator: usize,
     /// Phantom data to keep track of the Output type parameter
     _marker: PhantomData<Output>,
 }
@@ -1094,6 +1109,7 @@ impl<Input, Output, Getter: Clone, Setter: Clone> Clone for Mapping<Input, Outpu
             binding: self.binding.clone(),
             getter: self.getter.clone(),
             setter: self.setter.clone(),
+            discriminator: self.discriminator,
             _marker: PhantomData,
         }
     }
@@ -1112,6 +1128,12 @@ where
     /// Computes the output value by applying the getter to the input value.
     fn get(&self) -> Self::Output {
         (self.getter)(self.binding.get())
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.binding
+            .identity()
+            .map(|identity| identity.with_discriminator(self.discriminator))
     }
 
     /// Registers a watcher that will be notified when the input binding changes.

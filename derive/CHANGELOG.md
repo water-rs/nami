@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.3](https://github.com/water-rs/nami/compare/derive-v0.2.2...derive-v0.2.3) - 2026-01-23
+## [0.2.4](https://github.com/water-rs/nami/compare/derive-v0.2.3...derive-v0.2.4) - 2026-08-25
 
-### Other
+### Changed
 
-- Make SignalExt methods take &self
+- Update generated signal expressions for the current Nami API.
 
 ## [0.2.2](https://github.com/water-rs/nami/compare/derive-v0.2.1...derive-v0.2.2) - 2025-12-05
 

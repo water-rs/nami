@@ -10,6 +10,8 @@
 //! re-execute when their dependencies change, similar to reactive programming models
 //! found in front-end frameworks.
 
+use core::panic::Location;
+
 mod computed;
 pub use computed::*;
 
@@ -18,7 +20,7 @@ use crate::{
     watcher::Context,
 };
 
-pub use nami_core::Signal;
+pub use nami_core::{Signal, SignalIdentity};
 
 /// A trait for converting a value into a computation.
 pub trait IntoSignal<Output> {
@@ -76,12 +78,18 @@ pub struct WithMetadata<C, T> {
 
     /// The underlying computation.
     signal: C,
+    discriminator: usize,
 }
 
-impl<C, T> WithMetadata<C, T> {
+impl<C, T: 'static> WithMetadata<C, T> {
     /// Create a new computation with associated metadata.
-    pub const fn new(metadata: T, signal: C) -> Self {
-        Self { metadata, signal }
+    #[track_caller]
+    pub fn new(metadata: T, signal: C) -> Self {
+        Self {
+            metadata,
+            signal,
+            discriminator: SignalIdentity::call_site_discriminator::<T>(Location::caller()),
+        }
     }
 }
 
@@ -98,6 +106,12 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
         self.signal.get()
     }
 
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.signal
+            .identity()
+            .map(|identity| identity.with_discriminator(self.discriminator))
+    }
+
     /// Register a watcher, enriching notifications with the metadata.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let with = self.metadata.clone();
@@ -107,3 +121,5 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
             })
     }
 }
+
+impl_signal_wrapper_ops!(WithMetadata<C, T>, [C, T], C);

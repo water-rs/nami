@@ -20,7 +20,7 @@
 //!
 //! We preserve the freedom to discard notifications in certain scenarios, as a performance optimization.
 //!
-//! Also, you can use [`nami::distinct`](nami::distinct) to create a distinct signal that only notifies when the value changes manually.
+//! Also, you can use `nami::SignalExt::distinct` to create a distinct signal that only notifies when the value changes manually.
 
 use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, vec::Vec};
 use core::{
@@ -29,6 +29,8 @@ use core::{
     fmt::Debug,
     num::NonZeroUsize,
 };
+
+use crate::observe::{self, Origin};
 
 /// A type-erased container for metadata that can be associated with computation results.
 ///
@@ -47,12 +49,11 @@ impl MetadataInner {
     /// Attempts to retrieve a value of type `T` from the metadata store.
     ///
     /// Returns `None` if no value of the requested type is present.
-    #[allow(clippy::unwrap_used)]
     pub fn try_get<T: 'static + Clone>(&self) -> Option<T> {
         // Once `downcast_ref_unchecked` stabilized, we will use it here.
         self.0
             .get(&TypeId::of::<T>())
-            .map(|v| v.downcast_ref::<T>().unwrap())
+            .and_then(|value| value.downcast_ref::<T>())
             .cloned()
     }
 
@@ -192,13 +193,15 @@ where
     }
 }
 
-#[allow(clippy::unwrap_used)]
 impl<F> Drop for OnDrop<F>
 where
     F: FnOnce(),
 {
     fn drop(&mut self) {
-        (self.0.take().unwrap())();
+        let Some(callback) = self.0.take() else {
+            panic!("OnDrop::drop called with missing callback");
+        };
+        callback();
     }
 }
 
@@ -223,10 +226,9 @@ impl Metadata {
     ///
     /// Panics if no value of type `T` is present in the metadata.
     #[must_use]
-    #[allow(clippy::expect_used)]
     pub fn get<T: 'static + Clone>(&self) -> T {
         self.try_get()
-            .expect("Value of requested type should be present in metadata")
+            .unwrap_or_else(|| panic!("Metadata::get missing value for requested type"))
     }
 
     /// Attempts to get a value of type `T` from the metadata.
@@ -281,10 +283,24 @@ impl<T> Default for WatcherManager<T> {
 }
 
 impl<T: 'static> WatcherManager<T> {
-    /// Creates a new, empty watcher manager.
+    /// Creates a new, empty watcher manager with no provenance.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a watcher manager attributed to a state-owning signal node.
+    ///
+    /// State owners should use this rather than [`Self::new`] so development
+    /// tooling can attribute subscriptions and notifications to the node and to
+    /// the source location that created it. [`Origin`] is zero-sized unless the
+    /// `observability` feature is enabled.
+    #[must_use]
+    pub fn with_origin(origin: Origin) -> Self {
+        observe::on_create(origin);
+        Self {
+            inner: Rc::new(RefCell::new(WatcherManagerInner::with_origin(origin))),
+        }
     }
 
     /// Checks if the manager has any registered watchers.
@@ -295,7 +311,13 @@ impl<T: 'static> WatcherManager<T> {
 
     /// Registers a new watcher and returns its unique identifier.
     pub fn register(&self, watcher: impl Fn(Context<T>) + 'static) -> WatcherId {
-        self.inner.borrow_mut().register(watcher)
+        let (id, origin, subscribers) = {
+            let mut inner = self.inner.borrow_mut();
+            let id = inner.register(watcher);
+            (id, inner.origin, inner.len())
+        };
+        observe::on_subscribe(origin, subscribers);
+        id
     }
 
     /// Registers a watcher and returns a guard that will unregister it when dropped.
@@ -313,14 +335,16 @@ impl<T: 'static> WatcherManager<T> {
     where
         T: Clone,
     {
-        let watchers = {
+        let (watchers, origin) = {
             let inner = self.inner.borrow();
-            inner.watchers_snapshot()
+            (inner.watchers_snapshot(), inner.origin)
         };
 
         if watchers.is_empty() {
             return;
         }
+
+        observe::on_notify(origin, watchers.len());
 
         for watcher in watchers {
             watcher(ctx.clone());
@@ -329,7 +353,12 @@ impl<T: 'static> WatcherManager<T> {
 
     /// Cancels a previously registered watcher by its identifier.
     pub fn cancel(&self, id: WatcherId) {
-        self.inner.borrow_mut().cancel(id);
+        let (origin, subscribers) = {
+            let mut inner = self.inner.borrow_mut();
+            inner.cancel(id);
+            (inner.origin, inner.len())
+        };
+        observe::on_unsubscribe(origin, subscribers);
     }
 }
 
@@ -355,6 +384,7 @@ impl<T: 'static> Drop for WatcherManagerGuard<T> {
 struct WatcherManagerInner<T> {
     id: WatcherId,
     map: BTreeMap<WatcherId, Watcher<T>>,
+    origin: Origin,
 }
 
 impl<T> Debug for WatcherManagerInner<T> {
@@ -368,14 +398,35 @@ impl<T> Default for WatcherManagerInner<T> {
         Self {
             id: WatcherId::MIN,
             map: BTreeMap::new(),
+            origin: Origin::default(),
         }
     }
 }
 
+impl<T> Drop for WatcherManagerInner<T> {
+    fn drop(&mut self) {
+        observe::on_drop(self.origin);
+    }
+}
+
 impl<T: 'static> WatcherManagerInner<T> {
+    /// Creates an inner manager attributed to a signal node.
+    fn with_origin(origin: Origin) -> Self {
+        Self {
+            id: WatcherId::MIN,
+            map: BTreeMap::new(),
+            origin,
+        }
+    }
+
     /// Checks if there are any registered watchers.
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
+    }
+
+    /// Number of currently registered watchers.
+    fn len(&self) -> usize {
+        self.map.len()
     }
 
     /// Assigns a new unique identifier for a watcher.

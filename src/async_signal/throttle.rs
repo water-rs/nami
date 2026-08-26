@@ -12,6 +12,7 @@ use crate::{
     utils::sleep,
     watcher::{WatcherManager, WatcherManagerGuard},
 };
+use nami_core::{SignalIdentity, observe::Origin};
 
 /// A throttle wrapper that limits the rate of signal updates to at most once per duration.
 ///
@@ -69,13 +70,16 @@ where
     S: Signal,
 {
     /// Creates a new throttle wrapper with a custom executor.
+    #[track_caller]
     pub fn with_executor(signal: S, duration: Duration, executor: E) -> Self {
+        let timer = Rc::default();
+        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&timer));
         Self {
             signal,
-            watchers: WatcherManager::new(),
+            watchers: WatcherManager::with_origin(origin),
             duration,
             executor,
-            timer: Rc::default(),
+            timer,
             guard: Rc::default(),
             throttled: Rc::default(),
         }

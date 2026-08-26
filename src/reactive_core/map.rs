@@ -21,9 +21,9 @@
 //! doubled.get(); // Uses cached value, doesn't recompute
 //! ```
 
-use core::marker::PhantomData;
+use core::{marker::PhantomData, panic::Location};
 
-use crate::{Signal, watcher::Context};
+use crate::{Signal, SignalIdentity, watcher::Context};
 
 /// A reactive computation that transforms values from a source computation.
 ///
@@ -34,6 +34,7 @@ use crate::{Signal, watcher::Context};
 pub struct Map<C, F, Output> {
     source: C,
     f: F,
+    discriminator: usize,
     _marker: PhantomData<Output>,
 }
 
@@ -53,10 +54,14 @@ where
     /// # Returns
     ///
     /// A new `Map` instance that will transform values from the source.
-    pub const fn new(source: C, f: F) -> Self {
+    #[track_caller]
+    pub fn new(source: C, f: F) -> Self {
         Self {
             source,
             f,
+            discriminator: SignalIdentity::call_site_discriminator::<(F, Output)>(
+                Location::caller(),
+            ),
             _marker: PhantomData,
         }
     }
@@ -85,7 +90,8 @@ where
 /// let doubled = map(counter, |n: i32| n * 2);
 /// assert_eq!(doubled.get(), 2);
 /// ```
-pub const fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
+#[track_caller]
+pub fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
 where
     C: Signal + 'static,
     Output: 'static,
@@ -99,6 +105,7 @@ impl<C: Clone, F: Clone, Output> Clone for Map<C, F, Output> {
         Self {
             source: self.source.clone(),
             f: self.f.clone(),
+            discriminator: self.discriminator,
             _marker: PhantomData,
         }
     }
@@ -118,6 +125,12 @@ where
         (self.f)(self.source.get())
     }
 
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.source
+            .identity()
+            .map(|identity| identity.with_discriminator(self.discriminator))
+    }
+
     /// Registers a watcher to be notified when the transformed value changes.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let this = self.clone();
@@ -128,3 +141,5 @@ where
         })
     }
 }
+
+impl_signal_ops!(Map<C, F, Output>, [C, F, Output], Output);

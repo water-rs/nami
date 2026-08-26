@@ -63,40 +63,95 @@
 //! ```
 
 use core::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     ops::{Bound, RangeBounds},
 };
 pub use nami_core::collection::*;
 
 use alloc::{rc::Rc, vec::Vec};
-use nami_core::watcher::Context;
+use nami_core::{
+    SignalIdentity,
+    observe::Origin,
+    watcher::{Context, Metadata},
+};
 
-use crate::watcher::{WatcherManager, WatcherManagerGuard};
+use crate::{
+    Signal,
+    watcher::{WatcherManager, WatcherManagerGuard},
+};
+
+/// Adapts a signal of vector snapshots into a reactive collection.
+///
+/// Collection consumers reconcile snapshots by item identity, so membership
+/// changes update only inserted, removed, moved, or replaced items instead of
+/// rebuilding the containing view subtree.
+#[derive(Debug, Clone)]
+pub struct SignalCollection<S> {
+    signal: S,
+}
+
+impl<S> SignalCollection<S> {
+    /// Creates a collection backed by vector snapshots from `signal`.
+    pub const fn new(signal: S) -> Self {
+        Self { signal }
+    }
+}
 
 /// A reactive list that can be observed for changes.
+///
+/// Notifications use `Rc<[T]>` snapshots so that cloning a `Context` across
+/// multiple watchers is O(1) (reference-count bump) instead of O(n).
 #[derive(Debug)]
 pub struct List<T> {
     vec: Rc<RefCell<Vec<T>>>,
-    watchers: WatcherManager<Vec<T>>,
+    watchers: WatcherManager<Rc<[T]>>,
 }
 
 impl<T: 'static> From<Vec<T>> for List<T> {
+    #[track_caller]
     fn from(value: Vec<T>) -> Self {
-        Self {
-            vec: Rc::new(RefCell::new(value)),
-            watchers: WatcherManager::new(),
-        }
+        Self::from_vec(value)
     }
 }
 
 impl<T: 'static> List<T> {
     /// Creates a new empty reactive list.
     #[must_use]
+    #[track_caller]
     pub fn new() -> Self {
+        Self::from_vec(Vec::new())
+    }
+
+    /// Builds a list around `value`, attributing the node to the caller.
+    #[track_caller]
+    fn from_vec(value: Vec<T>) -> Self {
+        let vec = Rc::new(RefCell::new(value));
+        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&vec));
         Self {
-            vec: Rc::new(RefCell::new(Vec::new())),
-            watchers: WatcherManager::new(),
+            vec,
+            watchers: WatcherManager::with_origin(origin),
         }
+    }
+
+    /// Takes an `Rc<[T]>` snapshot of the current contents and notifies all
+    /// watchers.  The snapshot is shared (O(1) clone) across watchers so each
+    /// notification cycle only pays for one allocation.
+    fn notify(&self)
+    where
+        T: Clone,
+    {
+        self.notify_with_metadata(Metadata::new());
+    }
+
+    fn notify_with_metadata(&self, metadata: Metadata)
+    where
+        T: Clone,
+    {
+        if self.watchers.is_empty() {
+            return;
+        }
+        let snapshot: Rc<[T]> = Rc::from(self.vec.borrow().as_slice());
+        self.watchers.notify(&Context::new(snapshot, metadata));
     }
 
     /// Adds an element to the end of the list.
@@ -105,12 +160,7 @@ impl<T: 'static> List<T> {
         T: Clone,
     {
         self.vec.borrow_mut().push(value);
-        if self.watchers.is_empty() {
-            return;
-        }
-        let snapshot = self.vec.borrow().clone();
-        let context = Context::from(snapshot);
-        self.watchers.notify(&context);
+        self.notify();
     }
 
     /// Sorts the list in place.
@@ -119,12 +169,7 @@ impl<T: 'static> List<T> {
         T: Ord + Clone,
     {
         self.vec.borrow_mut().sort();
-        if self.watchers.is_empty() {
-            return;
-        }
-        let snapshot = self.vec.borrow().clone();
-        let context = Context::from(snapshot);
-        self.watchers.notify(&context);
+        self.notify();
     }
 
     /// Removes and returns the last element of the list.
@@ -135,12 +180,7 @@ impl<T: 'static> List<T> {
     {
         let result = self.vec.borrow_mut().pop();
         if result.is_some() {
-            if self.watchers.is_empty() {
-                return result;
-            }
-            let snapshot = self.vec.borrow().clone();
-            let context = Context::from(snapshot);
-            self.watchers.notify(&context);
+            self.notify();
         }
         result
     }
@@ -151,12 +191,7 @@ impl<T: 'static> List<T> {
         T: Clone,
     {
         self.vec.borrow_mut().insert(index, value);
-        if self.watchers.is_empty() {
-            return;
-        }
-        let snapshot = self.vec.borrow().clone();
-        let context = Context::from(snapshot);
-        self.watchers.notify(&context);
+        self.notify();
     }
 
     /// Removes and returns the element at the specified index.
@@ -166,12 +201,7 @@ impl<T: 'static> List<T> {
         T: Clone,
     {
         let result = self.vec.borrow_mut().remove(index);
-        if self.watchers.is_empty() {
-            return result;
-        }
-        let snapshot = self.vec.borrow().clone();
-        let context = Context::from(snapshot);
-        self.watchers.notify(&context);
+        self.notify();
         result
     }
 
@@ -183,13 +213,35 @@ impl<T: 'static> List<T> {
         let was_empty = self.vec.borrow().is_empty();
         self.vec.borrow_mut().clear();
         if !was_empty {
-            if self.watchers.is_empty() {
-                return;
-            }
-            let context = Context::from(Vec::<T>::new());
-            self.watchers.notify(&context);
+            self.notify();
         }
     }
+
+    /// Atomically replaces the complete list and returns the previous contents.
+    ///
+    /// Watchers observe only the final replacement snapshot, regardless of how
+    /// many items differ between the old and new collections.
+    #[must_use]
+    pub fn replace(&self, value: Vec<T>) -> Vec<T>
+    where
+        T: Clone,
+    {
+        let previous = core::mem::replace(&mut *self.vec.borrow_mut(), value);
+        self.notify();
+        previous
+    }
+
+    /// Atomically replaces the complete list and propagates watcher metadata.
+    #[must_use]
+    pub fn replace_with_metadata(&self, value: Vec<T>, metadata: Metadata) -> Vec<T>
+    where
+        T: Clone,
+    {
+        let previous = core::mem::replace(&mut *self.vec.borrow_mut(), value);
+        self.notify_with_metadata(metadata);
+        previous
+    }
+
     /// Takes a snapshot of the current list contents.
     #[must_use]
     pub fn snapshot(&self) -> Vec<T>
@@ -211,7 +263,7 @@ impl<T: 'static> List<T> {
     }
 }
 
-/// Iterator implementation for List<T>
+/// Iterator implementation for `List<T>`
 /// Tip: This method will attempt to avoid cloning the internal Vec if possible. However, if there are multiple references to the List, it will clone the Vec to ensure safety.
 impl<T: Clone + 'static> IntoIterator for List<T> {
     type Item = T;
@@ -226,7 +278,7 @@ impl<T: Clone + 'static> IntoIterator for List<T> {
     }
 }
 
-/// Iterator implementation for references to List<T>
+/// Iterator implementation for references to `List<T>`
 /// Warning: This will clone the entire list, ensuring that modifications during iteration do not affect the iterator.
 impl<T: Clone + 'static> IntoIterator for &List<T> {
     type Item = T;
@@ -252,9 +304,93 @@ impl<T: 'static> Default for List<T> {
     }
 }
 
+/// Resolve concrete `(start, end)` offsets from captured `Bound` values and
+/// the current snapshot length, clamping to valid indices.
+fn resolve_range(start_bound: Bound<usize>, end_bound: Bound<usize>, len: usize) -> (usize, usize) {
+    let mut start = match start_bound {
+        Bound::Included(n) => n,
+        Bound::Excluded(n) => n.saturating_add(1),
+        Bound::Unbounded => 0,
+    };
+    let mut end = match end_bound {
+        Bound::Included(n) => n.saturating_add(1),
+        Bound::Excluded(n) => n,
+        Bound::Unbounded => len,
+    };
+    start = start.min(len);
+    end = end.min(len);
+    if start > end {
+        start = end;
+    }
+    (start, end)
+}
+
+fn notify_signal_collection<T>(
+    watcher: &dyn for<'a> Fn(Context<&'a [T]>),
+    context: Context<Vec<T>>,
+    start_bound: Bound<usize>,
+    end_bound: Bound<usize>,
+) {
+    let metadata = context.metadata().clone();
+    let snapshot = context.into_value();
+    let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
+    watcher(Context::new(&snapshot[start..end], metadata));
+}
+
+impl<S, T> Collection for SignalCollection<S>
+where
+    S: Signal<Output = Vec<T>> + Clone,
+    T: Clone + 'static,
+{
+    type Item = T;
+    type Guard = S::Guard;
+
+    fn get(&self, index: usize) -> Option<Self::Item> {
+        self.signal.get().as_slice().get(index).cloned()
+    }
+
+    fn len(&self) -> usize {
+        self.signal.get().len()
+    }
+
+    fn watch(
+        &self,
+        range: impl RangeBounds<usize>,
+        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+    ) -> Self::Guard {
+        let start_bound = range.start_bound().cloned();
+        let end_bound = range.end_bound().cloned();
+        let watcher = Rc::new(watcher);
+        let pending = Rc::new(RefCell::new(None));
+        let subscribed = Rc::new(Cell::new(false));
+
+        let guard = self.signal.watch({
+            let watcher = Rc::clone(&watcher);
+            let pending = Rc::clone(&pending);
+            let subscribed = Rc::clone(&subscribed);
+            move |context| {
+                if subscribed.get() {
+                    notify_signal_collection(watcher.as_ref(), context, start_bound, end_bound);
+                } else {
+                    *pending.borrow_mut() = Some(context);
+                }
+            }
+        });
+
+        let initial = pending
+            .borrow_mut()
+            .take()
+            .unwrap_or_else(|| Context::from(self.signal.get()));
+        subscribed.set(true);
+        notify_signal_collection(watcher.as_ref(), initial, start_bound, end_bound);
+
+        guard
+    }
+}
+
 impl<T: Clone + 'static> Collection for List<T> {
     type Item = T;
-    type Guard = WatcherManagerGuard<Vec<T>>;
+    type Guard = WatcherManagerGuard<Rc<[T]>>;
 
     fn get(&self, index: usize) -> Option<Self::Item> {
         self.vec.borrow().as_slice().get(index).cloned()
@@ -267,9 +403,7 @@ impl<T: Clone + 'static> Collection for List<T> {
         range: impl RangeBounds<usize>,
         watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
     ) -> Self::Guard {
-        let vec = self.vec.clone();
-
-        // Convert range bounds to concrete start bound and end bound for capture
+        // Convert range bounds to concrete values for capture
         let start_bound = match range.start_bound() {
             Bound::Included(&n) => Bound::Included(n),
             Bound::Excluded(&n) => Bound::Excluded(n),
@@ -283,61 +417,19 @@ impl<T: Clone + 'static> Collection for List<T> {
 
         // Call watcher immediately with current data
         {
-            let borrowed = self.vec.borrow();
-            let full_slice = borrowed.as_slice();
-            let len = full_slice.len();
-
-            let mut start = match start_bound {
-                Bound::Included(n) => n,
-                Bound::Excluded(n) => n.saturating_add(1),
-                Bound::Unbounded => 0,
-            };
-            let mut end = match end_bound {
-                Bound::Included(n) => n.saturating_add(1),
-                Bound::Excluded(n) => n,
-                Bound::Unbounded => len,
-            };
-
-            start = start.min(len);
-            end = end.min(len);
-            if start > end {
-                start = end;
-            }
-
-            let slice_data: Vec<T> = full_slice[start..end].to_vec();
-            drop(borrowed);
-
-            let slice_ref = slice_data.as_slice();
-            watcher(Context::from(slice_ref));
+            let snapshot: Rc<[T]> = Rc::from(self.vec.borrow().as_slice());
+            let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
+            watcher(Context::from(&snapshot[start..end]));
         }
 
+        // Subsequent notifications: slice the Rc<[T]> snapshot carried inside
+        // the Context.  Cloning an Rc is O(1), so this avoids the previous
+        // O(n) re-borrow + range clone per watcher.
         self.watchers.register_as_guard(move |ctx| {
-            let borrowed = vec.borrow();
-            let full_slice = borrowed.as_slice();
-            let len = full_slice.len();
-
-            let mut start = match start_bound {
-                Bound::Included(n) => n,
-                Bound::Excluded(n) => n.saturating_add(1),
-                Bound::Unbounded => 0,
-            };
-            let mut end = match end_bound {
-                Bound::Included(n) => n.saturating_add(1),
-                Bound::Excluded(n) => n,
-                Bound::Unbounded => len,
-            };
-
-            start = start.min(len);
-            end = end.min(len);
-            if start > end {
-                start = end;
-            }
-
-            let slice_data: Vec<T> = full_slice[start..end].to_vec();
-            drop(borrowed);
-
-            let slice_ref = slice_data.as_slice();
-            watcher(ctx.map(|_| slice_ref));
+            let snapshot: Rc<[T]> = ctx.value().clone(); // O(1) ref-count bump
+            let metadata = ctx.metadata().clone();
+            let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
+            watcher(Context::new(&snapshot[start..end], metadata));
         })
     }
 }
@@ -364,6 +456,40 @@ mod tests {
         assert_eq!(Collection::get(&list, 1), Some(2));
         assert_eq!(Collection::get(&list, 2), Some(3));
         assert_eq!(Collection::get(&list, 3), None);
+    }
+
+    #[test]
+    fn replace_notifies_only_the_final_snapshot() {
+        let list = List::from(vec![1, 2]);
+        let observed = Rc::new(RefCell::new(Vec::<Vec<i32>>::new()));
+        let observed_for_watcher = Rc::clone(&observed);
+        let _guard = list.watch(.., move |context| {
+            observed_for_watcher
+                .borrow_mut()
+                .push(context.into_value().to_vec());
+        });
+
+        let previous = list.replace(vec![3, 4, 5]);
+
+        assert_eq!(previous, vec![1, 2]);
+        assert_eq!(*observed.borrow(), vec![vec![1, 2], vec![3, 4, 5]]);
+    }
+
+    #[test]
+    fn signal_collection_emits_initial_and_updated_snapshots() {
+        let values = crate::binding(vec![1, 2]);
+        let collection = SignalCollection::new(values.clone());
+        let observed = Rc::new(RefCell::new(Vec::<Vec<i32>>::new()));
+        let observed_for_watcher = Rc::clone(&observed);
+        let _guard = collection.watch(.., move |context| {
+            observed_for_watcher
+                .borrow_mut()
+                .push(context.into_value().to_vec());
+        });
+
+        values.set(vec![2, 3, 4]);
+
+        assert_eq!(*observed.borrow(), vec![vec![1, 2], vec![2, 3, 4]]);
     }
 
     #[test]

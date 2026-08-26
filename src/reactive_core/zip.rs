@@ -10,9 +10,9 @@
 //! to work with multiple interdependent values in a reactive context.
 
 use alloc::rc::Rc;
-use core::cell::RefCell;
+use core::{cell::RefCell, panic::Location};
 
-use crate::{Signal, map::Map, watcher::Context};
+use crate::{Signal, SignalIdentity, map::Map, watcher::Context};
 
 /// A structure that combines two `Signal` instances into a single computation
 /// that produces a tuple of their results.
@@ -22,6 +22,13 @@ pub struct Zip<A, B> {
     a: A,
     /// The second computation to be zipped.
     b: B,
+    discriminator: usize,
+}
+
+struct ZipWatchState<L, R, W> {
+    latest_left: RefCell<L>,
+    latest_right: RefCell<R>,
+    watcher: W,
 }
 
 impl<A, B> Zip<A, B>
@@ -40,8 +47,13 @@ where
     /// # Returns
     /// A new `Zip` instance containing both computations.
     /// Creates a new `Zip` that combines two signals.
-    pub const fn new(a: A, b: B) -> Self {
-        Self { a, b }
+    #[track_caller]
+    pub fn new(a: A, b: B) -> Self {
+        Self {
+            a,
+            b,
+            discriminator: SignalIdentity::call_site_discriminator::<(A, B)>(Location::caller()),
+        }
     }
 }
 
@@ -56,6 +68,7 @@ pub trait FlattenMap<F, T, Output>: Signal {
     ///
     /// # Returns
     /// A new computation that produces the result of applying `f` to the flattened elements.
+    #[track_caller]
     fn flatten_map(&self, f: F) -> Map<Self, impl Clone + Fn(Self::Output) -> Output, Output>;
 }
 
@@ -68,6 +81,7 @@ where
     T2: 'static,
     Output: 'static,
 {
+    #[track_caller]
     fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn((T1, T2)) -> Output, Output> {
         Map::new(self.clone(), move |(t1, t2)| f(t1, t2))
     }
@@ -80,6 +94,7 @@ where
     F: 'static + Clone + Fn(T1, T2, T3) -> Output,
     Output: 'static,
 {
+    #[track_caller]
     fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn(((T1, T2), T3)) -> Output, Output> {
         Map::new(self.clone(), move |((t1, t2), t3)| f(t1, t2, t3))
     }
@@ -95,7 +110,8 @@ where
 ///
 /// # Returns
 /// A new `Zip` instance that computes both values and returns them as a tuple.
-pub const fn zip<A, B>(a: A, b: B) -> Zip<A, B>
+#[track_caller]
+pub fn zip<A, B>(a: A, b: B) -> Zip<A, B>
 where
     A: Signal,
     B: Signal,
@@ -122,8 +138,17 @@ where
     /// # Returns
     /// A tuple containing the results of computing `a` and `b`.
     fn get(&self) -> Self::Output {
-        let Self { a, b } = self;
+        let Self { a, b, .. } = self;
         (a.get(), b.get())
+    }
+
+    fn identity(&self) -> Option<SignalIdentity> {
+        Some(
+            self.a
+                .identity()?
+                .combine(self.b.identity()?)
+                .with_discriminator(self.discriminator),
+        )
     }
 
     /// Adds a watcher to the zipped computation.
@@ -137,34 +162,29 @@ where
     /// # Returns
     /// A `WatcherGuard` that, when dropped, will remove the watchers from both computations.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
-        let watcher = Rc::new(watcher);
-        let Self { a, b } = self;
-        let latest_a = Rc::new(RefCell::new(a.get()));
-        let latest_b = Rc::new(RefCell::new(b.get()));
+        let Self { a, b, .. } = self;
+        let state = Rc::new(ZipWatchState {
+            latest_left: RefCell::new(a.get()),
+            latest_right: RefCell::new(b.get()),
+            watcher,
+        });
 
         let guard_a = {
-            let watcher = watcher.clone();
-            let latest_a = latest_a.clone();
-            let latest_b = latest_b.clone();
+            let state = Rc::clone(&state);
             self.a.watch(move |ctx: Context<A::Output>| {
                 let updated_a = ctx.value().clone();
-                *latest_a.borrow_mut() = updated_a;
-                let other = latest_b.borrow().clone();
-                watcher(ctx.map(|value| (value, other)));
+                *state.latest_left.borrow_mut() = updated_a;
+                let other = state.latest_right.borrow().clone();
+                (state.watcher)(ctx.map(|value| (value, other)));
             })
         };
 
-        let guard_b = {
-            let watcher = watcher;
-            let latest_a = latest_a;
-            let latest_b = latest_b;
-            self.b.watch(move |ctx: Context<B::Output>| {
-                let updated_b = ctx.value().clone();
-                *latest_b.borrow_mut() = updated_b;
-                let other = latest_a.borrow().clone();
-                watcher(ctx.map(|value| (other, value)));
-            })
-        };
+        let guard_b = self.b.watch(move |ctx: Context<B::Output>| {
+            let updated_b = ctx.value().clone();
+            *state.latest_right.borrow_mut() = updated_b;
+            let other = state.latest_left.borrow().clone();
+            (state.watcher)(ctx.map(|value| (other, value)));
+        });
 
         (guard_a, guard_b)
     }

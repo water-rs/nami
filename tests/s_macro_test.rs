@@ -1,4 +1,4 @@
-#![allow(missing_docs)]
+//! Tests for the `s!` reactive formatting macro.
 
 use nami::*;
 
@@ -72,6 +72,17 @@ fn test_s_macro_reactivity_named() {
 
     name.set("Bob".to_string());
     assert_eq!(s.get(), "Hello, Bob!");
+}
+
+#[test]
+fn test_usize_and_isize_constants_are_signals() {
+    let width = constant(5_usize);
+    let offset = constant(-2_isize);
+    let summary = width
+        .zip(&offset)
+        .map(|(width, offset)| format!("{width}:{offset}"));
+
+    assert_eq!(summary.get(), "5:-2");
 }
 
 #[test]

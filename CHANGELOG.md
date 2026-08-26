@@ -7,19 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.10.1](https://github.com/water-rs/nami/compare/v0.10.0...v0.10.1) - 2026-01-23
+## [0.11.0](https://github.com/water-rs/nami/compare/v0.10.1...v0.11.0) - 2026-08-25
 
-### Other
+### Added
 
-- Polish examples and simplify small code
-- Tidy examples: reorder imports and add attributes
-- Simplify tests and normalize imports
-- Add string and comparison SignalExt methods
-- Refactor SignalExt to use Map::new and add examples
-- Make FlattenMap use &self and remove Sized bound
-- Make SignalExt methods take &self
-- Add convenience adapters and helpers to SignalExt
-- release
+- *(core)* Observe the reactive graph behind an opt-in feature.
+- Add atomic list replacement and signal-backed reactive collections.
+- Implement `Signal` for fixed-size arrays.
+
+### Changed
+
+- **Breaking:** Rename the string signal helpers so they no longer shadow slice methods.
+- Upgrade the executor and reactive dependency stack.
+- Remove renderer-owned local-binding hooks in favor of explicit signal state.
+
+### Fixed
+
+- Keep graph observation safe when a signal is dropped during thread teardown.
+- Prevent `Distinct::watch` from double-borrowing its watcher state.
 
 ## [0.10.0](https://github.com/water-rs/nami/compare/v0.9.1...v0.10.0) - 2026-01-22
 

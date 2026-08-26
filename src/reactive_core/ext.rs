@@ -9,6 +9,8 @@ use crate::debounce::Debounce;
 #[cfg(feature = "timer")]
 use core::time::Duration;
 
+type BoolZipMap<A, B> = Map<Zip<A, B>, fn((bool, bool)) -> bool, bool>;
+
 /// Extension trait providing convenient methods for all Signal types.
 ///
 /// This trait adds utility methods to any type implementing Signal,
@@ -16,6 +18,7 @@ use core::time::Duration;
 /// All methods take `&self` and clone internally, as cloning is assumed cheap for reactive objects.
 pub trait SignalExt: Signal {
     /// Transforms the output of this signal using the provided function.
+    #[track_caller]
     fn map<F, Output>(&self, f: F) -> Map<Self, F, Output>
     where
         F: 'static + Clone + Fn(Self::Output) -> Output,
@@ -26,6 +29,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Combines this signal with another signal into a tuple.
+    #[track_caller]
     fn zip<B>(&self, b: &B) -> Zip<Self, B>
     where
         B: Signal,
@@ -44,6 +48,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Converts this signal into a type-erased `Computed` container.
+    #[track_caller]
     fn computed(&self) -> Computed<Self::Output>
     where
         Self: 'static,
@@ -52,13 +57,15 @@ pub trait SignalExt: Signal {
     }
 
     /// Attaches metadata to this signal's watcher notifications.
-    fn with<T>(&self, metadata: T) -> WithMetadata<Self, T> {
+    #[track_caller]
+    fn with<T: 'static>(&self, metadata: T) -> WithMetadata<Self, T> {
         WithMetadata::new(metadata, self.clone())
     }
 
     // ==================== Map Variants ====================
 
     /// Transforms the output using `Into::into`.
+    #[track_caller]
     fn map_into<U>(&self) -> Map<Self, fn(Self::Output) -> U, U>
     where
         Self: 'static,
@@ -69,6 +76,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Applies a side-effect function and returns the original value.
+    #[track_caller]
     fn inspect<F>(
         &self,
         f: F,
@@ -97,6 +105,7 @@ pub trait SignalExt: Signal {
     /// Returns `true` if the value equals the given value.
     ///
     /// For inequality checks, use `signal.equal_to(value).not()`.
+    #[track_caller]
     fn equal_to(
         &self,
         other: Self::Output,
@@ -109,6 +118,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the predicate returns `true` for the value.
+    #[track_caller]
     fn condition<F>(
         &self,
         predicate: F,
@@ -121,6 +131,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the value is greater than the given value.
+    #[track_caller]
     fn gt(
         &self,
         other: Self::Output,
@@ -133,6 +144,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the value is less than the given value.
+    #[track_caller]
     fn lt(
         &self,
         other: Self::Output,
@@ -145,6 +157,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the value is greater than or equal to the given value.
+    #[track_caller]
     fn ge(
         &self,
         other: Self::Output,
@@ -157,6 +170,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the value is less than or equal to the given value.
+    #[track_caller]
     fn le(
         &self,
         other: Self::Output,
@@ -172,6 +186,7 @@ pub trait SignalExt: Signal {
 
     /// Returns `true` if the `Option` is `Some`.
     #[allow(clippy::wrong_self_convention)]
+    #[track_caller]
     fn is_some<T>(&self) -> Map<Self, fn(Option<T>) -> bool, bool>
     where
         Self: Signal<Output = Option<T>> + 'static,
@@ -182,6 +197,7 @@ pub trait SignalExt: Signal {
 
     /// Returns `true` if the `Option` is `None`.
     #[allow(clippy::wrong_self_convention)]
+    #[track_caller]
     fn is_none<T>(&self) -> Map<Self, fn(Option<T>) -> bool, bool>
     where
         Self: Signal<Output = Option<T>> + 'static,
@@ -191,6 +207,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the contained value or a default.
+    #[track_caller]
     fn unwrap_or<T>(&self, default: T) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
@@ -202,6 +219,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the contained value or computes it from a closure.
+    #[track_caller]
     fn unwrap_or_else<T, F>(
         &self,
         default: F,
@@ -215,6 +233,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the contained value or the default value for that type.
+    #[track_caller]
     fn unwrap_or_default<T>(&self) -> Map<Self, fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
@@ -224,6 +243,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the `Option` is `Some` and the value equals the given value.
+    #[track_caller]
     fn some_equal_to<T>(
         &self,
         value: T,
@@ -239,6 +259,7 @@ pub trait SignalExt: Signal {
 
     /// Flattens a nested `Option<Option<T>>` into `Option<T>`.
     #[allow(clippy::type_complexity)]
+    #[track_caller]
     fn flatten<T>(&self) -> Map<Self, fn(Option<Option<T>>) -> Option<T>, Option<T>>
     where
         Self: Signal<Output = Option<Option<T>>> + 'static,
@@ -248,6 +269,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Maps an `Option<T>` to `Option<U>` using the provided function.
+    #[track_caller]
     fn map_some<T, U, F>(
         &self,
         f: F,
@@ -262,6 +284,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `None` if the option is `None`, otherwise calls `f` with the wrapped value and returns the result.
+    #[track_caller]
     fn and_then_some<T, U, F>(
         &self,
         f: F,
@@ -278,6 +301,7 @@ pub trait SignalExt: Signal {
     // ==================== Bool Methods ====================
 
     /// Returns the logical negation of the boolean value.
+    #[track_caller]
     fn not(&self) -> Map<Self, fn(bool) -> bool, bool>
     where
         Self: Signal<Output = bool> + 'static,
@@ -285,7 +309,28 @@ pub trait SignalExt: Signal {
         self.map(core::ops::Not::not)
     }
 
+    /// Returns the logical AND of this signal with another boolean signal.
+    #[track_caller]
+    fn and<B>(&self, other: &B) -> BoolZipMap<Self, B>
+    where
+        Self: Signal<Output = bool> + 'static,
+        B: Signal<Output = bool> + 'static,
+    {
+        Zip::new(self.clone(), other.clone()).map(|(a, b)| a && b)
+    }
+
+    /// Returns the logical OR of this signal with another boolean signal.
+    #[track_caller]
+    fn or<B>(&self, other: &B) -> BoolZipMap<Self, B>
+    where
+        Self: Signal<Output = bool> + 'static,
+        B: Signal<Output = bool> + 'static,
+    {
+        Zip::new(self.clone(), other.clone()).map(|(a, b)| a || b)
+    }
+
     /// Returns `Some(value)` if `true`, otherwise `None`.
+    #[track_caller]
     fn then_some<T>(
         &self,
         value: T,
@@ -298,6 +343,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `if_true` if `true`, otherwise `if_false`.
+    #[track_caller]
     fn select<T>(
         &self,
         if_true: T,
@@ -315,6 +361,7 @@ pub trait SignalExt: Signal {
     // ==================== Numeric Methods ====================
 
     /// Returns the negation of the value.
+    #[track_caller]
     fn negate<T>(&self) -> Map<Self, fn(T) -> T, T>
     where
         Self: Signal<Output = T> + 'static,
@@ -324,6 +371,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the absolute value.
+    #[track_caller]
     fn abs<T>(&self) -> Map<Self, fn(T) -> T, T>
     where
         Self: Signal<Output = T> + 'static,
@@ -333,6 +381,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the value is not negative (i.e., positive or zero).
+    #[track_caller]
     fn sign<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
@@ -343,6 +392,7 @@ pub trait SignalExt: Signal {
 
     /// Returns `true` if the value is positive.
     #[allow(clippy::wrong_self_convention)]
+    #[track_caller]
     fn is_positive<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
@@ -353,6 +403,7 @@ pub trait SignalExt: Signal {
 
     /// Returns `true` if the value is negative.
     #[allow(clippy::wrong_self_convention)]
+    #[track_caller]
     fn is_negative<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
@@ -363,6 +414,7 @@ pub trait SignalExt: Signal {
 
     /// Returns `true` if the value is zero.
     #[allow(clippy::wrong_self_convention)]
+    #[track_caller]
     fn is_zero<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
@@ -375,6 +427,7 @@ pub trait SignalExt: Signal {
 
     /// Returns `true` if the `Result` is `Ok`.
     #[allow(clippy::wrong_self_convention, clippy::type_complexity)]
+    #[track_caller]
     fn is_ok<T, E>(&self) -> Map<Self, fn(Result<T, E>) -> bool, bool>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
@@ -386,6 +439,7 @@ pub trait SignalExt: Signal {
 
     /// Returns `true` if the `Result` is `Err`.
     #[allow(clippy::wrong_self_convention, clippy::type_complexity)]
+    #[track_caller]
     fn is_err<T, E>(&self) -> Map<Self, fn(Result<T, E>) -> bool, bool>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
@@ -397,6 +451,7 @@ pub trait SignalExt: Signal {
 
     /// Converts from `Result<T, E>` to `Option<T>`.
     #[allow(clippy::type_complexity)]
+    #[track_caller]
     fn ok<T, E>(&self) -> Map<Self, fn(Result<T, E>) -> Option<T>, Option<T>>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
@@ -408,6 +463,7 @@ pub trait SignalExt: Signal {
 
     /// Converts from `Result<T, E>` to `Option<E>`.
     #[allow(clippy::type_complexity)]
+    #[track_caller]
     fn err<T, E>(&self) -> Map<Self, fn(Result<T, E>) -> Option<E>, Option<E>>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
@@ -418,6 +474,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the contained `Ok` value or a default.
+    #[track_caller]
     fn unwrap_or_result<T, E>(
         &self,
         default: T,
@@ -431,6 +488,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the contained `Ok` value or computes it from the error.
+    #[track_caller]
     fn unwrap_or_else_result<T, E, F>(
         &self,
         f: F,
@@ -446,6 +504,7 @@ pub trait SignalExt: Signal {
 
     /// Maps a `Result<T, E>` to `Result<U, E>` using the provided function.
     #[allow(clippy::type_complexity)]
+    #[track_caller]
     fn map_ok<T, E, U, F>(
         &self,
         f: F,
@@ -462,6 +521,7 @@ pub trait SignalExt: Signal {
 
     /// Maps a `Result<T, E>` to `Result<T, F>` using the provided function.
     #[allow(clippy::type_complexity)]
+    #[track_caller]
     fn map_err<T, E, F, U>(
         &self,
         f: F,
@@ -507,8 +567,13 @@ pub trait SignalExt: Signal {
     // ==================== String Methods ====================
 
     /// Returns `true` if the string is empty.
-    #[allow(clippy::wrong_self_convention)]
-    fn is_empty<T>(&self) -> Map<Self, fn(T) -> bool, bool>
+    ///
+    /// Named `str_`, like [`SignalExt::str_len`] and
+    /// [`SignalExt::str_contains`], because every type that can be a constant
+    /// signal gains these methods — including `Vec<T>`, whose own `is_empty`
+    /// would otherwise be shadowed by this one at the call site.
+    #[track_caller]
+    fn str_is_empty<T>(&self) -> Map<Self, fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
         T: AsRef<str> + 'static,
@@ -517,6 +582,7 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns the length of the string in bytes.
+    #[track_caller]
     fn str_len<T>(&self) -> Map<Self, fn(T) -> usize, usize>
     where
         Self: Signal<Output = T> + 'static,
@@ -526,7 +592,11 @@ pub trait SignalExt: Signal {
     }
 
     /// Returns `true` if the string contains the given pattern.
-    fn contains<T>(
+    ///
+    /// Named `str_` for the reason given on [`SignalExt::str_is_empty`]: a bare
+    /// `contains` here shadows `<[T]>::contains` on any `Vec<T>` in scope.
+    #[track_caller]
+    fn str_contains<T>(
         &self,
         pattern: impl Into<String>,
     ) -> Map<Self, impl 'static + Clone + Fn(T) -> bool, bool>
@@ -545,9 +615,52 @@ impl<C: Signal> SignalExt for C {}
 mod tests {
     use super::*;
     use crate::{Binding, binding};
+    use alloc::rc::Rc;
     use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     // ==================== Map Variants ====================
+
+    #[test]
+    fn derived_signal_identity_is_stable_across_reconstruction() {
+        fn mapped_signal(signal: &Binding<i32>) -> Map<Binding<i32>, fn(i32) -> i64, i64> {
+            signal.map(i64::from)
+        }
+
+        fn metadata_signal(signal: &Binding<i32>) -> WithMetadata<Binding<i32>, &'static str> {
+            signal.with("animation")
+        }
+
+        fn zipped_signal(
+            signal: &Binding<i32>,
+            other: &Binding<i32>,
+        ) -> Zip<Binding<i32>, Binding<i32>> {
+            signal.zip(other)
+        }
+
+        let signal: Binding<i32> = binding(42);
+
+        let metadata_a = metadata_signal(&signal);
+        let metadata_b = metadata_signal(&signal);
+        assert_eq!(metadata_a.identity(), metadata_b.identity());
+        assert_ne!(metadata_a.identity(), signal.identity());
+
+        let mapped_a = mapped_signal(&signal);
+        let mapped_b = mapped_signal(&signal);
+        assert_eq!(mapped_a.identity(), mapped_b.identity());
+        assert_ne!(mapped_a.identity(), signal.identity());
+
+        let different_map = signal.map(|value| i64::from(value) + 1);
+        assert_ne!(mapped_a.identity(), different_map.identity());
+
+        let other: Binding<i32> = binding(7);
+        let zipped_a = zipped_signal(&signal, &other);
+        let zipped_b = zipped_signal(&signal, &other);
+        assert_eq!(zipped_a.identity(), zipped_b.identity());
+        assert_ne!(zipped_a.identity(), signal.identity());
+        assert_ne!(zipped_a.identity(), other.identity());
+    }
 
     #[test]
     fn test_map_into() {
@@ -561,6 +674,24 @@ mod tests {
         let signal: Binding<i32> = binding(42);
         let distinct = signal.distinct();
         assert_eq!(distinct.get(), 42);
+    }
+
+    #[test]
+    fn test_distinct_watch_notifies_only_on_change() {
+        use core::cell::RefCell;
+
+        let signal: Binding<i32> = binding(0);
+        let distinct = signal.distinct();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let seen_in_watch = seen.clone();
+        let _guard = distinct.watch(move |ctx| {
+            seen_in_watch.borrow_mut().push(*ctx.value());
+        });
+
+        signal.set(1);
+        signal.set(1);
+        signal.set(2);
+        assert_eq!(*seen.borrow(), vec![1, 2]);
     }
 
     // ==================== Comparison Methods ====================
@@ -733,6 +864,42 @@ mod tests {
     }
 
     #[test]
+    fn test_and() {
+        let a: Binding<bool> = binding(true);
+        let b: Binding<bool> = binding(true);
+        let result = a.and(&b);
+        assert!(result.get());
+
+        a.set(false);
+        assert!(!result.get());
+
+        a.set(true);
+        b.set(false);
+        assert!(!result.get());
+
+        a.set(false);
+        assert!(!result.get());
+    }
+
+    #[test]
+    fn test_or() {
+        let a: Binding<bool> = binding(false);
+        let b: Binding<bool> = binding(false);
+        let result = a.or(&b);
+        assert!(!result.get());
+
+        a.set(true);
+        assert!(result.get());
+
+        a.set(false);
+        b.set(true);
+        assert!(result.get());
+
+        a.set(true);
+        assert!(result.get());
+    }
+
+    #[test]
     fn test_then_some() {
         let signal: Binding<bool> = binding(true);
         let maybe = signal.then_some(42);
@@ -860,19 +1027,19 @@ mod tests {
     #[test]
     fn test_is_empty_string() {
         let signal: Binding<String> = binding(String::new());
-        assert!(signal.is_empty().get());
+        assert!(signal.str_is_empty().get());
 
         signal.set("hello".to_string());
-        assert!(!signal.is_empty().get());
+        assert!(!signal.str_is_empty().get());
     }
 
     #[test]
     fn test_is_empty_str() {
         let signal: Binding<&str> = binding("");
-        assert!(signal.is_empty().get());
+        assert!(signal.str_is_empty().get());
 
         signal.set("hello");
-        assert!(!signal.is_empty().get());
+        assert!(!signal.str_is_empty().get());
     }
 
     #[test]
@@ -887,7 +1054,7 @@ mod tests {
     #[test]
     fn test_contains() {
         let signal: Binding<&str> = binding("hello world");
-        let has_world = signal.contains("world");
+        let has_world = signal.str_contains("world");
         assert!(has_world.get());
 
         signal.set("hello");
@@ -897,7 +1064,7 @@ mod tests {
     #[test]
     fn test_contains_str() {
         let signal: Binding<&str> = binding("hello world");
-        let has_world = signal.contains("world");
+        let has_world = signal.str_contains("world");
         assert!(has_world.get());
 
         signal.set("hello");

@@ -9,7 +9,7 @@ use core::cell::RefCell;
 use alloc::rc::Rc;
 use nami_core::watcher::Context;
 
-use crate::signal::Signal;
+use crate::signal::{Signal, SignalIdentity};
 
 /// A distinct signal that only notifies on value changes.
 #[derive(Debug, Clone)]
@@ -45,20 +45,21 @@ where
         self.signal.get()
     }
 
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.signal.identity()
+    }
+
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let last_value_store = self.last_value.clone();
         self.signal.watch(move |ctx: Context<S::Output>| {
-            let last_value = last_value_store.borrow();
-            if let Some(last_value) = &*last_value {
-                if last_value != ctx.value() {
-                    *last_value_store.borrow_mut() = Some(ctx.value().clone());
-                    watcher(ctx);
-                }
-            } else {
-                // First time watching, set the last value
+            let changed = last_value_store.borrow().as_ref() != Some(ctx.value());
+            if changed {
                 *last_value_store.borrow_mut() = Some(ctx.value().clone());
                 watcher(ctx);
             }
         })
     }
 }
+
+// Note: Distinct<S> has an additional PartialEq bound, making it incompatible
+// with the generic wrapper macros. Users can convert to Computed for operators.

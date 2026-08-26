@@ -3,12 +3,113 @@
 #![no_std]
 #![forbid(unsafe_code)]
 extern crate alloc;
+// Observability scopes its observer to one reactive graph with a thread-local,
+// which needs `std`. The crate stays `no_std` in every other configuration.
+#[cfg(feature = "observability")]
+extern crate std;
+
+use alloc::rc::Rc;
+use core::{
+    any::TypeId,
+    cell::RefCell,
+    hash::{Hash, Hasher},
+    panic::Location,
+};
 
 use crate::watcher::{Context, WatcherGuard};
+
+/// Stable identity for reactive signal instances that own observable state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct SignalIdentity(usize);
+
+impl SignalIdentity {
+    /// Creates an identity from a shared allocation pointer.
+    ///
+    /// The allocation must be tied to the semantic signal instance and be cloned
+    /// together with that instance.
+    #[must_use]
+    pub fn from_rc<T>(value: &Rc<T>) -> Self {
+        Self::from_ptr(Rc::as_ptr(value))
+    }
+
+    /// Creates an identity from a stable allocation pointer.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the pointer is null.
+    #[must_use]
+    pub fn from_ptr<T>(value: *const T) -> Self {
+        let value = value.cast::<()>() as usize;
+        assert!(value != 0, "signal identity pointer must not be null");
+        Self(value)
+    }
+
+    /// Raw value for renderer-local key composition.
+    #[must_use]
+    pub const fn raw(self) -> usize {
+        self.0
+    }
+
+    /// Creates a stable derived identity for a property of this signal.
+    #[must_use]
+    pub const fn with_discriminator(self, discriminator: usize) -> Self {
+        Self(
+            self.0.wrapping_mul(0x9E37_79B9usize).rotate_left(7)
+                ^ discriminator.wrapping_add(0x517C_C1B7usize),
+        )
+    }
+
+    /// Combines two stable signal identities into one deterministic identity.
+    #[must_use]
+    pub const fn combine(self, other: Self) -> Self {
+        self.with_discriminator(other.0)
+    }
+
+    /// Creates a stable discriminator from a call site and semantic wrapper type.
+    #[must_use]
+    pub fn call_site_discriminator<T: 'static>(caller: &'static Location<'static>) -> usize {
+        let mut hasher = IdentityDiscriminatorHasher::new();
+        TypeId::of::<T>().hash(&mut hasher);
+        caller.file().hash(&mut hasher);
+        caller.line().hash(&mut hasher);
+        caller.column().hash(&mut hasher);
+        hasher.value()
+    }
+}
+
+struct IdentityDiscriminatorHasher(usize);
+
+impl IdentityDiscriminatorHasher {
+    const OFFSET: usize = 0x811C_9DC5;
+    const PRIME: usize = 0x0100_0193;
+
+    const fn new() -> Self {
+        Self(Self::OFFSET)
+    }
+
+    const fn value(&self) -> usize {
+        self.0
+    }
+}
+
+impl Hasher for IdentityDiscriminatorHasher {
+    fn finish(&self) -> u64 {
+        self.0 as u64
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= usize::from(*byte);
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+            self.0 = self.0.rotate_left(5);
+        }
+    }
+}
 
 /// Collection types for Nami.
 pub mod collection;
 pub mod dictionary;
+pub mod observe;
 pub mod watcher;
 /// The core trait for reactive system.
 ///
@@ -22,6 +123,14 @@ pub trait Signal: Clone + 'static {
 
     /// Execute the computation and return the current value.
     fn get(&self) -> Self::Output;
+
+    /// Returns the stable semantic identity of this signal, when one exists.
+    ///
+    /// Constant signals intentionally return `None` because they do not own
+    /// observable state.
+    fn identity(&self) -> Option<SignalIdentity> {
+        None
+    }
 
     /// Register a watcher to be notified when the computed value changes.
     ///
@@ -98,7 +207,7 @@ macro_rules! impl_generic_constant {
 
 mod impl_constant {
     use alloc::borrow::Cow;
-    use alloc::collections::BTreeMap;
+    use alloc::collections::{BTreeMap, BTreeSet};
     use core::time::Duration;
 
     use crate::Signal;
@@ -110,10 +219,12 @@ mod impl_constant {
         u16,
         u32,
         u64,
+        usize,
         i8,
         i16,
         i32,
         i64,
+        isize,
         f32,
         f64,
         bool,
@@ -123,13 +234,25 @@ mod impl_constant {
         Cow<'static, str>
     );
 
-    impl_generic_constant!(Vec<T>,BTreeMap<K,V>);
+    impl_generic_constant!(Vec<T>,BTreeMap<K,V>,BTreeSet<T>);
 
     impl<T: 'static> Signal for &'static [T] {
         type Output = &'static [T];
         type Guard = ();
         fn get(&self) -> Self::Output {
             self
+        }
+        fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
+    }
+
+    // Fixed-size arrays of `Clone + 'static` elements act as constant signals.
+    // This lets callers pass typed value arrays (e.g. mesh-gradient palettes)
+    // directly into `IntoSignal<[T; N]>`-typed parameters without wrapping.
+    impl<T: Clone + 'static, const N: usize> Signal for [T; N] {
+        type Output = Self;
+        type Guard = ();
+        fn get(&self) -> Self::Output {
+            self.clone()
         }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
     }
@@ -140,6 +263,9 @@ impl<T: Signal> Signal for Option<T> {
     type Guard = Option<T::Guard>;
     fn get(&self) -> Self::Output {
         self.as_ref().map(Signal::get)
+    }
+    fn identity(&self) -> Option<SignalIdentity> {
+        self.as_ref().and_then(Signal::identity)
     }
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         self.as_ref()
@@ -156,10 +282,130 @@ impl<T: Signal, E: Signal> Signal for Result<T, E> {
             Err(e) => Err(e.get()),
         }
     }
+    fn identity(&self) -> Option<SignalIdentity> {
+        match &self {
+            Ok(s) => s.identity(),
+            Err(e) => e.identity(),
+        }
+    }
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         match &self {
             Ok(s) => Ok(s.watch(move |context| watcher(context.map(Ok)))),
             Err(e) => Err(e.watch(move |context| watcher(context.map(Err)))),
         }
+    }
+}
+
+struct TupleWatchState<L, R, W> {
+    latest_left: RefCell<L>,
+    latest_right: RefCell<R>,
+    watcher: W,
+}
+
+impl<T, U> Signal for (T, U)
+where
+    T: Signal,
+    U: Signal,
+    T::Output: Clone,
+    U::Output: Clone,
+{
+    type Output = (T::Output, U::Output);
+    type Guard = (T::Guard, U::Guard);
+
+    fn get(&self) -> Self::Output {
+        (self.0.get(), self.1.get())
+    }
+
+    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+        let state = Rc::new(TupleWatchState {
+            latest_left: RefCell::new(self.0.get()),
+            latest_right: RefCell::new(self.1.get()),
+            watcher,
+        });
+
+        let left_guard = {
+            let state = Rc::clone(&state);
+            self.0.watch(move |ctx: Context<T::Output>| {
+                let updated_left = ctx.value().clone();
+                *state.latest_left.borrow_mut() = updated_left;
+                let right = state.latest_right.borrow().clone();
+                (state.watcher)(ctx.map(|left| (left, right)));
+            })
+        };
+
+        let right_guard = self.1.watch(move |ctx: Context<U::Output>| {
+            let updated_right = ctx.value().clone();
+            *state.latest_right.borrow_mut() = updated_right;
+            let left = state.latest_left.borrow().clone();
+            (state.watcher)(ctx.map(|right| (left, right)));
+        });
+
+        (left_guard, right_guard)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{rc::Rc, vec, vec::Vec};
+    use core::cell::RefCell;
+
+    use crate::{Signal, watcher::Context};
+
+    #[derive(Clone)]
+    struct TestSignal<T> {
+        value: Rc<RefCell<T>>,
+        watchers: Rc<RefCell<Vec<Watcher<T>>>>,
+    }
+
+    type Watcher<T> = Rc<dyn Fn(Context<T>)>;
+
+    impl<T: Clone + 'static> TestSignal<T> {
+        fn new(value: T) -> Self {
+            Self {
+                value: Rc::new(RefCell::new(value)),
+                watchers: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+
+        fn set(&self, value: T) {
+            *self.value.borrow_mut() = value.clone();
+            for watcher in self.watchers.borrow().iter() {
+                watcher(Context::from(value.clone()));
+            }
+        }
+    }
+
+    impl<T: Clone + 'static> Signal for TestSignal<T> {
+        type Output = T;
+        type Guard = ();
+
+        fn get(&self) -> Self::Output {
+            self.value.borrow().clone()
+        }
+
+        fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+            self.watchers.borrow_mut().push(Rc::new(watcher));
+        }
+    }
+
+    #[test]
+    fn tuple_signal_tracks_both_inputs() {
+        let left = TestSignal::new(1_i32);
+        let right = TestSignal::new(2_i32);
+        let pair = (left.clone(), right.clone());
+        let updates = Rc::new(RefCell::new(Vec::new()));
+
+        let _ = pair.watch({
+            let updates = updates.clone();
+            move |ctx| {
+                updates.borrow_mut().push(ctx.into_value());
+            }
+        });
+
+        left.set(3);
+        right.set(4);
+
+        assert_eq!(pair.get(), (3, 4));
+        assert_eq!(*updates.borrow(), vec![(3, 2), (3, 4)]);
     }
 }
