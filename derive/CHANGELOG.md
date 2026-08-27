@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/water-rs/nami/compare/derive-v0.2.4...derive-v0.3.0) - 2026-08-27
+
+### Fixed
+
+- [**breaking**] give the derive crate its own breaking version
+
 ## [0.2.4](https://github.com/water-rs/nami/compare/derive-v0.2.3...derive-v0.2.4) - 2026-08-25
 
 ### Changed
