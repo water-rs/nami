@@ -115,6 +115,11 @@ pub mod watcher;
 ///
 /// Types implementing `Signal` represent a computation that can produce a value
 /// and notify observers when that value changes.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a nami `Signal`",
+    label = "expected a `Signal` implementation",
+    note = "`Signal` is nami's reactive read trait; wrap a value in `nami::Binding` or `nami::Computed`, or create a fixed one with `nami::constant(value)`"
+)]
 pub trait Signal: Clone + 'static {
     /// The type of value produced by this computation.
     type Output: 'static;
