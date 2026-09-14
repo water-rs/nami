@@ -36,10 +36,15 @@ jobs:
         if: steps.detect.outputs.type == 'rust'
         uses: Swatinem/rust-cache@v2
 
+      - name: Install cargo-outdated
+        if: steps.detect.outputs.type == 'rust'
+        uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-outdated
+
       - name: Check Rust dependencies
         if: steps.detect.outputs.type == 'rust'
         run: |
-          cargo install cargo-outdated --locked
           cargo outdated -R --exit-code 1 > outdated.txt 2>&1 || true
           cat outdated.txt
 
