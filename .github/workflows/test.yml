@@ -20,4 +20,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test-${{ matrix.os }}
-      - run: cargo test --verbose --all-features
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --all-features
+      - run: cargo test --doc --all-features
