@@ -38,7 +38,9 @@ jobs:
 
       - name: Install cargo-outdated
         if: steps.detect.outputs.type == 'rust'
-        uses: taiki-e/install-action@cargo-outdated
+        uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: cargo-outdated
 
       - name: Check Rust dependencies
         if: steps.detect.outputs.type == 'rust'
