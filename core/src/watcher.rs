@@ -398,7 +398,7 @@ impl<T> Default for WatcherManagerInner<T> {
         Self {
             id: WatcherId::MIN,
             map: BTreeMap::new(),
-            origin: Origin::default(),
+            origin: Origin::unattributed(),
         }
     }
 }

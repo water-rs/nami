@@ -38,6 +38,7 @@ license = { file = "LICENSE" }
 
 [dev-dependencies]
 nami-derive = { workspace = true }
+trybuild = "1"
 
 [dependencies]
 log = { version = "0.4.33", default-features = true }

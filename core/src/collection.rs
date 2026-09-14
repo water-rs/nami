@@ -2,6 +2,11 @@
 ///
 /// This trait provides a common interface for collections that support
 /// reactive programming patterns through watchers.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a reactive collection",
+    label = "expected a `Collection` implementation",
+    note = "use `nami::collection::List<T>` for an owned reactive sequence; for a sequence derived from a signal such as a `Binding<Vec<T>>`, wrap it in `nami::collection::SignalCollection`"
+)]
 pub trait Collection: 'static {
     /// The type of items stored in the collection.
     type Item: 'static;
