@@ -1,0 +1,29 @@
+error[E0277]: `NotReactive` is not a nami `Signal`
+ --> tests/ui/on_unimplemented/signal.rs:8:11
+  |
+8 |     takes(NotReactive);
+  |     ----- ^^^^^^^^^^^ expected a `Signal` implementation
+  |     |
+  |     required by a bound introduced by this call
+  |
+help: the trait `Signal` is not implemented for `NotReactive`
+ --> tests/ui/on_unimplemented/signal.rs:5:1
+  |
+5 | struct NotReactive;
+  | ^^^^^^^^^^^^^^^^^^
+  = note: `Signal` is nami's reactive read trait; wrap a value in `nami::Binding` or `nami::Computed`, or create a fixed one with `nami::constant(value)`
+  = help: the following other types implement trait `Signal`:
+            &'static [T]
+            &'static str
+            (T, U)
+            BTreeMap<K, V>
+            BTreeSet<T>
+            Binding<T>
+            Cached<C>
+            Computed<T>
+          and $N others
+note: required by a bound in `takes`
+ --> tests/ui/on_unimplemented/signal.rs:3:13
+  |
+3 | fn takes<S: Signal>(_: S) {}
+  |             ^^^^^^ required by this bound in `takes`

@@ -94,6 +94,15 @@ mod enabled {
             }))
         }
 
+        /// An origin that is not attributed to any signal node.
+        ///
+        /// Exists so feature-agnostic callers can spell "no origin" without
+        /// depending on which `Origin` shape is compiled in.
+        #[must_use]
+        pub(crate) const fn unattributed() -> Self {
+            Self(None)
+        }
+
         /// The node this origin describes, if it is attributed to one.
         #[must_use]
         pub const fn node(self) -> Option<SignalNode> {
@@ -234,6 +243,15 @@ mod disabled {
         /// Captures nothing.
         #[must_use]
         pub const fn capture<T: ?Sized>(_identity: SignalIdentity) -> Self {
+            Self
+        }
+
+        /// An origin that is not attributed to any signal node.
+        ///
+        /// Exists so feature-agnostic callers can spell "no origin" without
+        /// depending on which `Origin` shape is compiled in.
+        #[must_use]
+        pub(crate) const fn unattributed() -> Self {
             Self
         }
     }
