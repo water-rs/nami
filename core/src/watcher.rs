@@ -352,13 +352,18 @@ impl<T: 'static> WatcherManager<T> {
     }
 
     /// Cancels a previously registered watcher by its identifier.
+    ///
+    /// The removed watcher is dropped after the borrow on `inner` is
+    /// released, because dropping its closure may re-enter this manager
+    /// through a `WatcherManagerGuard` it owns.
     pub fn cancel(&self, id: WatcherId) {
-        let (origin, subscribers) = {
+        let (removed, origin, subscribers) = {
             let mut inner = self.inner.borrow_mut();
-            inner.cancel(id);
-            (inner.origin, inner.len())
+            let removed = inner.cancel(id);
+            (removed, inner.origin, inner.len())
         };
         observe::on_unsubscribe(origin, subscribers);
+        drop(removed);
     }
 }
 
@@ -452,7 +457,30 @@ impl<T: 'static> WatcherManagerInner<T> {
     }
 
     /// Cancels a watcher registration by its identifier.
-    pub fn cancel(&mut self, id: WatcherId) {
-        self.map.remove(&id);
+    ///
+    /// The removed watcher is handed back to the caller, which drops it only
+    /// after the `RefCell` borrow on the manager has been released.
+    pub fn cancel(&mut self, id: WatcherId) -> Option<Watcher<T>> {
+        self.map.remove(&id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Context, WatcherManager};
+
+    /// A watcher whose closure owns a `WatcherManagerGuard` on the same
+    /// manager re-enters `cancel` from the guard's `Drop` when the watcher is
+    /// dropped, so removal must not run that destructor while `inner` is
+    /// still borrowed.
+    #[test]
+    fn cancel_drops_removed_watcher_after_releasing_borrow() {
+        let manager = WatcherManager::<i32>::new();
+        let nested = manager.register_as_guard(|_| ());
+        let owner = manager.register(move |_: Context<i32>| {
+            let _owns_nested_guard = &nested;
+        });
+        manager.cancel(owner);
+        assert!(manager.is_empty());
     }
 }
