@@ -83,7 +83,7 @@ define_binary_op!(shr, Shr, shr);
 /// let a: Binding<i32> = binding(10);
 /// let b: Binding<i32> = binding(5);
 /// let maximum = max(a, b);
-/// assert_eq!(maximum.get(), 10);
+/// assert_eq!(maximum.snapshot(), 10);
 /// ```
 #[allow(clippy::type_complexity)]
 pub fn max<A, B, T>(a: A, b: B) -> Map<Zip<A, B>, fn((T, T)) -> T, T>
@@ -125,7 +125,7 @@ where
 /// let a: Binding<i32> = binding(10);
 /// let b: Binding<i32> = binding(5);
 /// let minimum = min(a, b);
-/// assert_eq!(minimum.get(), 5);
+/// assert_eq!(minimum.snapshot(), 5);
 /// ```
 #[allow(clippy::type_complexity)]
 pub fn min<A, B, T>(a: A, b: B) -> Map<Zip<A, B>, fn((T, T)) -> T, T>

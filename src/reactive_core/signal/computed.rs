@@ -44,7 +44,7 @@ impl<C: Signal + 'static> ComputedImpl for C {
     type Output = C::Output;
 
     fn compute(&self) -> Self::Output {
-        <Self as Signal>::get(self)
+        <Self as Signal>::snapshot(self)
     }
 
     fn add_watcher(&self, watcher: Watcher<Self::Output>) -> BoxWatcherGuard {
@@ -85,7 +85,7 @@ impl<T: 'static> Signal for Computed<T> {
     type Output = T;
     type Guard = BoxWatcherGuard;
 
-    fn get(&self) -> Self::Output {
+    fn snapshot(&self) -> Self::Output {
         self.0.compute()
     }
 
