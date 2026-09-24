@@ -378,13 +378,13 @@ impl<T: 'static> BindingMailbox<T> {
             .expect("BindingMailbox::handle failed to enqueue job");
     }
 
-    /// Gets the current value of the binding asynchronously via the mailbox.
+    /// Takes a snapshot of the binding's current value asynchronously via the mailbox.
     ///
     /// # Panics
     ///
     /// Panics when the value request cannot be sent to the mailbox worker
     /// or when the response channel is unexpectedly closed.
-    pub async fn get(&self) -> T
+    pub async fn snapshot(&self) -> T
     where
         T: Clone + Send,
     {
@@ -392,16 +392,16 @@ impl<T: 'static> BindingMailbox<T> {
         self.handle(move |binding| {
             sender
                 .try_send(binding.snapshot())
-                .expect("BindingMailbox::get failed to send response");
+                .expect("BindingMailbox::snapshot failed to send response");
         });
 
         match receiver.recv().await {
             Ok(value) => value,
-            Err(error) => panic!("BindingMailbox::get response channel closed: {error}"),
+            Err(error) => panic!("BindingMailbox::snapshot response channel closed: {error}"),
         }
     }
 
-    /// Gets the current value of the binding asynchronously and converts it to type `T2`.
+    /// Takes a snapshot of the binding's current value asynchronously and converts it to type `T2`.
     ///
     /// This method retrieves the binding's value via the mailbox and automatically
     /// converts it to the target type using the `From` trait. This is particularly
@@ -420,7 +420,7 @@ impl<T: 'static> BindingMailbox<T> {
     /// use waterui_str::Str;
     /// let text_binding:Binding<Str> = nami::binding("hello world");
     /// let mailbox = text_binding.mailbox();
-    /// let owned_string: String = mailbox.get_as().await;
+    /// let owned_string: String = mailbox.snapshot_as().await;
     /// assert_eq!(owned_string, "hello world");
     /// ```
     ///
@@ -428,7 +428,7 @@ impl<T: 'static> BindingMailbox<T> {
     ///
     /// Panics when the value request cannot be sent to the mailbox worker
     /// or when the response channel is unexpectedly closed.
-    pub async fn get_as<T2>(&self) -> T2
+    pub async fn snapshot_as<T2>(&self) -> T2
     where
         T2: Send + 'static + From<T>,
     {
@@ -436,12 +436,12 @@ impl<T: 'static> BindingMailbox<T> {
         self.handle(move |binding| {
             sender
                 .try_send(binding.snapshot().into())
-                .expect("BindingMailbox::get_as failed to send response");
+                .expect("BindingMailbox::snapshot_as failed to send response");
         });
 
         match receiver.recv().await {
             Ok(value) => value,
-            Err(error) => panic!("BindingMailbox::get_as response channel closed: {error}"),
+            Err(error) => panic!("BindingMailbox::snapshot_as response channel closed: {error}"),
         }
     }
 

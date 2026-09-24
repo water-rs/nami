@@ -172,7 +172,7 @@ Bridge async with reactive using adapters:
 
 - `FutureSignal<T>`: `Option<T>` becomes `Some(T)` when a future resolves
 - `SignalStream<S>`: treat a `Signal` as a `Stream` that yields on updates
-- `BindingMailbox<T>`: cross-thread reactive state with `get()`, `set()`, and `get_as()` for type conversion
+- `BindingMailbox<T>`: cross-thread reactive state with `snapshot()`, `set()`, and `snapshot_as()` for type conversion
 
 ```rust,no_run
 use nami::{future::FutureSignal, Signal};
@@ -202,7 +202,7 @@ let text_binding:Binding<Str> = binding("hello");
 let mailbox = text_binding.mailbox();
 
 // Convert to Send type for cross-thread usage
-let owned_string: String = mailbox.get_as().await;
+let owned_string: String = mailbox.snapshot_as().await;
 assert_eq!(owned_string, "hello");
 
 // Regular mailbox operations
