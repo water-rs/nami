@@ -105,8 +105,8 @@ where
     type Output = S::Output;
     type Guard = WatcherManagerGuard<S::Output>;
 
-    fn get(&self) -> Self::Output {
-        self.signal.get()
+    fn snapshot(&self) -> Self::Output {
+        self.signal.snapshot()
     }
 
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {

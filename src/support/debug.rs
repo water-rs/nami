@@ -199,9 +199,9 @@ where
 {
     type Output = C::Output;
     type Guard = BoxWatcherGuard;
-    fn get(&self) -> Self::Output {
+    fn snapshot(&self) -> Self::Output {
         let name = type_name::<C>();
-        let value = self.source.get();
+        let value = self.source.snapshot();
         if self.inner.config.should_log_compute() {
             log::debug!("`{name}` computed value {value:?}");
         }

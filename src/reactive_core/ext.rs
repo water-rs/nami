@@ -666,14 +666,14 @@ mod tests {
     fn test_map_into() {
         let signal: Binding<i32> = binding(42i32);
         let mapped: Map<_, _, i64> = signal.map_into();
-        assert_eq!(mapped.get(), 42i64);
+        assert_eq!(mapped.snapshot(), 42i64);
     }
 
     #[test]
     fn test_distinct() {
         let signal: Binding<i32> = binding(42);
         let distinct = signal.distinct();
-        assert_eq!(distinct.get(), 42);
+        assert_eq!(distinct.snapshot(), 42);
     }
 
     #[test]
@@ -700,10 +700,10 @@ mod tests {
     fn test_equal_to() {
         let signal: Binding<i32> = binding(42);
         let is_42 = signal.equal_to(42);
-        assert!(is_42.get());
+        assert!(is_42.snapshot());
 
         signal.set(10);
-        assert!(!is_42.get());
+        assert!(!is_42.snapshot());
     }
 
     #[test]
@@ -711,72 +711,72 @@ mod tests {
         let signal: Binding<i32> = binding(42);
         // Use equal_to().not() - direct not_equal_to has RPIT lifetime issues
         let not_42 = signal.equal_to(42).not();
-        assert!(!not_42.get());
+        assert!(!not_42.snapshot());
 
         signal.set(10);
-        assert!(not_42.get());
+        assert!(not_42.snapshot());
     }
 
     #[test]
     fn test_condition() {
         let signal: Binding<i32> = binding(42);
         let is_even = signal.condition(|x| x % 2 == 0);
-        assert!(is_even.get());
+        assert!(is_even.snapshot());
 
         signal.set(43);
-        assert!(!is_even.get());
+        assert!(!is_even.snapshot());
     }
 
     #[test]
     fn test_gt() {
         let signal: Binding<i32> = binding(42);
         let is_gt_40 = signal.gt(40);
-        assert!(is_gt_40.get());
+        assert!(is_gt_40.snapshot());
 
         signal.set(40);
-        assert!(!is_gt_40.get());
+        assert!(!is_gt_40.snapshot());
 
         signal.set(30);
-        assert!(!is_gt_40.get());
+        assert!(!is_gt_40.snapshot());
     }
 
     #[test]
     fn test_lt() {
         let signal: Binding<i32> = binding(30);
         let is_lt_40 = signal.lt(40);
-        assert!(is_lt_40.get());
+        assert!(is_lt_40.snapshot());
 
         signal.set(40);
-        assert!(!is_lt_40.get());
+        assert!(!is_lt_40.snapshot());
 
         signal.set(50);
-        assert!(!is_lt_40.get());
+        assert!(!is_lt_40.snapshot());
     }
 
     #[test]
     fn test_ge() {
         let signal: Binding<i32> = binding(42);
         let is_ge_40 = signal.ge(40);
-        assert!(is_ge_40.get());
+        assert!(is_ge_40.snapshot());
 
         signal.set(40);
-        assert!(is_ge_40.get());
+        assert!(is_ge_40.snapshot());
 
         signal.set(30);
-        assert!(!is_ge_40.get());
+        assert!(!is_ge_40.snapshot());
     }
 
     #[test]
     fn test_le() {
         let signal: Binding<i32> = binding(30);
         let is_le_40 = signal.le(40);
-        assert!(is_le_40.get());
+        assert!(is_le_40.snapshot());
 
         signal.set(40);
-        assert!(is_le_40.get());
+        assert!(is_le_40.snapshot());
 
         signal.set(50);
-        assert!(!is_le_40.get());
+        assert!(!is_le_40.snapshot());
     }
 
     // ==================== Option Methods ====================
@@ -784,48 +784,48 @@ mod tests {
     #[test]
     fn test_is_some() {
         let signal: Binding<Option<i32>> = binding(Some(42));
-        assert!(signal.is_some().get());
+        assert!(signal.is_some().snapshot());
 
         signal.set(None);
-        assert!(!signal.is_some().get());
+        assert!(!signal.is_some().snapshot());
     }
 
     #[test]
     fn test_is_none() {
         let signal: Binding<Option<i32>> = binding(None);
-        assert!(signal.is_none().get());
+        assert!(signal.is_none().snapshot());
 
         signal.set(Some(42));
-        assert!(!signal.is_none().get());
+        assert!(!signal.is_none().snapshot());
     }
 
     #[test]
     fn test_unwrap_or() {
         let signal: Binding<Option<i32>> = binding(Some(42));
         let unwrapped = signal.unwrap_or(0);
-        assert_eq!(unwrapped.get(), 42);
+        assert_eq!(unwrapped.snapshot(), 42);
 
         signal.set(None);
-        assert_eq!(unwrapped.get(), 0);
+        assert_eq!(unwrapped.snapshot(), 0);
     }
 
     #[test]
     fn test_unwrap_or_else() {
         let signal: Binding<Option<i32>> = binding(Some(42));
         let unwrapped = signal.unwrap_or_else(|| 100);
-        assert_eq!(unwrapped.get(), 42);
+        assert_eq!(unwrapped.snapshot(), 42);
 
         signal.set(None);
-        assert_eq!(unwrapped.get(), 100);
+        assert_eq!(unwrapped.snapshot(), 100);
     }
 
     #[test]
     fn test_unwrap_or_default() {
         let signal: Binding<Option<i32>> = binding(Some(42));
-        assert_eq!(signal.unwrap_or_default().get(), 42);
+        assert_eq!(signal.unwrap_or_default().snapshot(), 42);
 
         signal.set(None);
-        assert_eq!(signal.unwrap_or_default().get(), 0);
+        assert_eq!(signal.unwrap_or_default().snapshot(), 0);
     }
 
     #[test]
@@ -833,23 +833,23 @@ mod tests {
         let signal: Binding<Option<i32>> = binding(Some(42));
         let eq_42 = signal.some_equal_to(42);
         let eq_0 = signal.some_equal_to(0);
-        assert!(eq_42.get());
-        assert!(!eq_0.get());
+        assert!(eq_42.snapshot());
+        assert!(!eq_0.snapshot());
 
         signal.set(None);
-        assert!(!eq_42.get());
+        assert!(!eq_42.snapshot());
     }
 
     #[test]
     fn test_flatten() {
         let signal: Binding<Option<Option<i32>>> = binding(Some(Some(42)));
-        assert_eq!(signal.flatten().get(), Some(42));
+        assert_eq!(signal.flatten().snapshot(), Some(42));
 
         signal.set(Some(None));
-        assert_eq!(signal.flatten().get(), None);
+        assert_eq!(signal.flatten().snapshot(), None);
 
         signal.set(None);
-        assert_eq!(signal.flatten().get(), None);
+        assert_eq!(signal.flatten().snapshot(), None);
     }
 
     // ==================== Bool Methods ====================
@@ -857,10 +857,10 @@ mod tests {
     #[test]
     fn test_not() {
         let signal: Binding<bool> = binding(true);
-        assert!(!signal.not().get());
+        assert!(!signal.not().snapshot());
 
         signal.set(false);
-        assert!(signal.not().get());
+        assert!(signal.not().snapshot());
     }
 
     #[test]
@@ -868,17 +868,17 @@ mod tests {
         let a: Binding<bool> = binding(true);
         let b: Binding<bool> = binding(true);
         let result = a.and(&b);
-        assert!(result.get());
+        assert!(result.snapshot());
 
         a.set(false);
-        assert!(!result.get());
+        assert!(!result.snapshot());
 
         a.set(true);
         b.set(false);
-        assert!(!result.get());
+        assert!(!result.snapshot());
 
         a.set(false);
-        assert!(!result.get());
+        assert!(!result.snapshot());
     }
 
     #[test]
@@ -886,37 +886,37 @@ mod tests {
         let a: Binding<bool> = binding(false);
         let b: Binding<bool> = binding(false);
         let result = a.or(&b);
-        assert!(!result.get());
+        assert!(!result.snapshot());
 
         a.set(true);
-        assert!(result.get());
+        assert!(result.snapshot());
 
         a.set(false);
         b.set(true);
-        assert!(result.get());
+        assert!(result.snapshot());
 
         a.set(true);
-        assert!(result.get());
+        assert!(result.snapshot());
     }
 
     #[test]
     fn test_then_some() {
         let signal: Binding<bool> = binding(true);
         let maybe = signal.then_some(42);
-        assert_eq!(maybe.get(), Some(42));
+        assert_eq!(maybe.snapshot(), Some(42));
 
         signal.set(false);
-        assert_eq!(maybe.get(), None);
+        assert_eq!(maybe.snapshot(), None);
     }
 
     #[test]
     fn test_select() {
         let signal: Binding<bool> = binding(true);
         let selected = signal.select("yes", "no");
-        assert_eq!(selected.get(), "yes");
+        assert_eq!(selected.snapshot(), "yes");
 
         signal.set(false);
-        assert_eq!(selected.get(), "no");
+        assert_eq!(selected.snapshot(), "no");
     }
 
     // ==================== Numeric Methods ====================
@@ -924,64 +924,64 @@ mod tests {
     #[test]
     fn test_negate() {
         let signal: Binding<i32> = binding(42);
-        assert_eq!(signal.negate().get(), -42);
+        assert_eq!(signal.negate().snapshot(), -42);
 
         signal.set(-10);
-        assert_eq!(signal.negate().get(), 10);
+        assert_eq!(signal.negate().snapshot(), 10);
     }
 
     #[test]
     fn test_abs() {
         let signal: Binding<i32> = binding(-42);
-        assert_eq!(signal.abs().get(), 42);
+        assert_eq!(signal.abs().snapshot(), 42);
 
         signal.set(10);
-        assert_eq!(signal.abs().get(), 10);
+        assert_eq!(signal.abs().snapshot(), 10);
     }
 
     #[test]
     fn test_sign() {
         let signal: Binding<i32> = binding(42);
-        assert!(signal.sign().get()); // positive
+        assert!(signal.sign().snapshot()); // positive
 
         signal.set(-10);
-        assert!(!signal.sign().get()); // negative
+        assert!(!signal.sign().snapshot()); // negative
 
         signal.set(0);
-        assert!(signal.sign().get()); // zero is not negative
+        assert!(signal.sign().snapshot()); // zero is not negative
     }
 
     #[test]
     fn test_is_positive() {
         let signal: Binding<i32> = binding(42);
-        assert!(signal.is_positive().get());
+        assert!(signal.is_positive().snapshot());
 
         signal.set(-10);
-        assert!(!signal.is_positive().get());
+        assert!(!signal.is_positive().snapshot());
 
         signal.set(0);
-        assert!(!signal.is_positive().get());
+        assert!(!signal.is_positive().snapshot());
     }
 
     #[test]
     fn test_is_negative() {
         let signal: Binding<i32> = binding(-42);
-        assert!(signal.is_negative().get());
+        assert!(signal.is_negative().snapshot());
 
         signal.set(10);
-        assert!(!signal.is_negative().get());
+        assert!(!signal.is_negative().snapshot());
 
         signal.set(0);
-        assert!(!signal.is_negative().get());
+        assert!(!signal.is_negative().snapshot());
     }
 
     #[test]
     fn test_is_zero() {
         let signal: Binding<i32> = binding(0);
-        assert!(signal.is_zero().get());
+        assert!(signal.is_zero().snapshot());
 
         signal.set(42);
-        assert!(!signal.is_zero().get());
+        assert!(!signal.is_zero().snapshot());
     }
 
     // ==================== Result Methods ====================
@@ -989,37 +989,37 @@ mod tests {
     #[test]
     fn test_is_ok() {
         let signal: Binding<Result<i32, &str>> = binding(Ok(42));
-        assert!(signal.is_ok().get());
+        assert!(signal.is_ok().snapshot());
 
         signal.set(Err("error"));
-        assert!(!signal.is_ok().get());
+        assert!(!signal.is_ok().snapshot());
     }
 
     #[test]
     fn test_is_err() {
         let signal: Binding<Result<i32, &str>> = binding(Err("error"));
-        assert!(signal.is_err().get());
+        assert!(signal.is_err().snapshot());
 
         signal.set(Ok(42));
-        assert!(!signal.is_err().get());
+        assert!(!signal.is_err().snapshot());
     }
 
     #[test]
     fn test_ok() {
         let signal: Binding<Result<i32, &str>> = binding(Ok(42));
-        assert_eq!(signal.ok().get(), Some(42));
+        assert_eq!(signal.ok().snapshot(), Some(42));
 
         signal.set(Err("error"));
-        assert_eq!(signal.ok().get(), None);
+        assert_eq!(signal.ok().snapshot(), None);
     }
 
     #[test]
     fn test_err() {
         let signal: Binding<Result<i32, &str>> = binding(Err("error"));
-        assert_eq!(signal.err().get(), Some("error"));
+        assert_eq!(signal.err().snapshot(), Some("error"));
 
         signal.set(Ok(42));
-        assert_eq!(signal.err().get(), None);
+        assert_eq!(signal.err().snapshot(), None);
     }
 
     // ==================== String Methods ====================
@@ -1027,47 +1027,47 @@ mod tests {
     #[test]
     fn test_is_empty_string() {
         let signal: Binding<String> = binding(String::new());
-        assert!(signal.str_is_empty().get());
+        assert!(signal.str_is_empty().snapshot());
 
         signal.set("hello".to_string());
-        assert!(!signal.str_is_empty().get());
+        assert!(!signal.str_is_empty().snapshot());
     }
 
     #[test]
     fn test_is_empty_str() {
         let signal: Binding<&str> = binding("");
-        assert!(signal.str_is_empty().get());
+        assert!(signal.str_is_empty().snapshot());
 
         signal.set("hello");
-        assert!(!signal.str_is_empty().get());
+        assert!(!signal.str_is_empty().snapshot());
     }
 
     #[test]
     fn test_str_len() {
         let signal: Binding<String> = binding("hello".to_string());
-        assert_eq!(signal.str_len().get(), 5);
+        assert_eq!(signal.str_len().snapshot(), 5);
 
         signal.set(String::new());
-        assert_eq!(signal.str_len().get(), 0);
+        assert_eq!(signal.str_len().snapshot(), 0);
     }
 
     #[test]
     fn test_contains() {
         let signal: Binding<&str> = binding("hello world");
         let has_world = signal.str_contains("world");
-        assert!(has_world.get());
+        assert!(has_world.snapshot());
 
         signal.set("hello");
-        assert!(!has_world.get());
+        assert!(!has_world.snapshot());
     }
 
     #[test]
     fn test_contains_str() {
         let signal: Binding<&str> = binding("hello world");
         let has_world = signal.str_contains("world");
-        assert!(has_world.get());
+        assert!(has_world.snapshot());
 
         signal.set("hello");
-        assert!(!has_world.get());
+        assert!(!has_world.snapshot());
     }
 }

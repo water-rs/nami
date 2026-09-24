@@ -179,23 +179,23 @@ mod tests {
 
         // Test Add
         let sum = a.clone() + b.clone();
-        assert_eq!(sum.get(), 13);
+        assert_eq!(sum.snapshot(), 13);
 
         // Test Sub
         let diff = a.clone() - b.clone();
-        assert_eq!(diff.get(), 7);
+        assert_eq!(diff.snapshot(), 7);
 
         // Test Mul
         let product = a.clone() * b.clone();
-        assert_eq!(product.get(), 30);
+        assert_eq!(product.snapshot(), 30);
 
         // Test Div
         let quotient = a.clone() / b.clone();
-        assert_eq!(quotient.get(), 3);
+        assert_eq!(quotient.snapshot(), 3);
 
         // Test Rem
         let remainder = a % b;
-        assert_eq!(remainder.get(), 1);
+        assert_eq!(remainder.snapshot(), 1);
     }
 
     #[test]
@@ -205,24 +205,24 @@ mod tests {
 
         // Test BitAnd
         let and = a.clone() & b.clone();
-        assert_eq!(and.get(), 0b1000);
+        assert_eq!(and.snapshot(), 0b1000);
 
         // Test BitOr
         let or = a.clone() | b.clone();
-        assert_eq!(or.get(), 0b1110);
+        assert_eq!(or.snapshot(), 0b1110);
 
         // Test BitXor
         let xor = a.clone() ^ b;
-        assert_eq!(xor.get(), 0b0110);
+        assert_eq!(xor.snapshot(), 0b0110);
 
         // Test Shl
         let shift: Binding<u32> = binding(2u32);
         let shl = a.clone() << shift.clone();
-        assert_eq!(shl.get(), 0b11_0000);
+        assert_eq!(shl.snapshot(), 0b11_0000);
 
         // Test Shr
         let shr = a >> shift;
-        assert_eq!(shr.get(), 0b11);
+        assert_eq!(shr.snapshot(), 0b11);
     }
 
     #[test]
@@ -231,21 +231,21 @@ mod tests {
         let b: Computed<i32> = Computed::constant(5);
 
         let sum = a.clone() + b.clone();
-        assert_eq!(sum.get(), 15);
+        assert_eq!(sum.snapshot(), 15);
 
         let diff = a.clone() - b;
-        assert_eq!(diff.get(), 5);
+        assert_eq!(diff.snapshot(), 5);
 
         // Test Neg
         let neg = -a;
-        assert_eq!(neg.get(), -10);
+        assert_eq!(neg.snapshot(), -10);
     }
 
     #[test]
     fn test_computed_not() {
         let flag: Computed<bool> = Computed::constant(true);
         let negated = !flag;
-        assert!(!negated.get());
+        assert!(!negated.snapshot());
     }
 
     #[test]
@@ -255,7 +255,7 @@ mod tests {
 
         let b: Binding<i32> = binding(5);
         let sum = mapped + b;
-        assert_eq!(sum.get(), 25); // (10 * 2) + 5 = 25
+        assert_eq!(sum.snapshot(), 25); // (10 * 2) + 5 = 25
     }
 
     #[test]
@@ -264,10 +264,10 @@ mod tests {
         let b = constant(3i32);
 
         let sum = a.clone() + b;
-        assert_eq!(sum.get(), 13);
+        assert_eq!(sum.snapshot(), 13);
 
         let neg = -a;
-        assert_eq!(neg.get(), -10);
+        assert_eq!(neg.snapshot(), -10);
     }
 
     #[test]
@@ -277,7 +277,7 @@ mod tests {
 
         let b: Binding<i32> = binding(5);
         let sum = cached + b;
-        assert_eq!(sum.get(), 15);
+        assert_eq!(sum.snapshot(), 15);
     }
 
     #[test]
@@ -288,11 +288,11 @@ mod tests {
 
         // (a + b) * c
         let result = (a.clone() + b) * c;
-        assert_eq!(result.get(), 30);
+        assert_eq!(result.snapshot(), 30);
 
         // Verify reactivity
         a.set(20);
-        assert_eq!(result.get(), 50); // (20 + 5) * 2 = 50
+        assert_eq!(result.snapshot(), 50); // (20 + 5) * 2 = 50
     }
 
     #[test]
@@ -303,14 +303,14 @@ mod tests {
 
         // Binding + Constant
         let sum1 = binding_val.clone() + constant_val.clone();
-        assert_eq!(sum1.get(), 15);
+        assert_eq!(sum1.snapshot(), 15);
 
         // Binding + Computed
         let sum2 = binding_val + computed_val.clone();
-        assert_eq!(sum2.get(), 13);
+        assert_eq!(sum2.snapshot(), 13);
 
         // Constant + Computed
         let sum3 = constant_val + computed_val;
-        assert_eq!(sum3.get(), 8);
+        assert_eq!(sum3.snapshot(), 8);
     }
 }

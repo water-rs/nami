@@ -15,10 +15,10 @@
 //! let number: Binding<i32> = binding(5);
 //! let doubled = map(number, |n: i32| n * 2);
 //!
-//! assert_eq!(doubled.get(), 10);
+//! assert_eq!(doubled.snapshot(), 10);
 //!
 //! // The transformation is automatically cached
-//! doubled.get(); // Uses cached value, doesn't recompute
+//! doubled.snapshot(); // Uses cached value, doesn't recompute
 //! ```
 
 use core::{marker::PhantomData, panic::Location};
@@ -88,7 +88,7 @@ where
 ///
 /// let counter: Binding<i32> = binding(1);
 /// let doubled = map(counter, |n: i32| n * 2);
-/// assert_eq!(doubled.get(), 2);
+/// assert_eq!(doubled.snapshot(), 2);
 /// ```
 #[track_caller]
 pub fn map<C, F, Output>(source: C, f: F) -> Map<C, F, Output>
@@ -121,8 +121,8 @@ where
     type Guard = C::Guard;
 
     /// Computes the transformed value, using the cache when available.
-    fn get(&self) -> Output {
-        (self.f)(self.source.get())
+    fn snapshot(&self) -> Output {
+        (self.f)(self.source.snapshot())
     }
 
     fn identity(&self) -> Option<SignalIdentity> {

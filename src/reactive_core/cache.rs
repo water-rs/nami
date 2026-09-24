@@ -32,7 +32,7 @@ where
 {
     /// Creates a new cached wrapper around the provided Signal.
     ///
-    /// The cache is initially empty and will be populated on the first call to `get()`.
+    /// The cache is initially empty and will be populated on the first call to `snapshot()`.
     pub fn new(source: C) -> Self {
         let cache: Rc<RefCell<Option<C::Output>>> = Rc::default();
         let guard = {
@@ -58,12 +58,12 @@ where
 {
     type Output = C::Output;
     type Guard = C::Guard;
-    fn get(&self) -> Self::Output {
+    fn snapshot(&self) -> Self::Output {
         let mut cache = self.cache.borrow_mut();
         if let Some(ref cached_value) = *cache {
             cached_value.clone()
         } else {
-            let value = self.source.get();
+            let value = self.source.snapshot();
             *cache = Some(value.clone());
             value
         }
@@ -103,7 +103,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct CountingSignal {
         value: Rc<RefCell<i32>>,
-        get_counter: Rc<RefCell<usize>>,
+        snapshot_counter: Rc<RefCell<usize>>,
         watchers: WatcherManager<i32>,
     }
 
@@ -111,7 +111,7 @@ mod tests {
         fn new(initial: i32) -> Self {
             Self {
                 value: Rc::new(RefCell::new(initial)),
-                get_counter: Rc::new(RefCell::new(0)),
+                snapshot_counter: Rc::new(RefCell::new(0)),
                 watchers: WatcherManager::default(),
             }
         }
@@ -122,8 +122,8 @@ mod tests {
             self.watchers.notify(&context);
         }
 
-        fn get_call_count(&self) -> usize {
-            *self.get_counter.borrow()
+        fn snapshot_call_count(&self) -> usize {
+            *self.snapshot_counter.borrow()
         }
     }
 
@@ -131,8 +131,8 @@ mod tests {
         type Output = i32;
         type Guard = WatcherManagerGuard<i32>;
 
-        fn get(&self) -> Self::Output {
-            *self.get_counter.borrow_mut() += 1;
+        fn snapshot(&self) -> Self::Output {
+            *self.snapshot_counter.borrow_mut() += 1;
             *self.value.borrow()
         }
 
@@ -146,16 +146,16 @@ mod tests {
         let signal = CountingSignal::new(5);
         let cached = Cached::new(signal.clone());
 
-        assert_eq!(cached.get(), 5);
+        assert_eq!(cached.snapshot(), 5);
         assert_eq!(
-            signal.get_call_count(),
+            signal.snapshot_call_count(),
             1,
             "first access should compute the value"
         );
 
-        assert_eq!(cached.get(), 5);
+        assert_eq!(cached.snapshot(), 5);
         assert_eq!(
-            signal.get_call_count(),
+            signal.snapshot_call_count(),
             1,
             "cached access should reuse the stored value without recomputing",
         );
@@ -166,14 +166,14 @@ mod tests {
         let signal = CountingSignal::new(1);
         let cached = Cached::new(signal.clone());
 
-        assert_eq!(cached.get(), 1);
-        assert_eq!(signal.get_call_count(), 1);
+        assert_eq!(cached.snapshot(), 1);
+        assert_eq!(signal.snapshot_call_count(), 1);
 
         signal.set(42);
 
-        assert_eq!(cached.get(), 42);
+        assert_eq!(cached.snapshot(), 42);
         assert_eq!(
-            signal.get_call_count(),
+            signal.snapshot_call_count(),
             1,
             "up-to-date cache should provide the new value without triggering recomputation",
         );

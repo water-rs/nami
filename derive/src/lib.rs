@@ -17,7 +17,7 @@ use syn::{
 /// # Examples
 ///
 /// ```rust,ignore
-/// use nami::{Binding, binding};
+/// use nami::{Binding, Signal, binding};
 /// use nami_derive::Project;
 ///
 /// #[derive(Project,Clone,Debug)]
@@ -35,7 +35,7 @@ use syn::{
 /// projected.name.set_from("Bob");
 /// projected.age.set(25);
 ///
-/// let person = person_binding.get();
+/// let person = person_binding.snapshot();
 /// assert_eq!(person.name, "Bob");
 /// assert_eq!(person.age, 25);
 /// ```

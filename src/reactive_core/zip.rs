@@ -137,9 +137,9 @@ where
     ///
     /// # Returns
     /// A tuple containing the results of computing `a` and `b`.
-    fn get(&self) -> Self::Output {
+    fn snapshot(&self) -> Self::Output {
         let Self { a, b, .. } = self;
-        (a.get(), b.get())
+        (a.snapshot(), b.snapshot())
     }
 
     fn identity(&self) -> Option<SignalIdentity> {
@@ -164,8 +164,8 @@ where
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let Self { a, b, .. } = self;
         let state = Rc::new(ZipWatchState {
-            latest_left: RefCell::new(a.get()),
-            latest_right: RefCell::new(b.get()),
+            latest_left: RefCell::new(a.snapshot()),
+            latest_right: RefCell::new(b.snapshot()),
             watcher,
         });
 
