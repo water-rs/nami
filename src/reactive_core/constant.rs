@@ -20,7 +20,7 @@
 //! let total = price.zip(&tax_rate)
 //!     .map(|(price, rate)| price * (1.0 + rate));
 //!
-//! assert_eq!(total.get(), 108.0);
+//! assert_eq!(total.snapshot(), 108.0);
 //! ```
 
 use core::cell::RefCell;
@@ -43,7 +43,7 @@ use crate::{Signal, watcher::Context};
 /// use nami::{Signal, constant};
 ///
 /// let c = constant(42);
-/// assert_eq!(c.get(), 42);
+/// assert_eq!(c.snapshot(), 42);
 /// ```
 #[derive(Debug, Clone)]
 pub struct Constant<T>(T);
@@ -74,7 +74,7 @@ impl<T: Clone + 'static> Signal for Constant<T> {
     /// # Returns
     ///
     /// A clone of the constant value.
-    fn get(&self) -> Self::Output {
+    fn snapshot(&self) -> Self::Output {
         self.0.clone()
     }
 
@@ -112,7 +112,7 @@ impl<T: Clone + 'static> Signal for Constant<T> {
 /// use nami::{Signal, constant};
 ///
 /// let c = constant("Hello, world!");
-/// assert_eq!(c.get(), "Hello, world!");
+/// assert_eq!(c.snapshot(), "Hello, world!");
 /// ```
 pub fn constant<T>(value: T) -> Constant<T> {
     Constant::from(value)
@@ -148,7 +148,7 @@ where
 {
     type Output = T;
     type Guard = ();
-    fn get(&self) -> Self::Output {
+    fn snapshot(&self) -> Self::Output {
         let mut this = self.value.borrow_mut();
         this.get_or_insert_with(|| (self.f)()).clone()
     }

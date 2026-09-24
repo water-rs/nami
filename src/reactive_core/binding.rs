@@ -97,19 +97,19 @@ impl<T: Default + Clone + 'static> Default for Binding<T> {
 /// # Examples
 ///
 /// ```
-/// use nami::{binding, Binding};
+/// use nami::{binding, Binding, Signal};
 ///
 /// // Automatic conversion from &str to String
 /// let text: Binding<String> = binding("hello");
-/// assert_eq!(text.get(), "hello");
+/// assert_eq!(text.snapshot(), "hello");
 ///
 /// // Direct initialization with owned types
 /// let numbers: Binding<Vec<i32>> = binding(vec![1, 2, 3]);
-/// assert_eq!(numbers.get(), vec![1, 2, 3]);
+/// assert_eq!(numbers.snapshot(), vec![1, 2, 3]);
 ///
 /// // Works with any type implementing Into
 /// let count: Binding<i64> = binding(42i32); // i32 -> i64
-/// assert_eq!(count.get(), 42i64);
+/// assert_eq!(count.snapshot(), 42i64);
 /// ```
 ///
 /// This is equivalent to `Binding::container(value.into())`.
@@ -135,7 +135,7 @@ impl<'a, T> BindingMutGuard<'a, T> {
     /// Creates a new guard for the given binding.
     pub fn new(binding: &'a Binding<T>) -> Self {
         Self {
-            value: ManuallyDrop::new(binding.get()),
+            value: ManuallyDrop::new(binding.snapshot()),
             binding,
             dirty: false,
         }
@@ -175,12 +175,6 @@ impl<T: 'static> Binding<T> {
         Self(Box::new(custom))
     }
 
-    /// Gets the current value of the binding.
-    #[must_use]
-    pub fn get(&self) -> T {
-        self.0.compute()
-    }
-
     /// Gets mutable access to the binding's value through a guard.
     ///
     /// When the guard is dropped, the binding is updated with the modified value.
@@ -210,11 +204,11 @@ impl<T: 'static> Binding<T> {
     ///
     /// # Example
     /// ```
-    /// use nami::{binding, Binding};
+    /// use nami::{binding, Binding, Signal};
     /// let mut text: Binding<String> = binding("hello");
     /// let taken = text.take();
     /// assert_eq!(taken, "hello");
-    /// assert_eq!(text.get(), String::new());
+    /// assert_eq!(text.snapshot(), String::new());
     /// ```
     #[must_use]
     pub fn take(&self) -> T
@@ -232,17 +226,17 @@ impl<T: 'static> Binding<T> {
     /// # Examples
     ///
     /// ```
-    /// use nami::{binding, Binding};
+    /// use nami::{binding, Binding, Signal};
     ///
     /// let mut text: Binding<String> = binding("initial");
     ///
     /// // Direct &str usage - no .into() or .to_string() needed
     /// text.set_from("updated");
-    /// assert_eq!(text.get(), "updated");
+    /// assert_eq!(text.snapshot(), "updated");
     ///
     /// let mut count: Binding<i64> = binding(0);
     /// count.set(42);
-    /// assert_eq!(count.get(), 42i64);
+    /// assert_eq!(count.snapshot(), 42i64);
     /// ```
     pub fn set_from(&self, value: impl Into<T>) {
         self.0.set(value.into());
@@ -330,9 +324,10 @@ impl<T: 'static> Binding<T> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let number = nami::binding(5i32);
     /// let is_positive = number.condition(|&n: &i32| n > 0);
-    /// assert_eq!(is_positive.get(), true);
+    /// assert_eq!(is_positive.snapshot(), true);
     /// ```
     pub fn condition(&self, condition: impl 'static + Clone + Fn(&T) -> bool) -> Binding<bool>
     where
@@ -347,9 +342,10 @@ impl<T: 'static> Binding<T> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let text = nami::binding("hello".to_string());
     /// let is_hello = text.equal_to("hello".to_string());
-    /// assert_eq!(is_hello.get(), true);
+    /// assert_eq!(is_hello.snapshot(), true);
     /// ```
     pub fn equal_to(&self, other: T) -> Binding<bool>
     where
@@ -382,30 +378,30 @@ impl<T: 'static> BindingMailbox<T> {
             .expect("BindingMailbox::handle failed to enqueue job");
     }
 
-    /// Gets the current value of the binding asynchronously via the mailbox.
+    /// Takes a snapshot of the binding's current value asynchronously via the mailbox.
     ///
     /// # Panics
     ///
     /// Panics when the value request cannot be sent to the mailbox worker
     /// or when the response channel is unexpectedly closed.
-    pub async fn get(&self) -> T
+    pub async fn snapshot(&self) -> T
     where
         T: Clone + Send,
     {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
             sender
-                .try_send(binding.get())
-                .expect("BindingMailbox::get failed to send response");
+                .try_send(binding.snapshot())
+                .expect("BindingMailbox::snapshot failed to send response");
         });
 
         match receiver.recv().await {
             Ok(value) => value,
-            Err(error) => panic!("BindingMailbox::get response channel closed: {error}"),
+            Err(error) => panic!("BindingMailbox::snapshot response channel closed: {error}"),
         }
     }
 
-    /// Gets the current value of the binding asynchronously and converts it to type `T2`.
+    /// Takes a snapshot of the binding's current value asynchronously and converts it to type `T2`.
     ///
     /// This method retrieves the binding's value via the mailbox and automatically
     /// converts it to the target type using the `From` trait. This is particularly
@@ -424,7 +420,7 @@ impl<T: 'static> BindingMailbox<T> {
     /// use waterui_str::Str;
     /// let text_binding:Binding<Str> = nami::binding("hello world");
     /// let mailbox = text_binding.mailbox();
-    /// let owned_string: String = mailbox.get_as().await;
+    /// let owned_string: String = mailbox.snapshot_as().await;
     /// assert_eq!(owned_string, "hello world");
     /// ```
     ///
@@ -432,20 +428,20 @@ impl<T: 'static> BindingMailbox<T> {
     ///
     /// Panics when the value request cannot be sent to the mailbox worker
     /// or when the response channel is unexpectedly closed.
-    pub async fn get_as<T2>(&self) -> T2
+    pub async fn snapshot_as<T2>(&self) -> T2
     where
         T2: Send + 'static + From<T>,
     {
         let (sender, receiver) = unbounded();
         self.handle(move |binding| {
             sender
-                .try_send(binding.get().into())
-                .expect("BindingMailbox::get_as failed to send response");
+                .try_send(binding.snapshot().into())
+                .expect("BindingMailbox::snapshot_as failed to send response");
         });
 
         match receiver.recv().await {
             Ok(value) => value,
-            Err(error) => panic!("BindingMailbox::get_as response channel closed: {error}"),
+            Err(error) => panic!("BindingMailbox::snapshot_as response channel closed: {error}"),
         }
     }
 
@@ -558,10 +554,10 @@ impl<T: Signed> Binding<T> {
     ///
     /// # Example
     /// ```
-    /// use nami::Binding;
+    /// use nami::{Binding, Signal};
     /// let number = Binding::i32(-10i32);
     /// let sign = number.sign();
-    /// assert_eq!(sign.get(), false);
+    /// assert_eq!(sign.snapshot(), false);
     /// ```
     #[must_use]
     pub fn sign(&self) -> Binding<bool> {
@@ -569,12 +565,8 @@ impl<T: Signed> Binding<T> {
             self,
             move |value| !value.is_negative(),
             move |binding, value| {
-                let current = binding.get();
-                if value {
-                    binding.set(current.abs());
-                } else {
-                    binding.set(-current.abs());
-                }
+                let mut guard = binding.get_mut();
+                *guard = if value { guard.abs() } else { -guard.abs() };
             },
         )
     }
@@ -598,8 +590,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let counter = nami::Binding::u32(42);
-    /// assert_eq!(counter.get(), 42);
+    /// assert_eq!(counter.snapshot(), 42);
     /// ```
     u32
 );
@@ -609,8 +602,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let counter = nami::Binding::u64(42);
-    /// assert_eq!(counter.get(), 42);
+    /// assert_eq!(counter.snapshot(), 42);
     /// ```
     u64
 );
@@ -620,8 +614,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let index = nami::Binding::usize(10);
-    /// assert_eq!(index.get(), 10);
+    /// assert_eq!(index.snapshot(), 10);
     /// ```
     ///
     usize
@@ -632,8 +627,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let counter = nami::Binding::i32(42);
-    /// assert_eq!(counter.get(), 42);
+    /// assert_eq!(counter.snapshot(), 42);
     /// ```
     i32
 );
@@ -643,8 +639,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let counter = nami::Binding::i64(42);
-    /// assert_eq!(counter.get(), 42);
+    /// assert_eq!(counter.snapshot(), 42);
     /// ```
     i64
 );
@@ -654,8 +651,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let index = nami::Binding::isize(10);
-    /// assert_eq!(index.get(), 10);
+    /// assert_eq!(index.snapshot(), 10);
     /// ```
     ///
     isize
@@ -666,8 +664,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let ratio = nami::Binding::f32(3.14);
-    /// assert_eq!(ratio.get(), 3.14);
+    /// assert_eq!(ratio.snapshot(), 3.14);
     /// ```
     f32
 );
@@ -677,8 +676,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let ratio = nami::Binding::f64(3.14);
-    /// assert_eq!(ratio.get(), 3.14);
+    /// assert_eq!(ratio.snapshot(), 3.14);
     /// ```
     f64
 );
@@ -687,8 +687,9 @@ impl_binding!(
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let flag = nami::Binding::bool(true);
-    /// assert_eq!(flag.get(), true);
+    /// assert_eq!(flag.snapshot(), true);
     /// ```
     bool
 );
@@ -699,9 +700,10 @@ impl<T: Clone> Binding<T> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let mut text: nami::Binding<String> = nami::binding(String::from("Hello"));
     /// text.append(" World");
-    /// assert_eq!(text.get(), "Hello World");
+    /// assert_eq!(text.snapshot(), "Hello World");
     /// ```
     pub fn append<Ele>(&self, ele: Ele)
     where
@@ -744,9 +746,10 @@ impl<T> Binding<Option<T>> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let maybe_text = nami::binding(None::<String>);
     /// let text = maybe_text.unwrap_or_else(|| "default".to_string());
-    /// assert_eq!(text.get(), "default");
+    /// assert_eq!(text.snapshot(), "default");
     /// ```
     pub fn unwrap_or_else(&self, default: impl 'static + Clone + Fn() -> T) -> Binding<T>
     where
@@ -767,9 +770,10 @@ impl<T> Binding<Option<T>> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let maybe_number = nami::binding(None::<i32>);
     /// let number = maybe_number.unwrap_or(42);
-    /// assert_eq!(number.get(), 42);
+    /// assert_eq!(number.snapshot(), 42);
     /// ```
     pub fn unwrap_or(&self, default: T) -> Binding<T>
     where
@@ -784,9 +788,10 @@ impl<T> Binding<Option<T>> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let maybe_vec = nami::binding(None::<Vec<i32>>);
     /// let vec: nami::Binding<Vec<i32>> = maybe_vec.unwrap_or_default();
-    /// assert!(vec.get().is_empty());
+    /// assert!(vec.snapshot().is_empty());
     /// ```
     pub fn unwrap_or_default(&self) -> Binding<T>
     where
@@ -804,9 +809,10 @@ impl<T> Binding<Option<T>> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let maybe_text = nami::binding(Some("hello".to_string()));
     /// let is_hello = maybe_text.some_equal_to("hello".to_string());
-    /// assert_eq!(is_hello.get(), true);
+    /// assert_eq!(is_hello.snapshot(), true);
     /// ```
     pub fn some_equal_to(&self, equal: T) -> Binding<bool>
     where
@@ -834,9 +840,10 @@ impl Binding<bool> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let mut flag = nami::binding(false);
     /// flag.toggle();
-    /// assert_eq!(flag.get(), true);
+    /// assert_eq!(flag.snapshot(), true);
     /// ```
     pub fn toggle(&self) {
         self.with_mut(|v| {
@@ -851,9 +858,10 @@ impl Binding<bool> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let is_logged_in = nami::binding(true);
     /// let username = is_logged_in.then("alice".to_string());
-    /// assert_eq!(username.get(), Some("alice".to_string()));
+    /// assert_eq!(username.snapshot(), Some("alice".to_string()));
     /// ```
     pub fn then<T>(&self, if_true: T) -> Binding<Option<T>>
     where
@@ -876,9 +884,10 @@ impl Binding<bool> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let enabled = nami::binding(false);
     /// let button_text = enabled.then_some("Click me!".to_string());
-    /// assert_eq!(button_text.get(), None);
+    /// assert_eq!(button_text.snapshot(), None);
     /// ```
     pub fn then_some<T>(&self, if_true: T) -> Binding<Option<T>>
     where
@@ -906,9 +915,10 @@ impl Binding<bool> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let dark_mode = nami::binding(false);
     /// let theme = dark_mode.bidirectional_select("dark".to_string(), "light".to_string());
-    /// assert_eq!(theme.get(), "light");
+    /// assert_eq!(theme.snapshot(), "light");
     /// ```
     pub fn bidirectional_select<T>(&self, if_true: T, if_false: T) -> Binding<T>
     where
@@ -936,9 +946,10 @@ impl Binding<bool> {
     ///
     /// # Example
     /// ```
+    /// use nami::Signal;
     /// let enabled = nami::binding(true);
     /// let disabled = enabled.reverse();
-    /// assert_eq!(disabled.get(), false);
+    /// assert_eq!(disabled.snapshot(), false);
     /// ```
     #[must_use]
     pub fn reverse(&self) -> Self {
@@ -1042,7 +1053,7 @@ impl<T: 'static + Clone> Signal for Container<T> {
     type Guard = BoxWatcherGuard;
 
     /// Retrieves the current value.
-    fn get(&self) -> Self::Output {
+    fn snapshot(&self) -> Self::Output {
         self.value.borrow().deref().clone()
     }
 
@@ -1073,8 +1084,8 @@ impl<T: 'static> Signal for Binding<T> {
     type Guard = BoxWatcherGuard;
 
     /// Computes the current value of the binding.
-    fn get(&self) -> Self::Output {
-        self.get()
+    fn snapshot(&self) -> Self::Output {
+        self.0.compute()
     }
 
     fn identity(&self) -> Option<SignalIdentity> {
@@ -1126,8 +1137,8 @@ where
     type Guard = <Binding<Input> as Signal>::Guard;
 
     /// Computes the output value by applying the getter to the input value.
-    fn get(&self) -> Self::Output {
-        (self.getter)(self.binding.get())
+    fn snapshot(&self) -> Self::Output {
+        (self.getter)(self.binding.snapshot())
     }
 
     fn identity(&self) -> Option<SignalIdentity> {
@@ -1179,32 +1190,32 @@ mod tests {
     fn test_binding_into_conversion() {
         // Test &str -> String conversion
         let text: Binding<String> = binding("hello");
-        assert_eq!(text.get(), "hello");
+        assert_eq!(text.snapshot(), "hello");
 
         // Test direct initialization
         let number: Binding<i32> = binding(42);
-        assert_eq!(number.get(), 42);
+        assert_eq!(number.snapshot(), 42);
 
         // Test Vec initialization
         let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);
-        assert_eq!(items.get(), vec![1, 2, 3]);
+        assert_eq!(items.snapshot(), vec![1, 2, 3]);
 
         // Test i32 -> i64 conversion
         let count: Binding<i64> = binding(100i32);
-        assert_eq!(count.get(), 100i64);
+        assert_eq!(count.snapshot(), 100i64);
     }
 
     #[test]
     fn test_binding_operations() {
         let text: Binding<String> = binding("initial");
         text.set_from("updated"); // Now works directly with &str!
-        assert_eq!(text.get(), "updated");
+        assert_eq!(text.snapshot(), "updated");
 
         let counter: Binding<i32> = binding(0);
         counter.add_assign(5);
-        assert_eq!(counter.get(), 5);
+        assert_eq!(counter.snapshot(), 5);
         counter.sub_assign(2);
-        assert_eq!(counter.get(), 3);
+        assert_eq!(counter.snapshot(), 3);
     }
 
     #[test]
@@ -1214,22 +1225,22 @@ mod tests {
 
         // &str -> String
         text.set_from("hello");
-        assert_eq!(text.get(), "hello");
+        assert_eq!(text.snapshot(), "hello");
 
         // String -> String (owned)
         text.set(String::from("world"));
-        assert_eq!(text.get(), "world");
+        assert_eq!(text.snapshot(), "world");
 
         // Cross-type conversions
         let number: Binding<i64> = binding(0i64);
         number.set(42); // i32 -> i64
-        assert_eq!(number.get(), 42i64);
+        assert_eq!(number.snapshot(), 42i64);
         number.set(100); // Direct i64
-        assert_eq!(number.get(), 100i64);
+        assert_eq!(number.snapshot(), 100i64);
     }
 
     #[test]
-    fn test_with_mut_allows_nested_get() {
+    fn test_with_mut_allows_nested_snapshot() {
         use alloc::rc::Rc;
         use core::cell::RefCell;
 
@@ -1241,13 +1252,13 @@ mod tests {
         let notifications_clone = notifications.clone();
 
         let _guard = watcher_binding.watch(move |_| {
-            let _ = reader_binding.get();
+            let _ = reader_binding.snapshot();
             *notifications_clone.borrow_mut() += 1;
         });
 
         binding.with_mut(|value| *value += 1);
 
-        assert_eq!(binding.get(), 1);
+        assert_eq!(binding.snapshot(), 1);
         assert_eq!(*notifications.borrow(), 1);
     }
 
@@ -1257,27 +1268,30 @@ mod tests {
         let sign = number.sign();
 
         // Test getting the sign
-        assert!(sign.get(), "Positive number should have positive sign");
+        assert!(sign.snapshot(), "Positive number should have positive sign");
         number.set(-10);
-        assert!(!sign.get(), "Negative number should have negative sign");
+        assert!(
+            !sign.snapshot(),
+            "Negative number should have negative sign"
+        );
         number.set(0);
-        assert!(sign.get(), "Zero should have positive sign");
+        assert!(sign.snapshot(), "Zero should have positive sign");
 
         // Test setting the sign
         number.set(20);
-        assert_eq!(number.get(), 20);
+        assert_eq!(number.snapshot(), 20);
         sign.set(false); // Set to negative
         assert_eq!(
-            number.get(),
+            number.snapshot(),
             -20,
             "Setting sign to false should make number negative"
         );
 
         number.set(-30);
-        assert_eq!(number.get(), -30);
+        assert_eq!(number.snapshot(), -30);
         sign.set(true); // Set to positive
         assert_eq!(
-            number.get(),
+            number.snapshot(),
             30,
             "Setting sign to true should make number positive"
         );
@@ -1285,9 +1299,9 @@ mod tests {
         // Test reactivity
         let is_positive = number.sign();
         number.set(-5);
-        assert!(!is_positive.get());
+        assert!(!is_positive.snapshot());
         number.set(5);
-        assert!(is_positive.get());
+        assert!(is_positive.snapshot());
     }
 
     #[test]
@@ -1297,21 +1311,21 @@ mod tests {
 
         clamped.set(-42);
         assert_eq!(
-            source.get(),
+            source.snapshot(),
             0,
             "values below range should clamp to lower bound"
         );
 
         clamped.set(42);
         assert_eq!(
-            source.get(),
+            source.snapshot(),
             10,
             "values above range should clamp to upper bound"
         );
 
         clamped.set(7);
         assert_eq!(
-            source.get(),
+            source.snapshot(),
             7,
             "in-range values should pass through unchanged"
         );

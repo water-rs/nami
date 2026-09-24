@@ -62,8 +62,8 @@ where
     type Output = Option<T>;
     type Guard = <Container<Option<T>> as Signal>::Guard;
     /// Returns `Some(value)` after the future resolves, else `None`.
-    fn get(&self) -> Self::Output {
-        self.container.get()
+    fn snapshot(&self) -> Self::Output {
+        self.container.snapshot()
     }
     /// Watches for completion and subsequent updates (if any).
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {

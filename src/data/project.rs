@@ -17,7 +17,7 @@ use crate::Binding;
 ///
 /// ## Tuple projection
 /// ```rust
-/// use nami::{Binding, binding};
+/// use nami::{Binding, binding, Signal};
 /// use nami::project::Project;
 ///
 /// // Create a binding to a tuple
@@ -28,12 +28,12 @@ use crate::Binding;
 ///
 /// // Changes to individual projections update the original
 /// num_binding.set(100);
-/// assert_eq!(tuple_binding.get().0, 100);
+/// assert_eq!(tuple_binding.snapshot().0, 100);
 /// ```
 ///
 /// ## Struct projection with derive macro
 /// ```rust
-/// use nami::{Binding, binding};
+/// use nami::{Binding, binding, Signal};
 ///
 /// #[cfg(feature = "derive")]
 /// # {
@@ -52,7 +52,7 @@ use crate::Binding;
 /// projected.name.set_from("Bob");
 /// projected.age.set(25);
 ///
-/// let person = person_binding.get();
+/// let person = person_binding.snapshot();
 /// assert_eq!(person.name, "Bob");
 /// assert_eq!(person.age, 25);
 /// # }
@@ -244,7 +244,7 @@ impl<T: Project> Binding<T> {
     /// # Examples
     ///
     /// ```rust
-    /// use nami::{Binding, binding};
+    /// use nami::{Binding, binding, Signal};
     ///
     /// let tuple_binding: Binding<(i32, i32, i32)> = binding((1, 2, 3));
     /// let (mut a, mut b, c) = tuple_binding.project();
@@ -254,7 +254,7 @@ impl<T: Project> Binding<T> {
     /// b.set(20);
     ///
     /// // Original binding reflects changes
-    /// assert_eq!(tuple_binding.get(), (10, 20, 3));
+    /// assert_eq!(tuple_binding.snapshot(), (10, 20, 3));
     /// ```
     #[must_use]
     pub fn project(&self) -> T::Projected {

@@ -112,8 +112,8 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
     type Guard = C::Guard;
 
     /// Execute the underlying computation.
-    fn get(&self) -> Self::Output {
-        self.signal.get()
+    fn snapshot(&self) -> Self::Output {
+        self.signal.snapshot()
     }
 
     fn identity(&self) -> Option<SignalIdentity> {
