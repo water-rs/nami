@@ -41,8 +41,8 @@ where
     type Output = S::Output;
     type Guard = S::Guard;
 
-    fn get(&self) -> Self::Output {
-        self.signal.get()
+    fn snapshot(&self) -> Self::Output {
+        self.signal.snapshot()
     }
 
     fn identity(&self) -> Option<SignalIdentity> {

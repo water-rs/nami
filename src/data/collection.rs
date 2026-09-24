@@ -346,11 +346,11 @@ where
     type Guard = S::Guard;
 
     fn get(&self, index: usize) -> Option<Self::Item> {
-        self.signal.get().as_slice().get(index).cloned()
+        self.signal.snapshot().as_slice().get(index).cloned()
     }
 
     fn len(&self) -> usize {
-        self.signal.get().len()
+        self.signal.snapshot().len()
     }
 
     fn watch(
@@ -380,7 +380,7 @@ where
         let initial = pending
             .borrow_mut()
             .take()
-            .unwrap_or_else(|| Context::from(self.signal.get()));
+            .unwrap_or_else(|| Context::from(self.signal.snapshot()));
         subscribed.set(true);
         notify_signal_collection(watcher.as_ref(), initial, start_bound, end_bound);
 
