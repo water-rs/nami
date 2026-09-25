@@ -269,6 +269,53 @@ mod impl_constant {
     }
 }
 
+/// Constant signals for kurbo's geometry types.
+///
+/// A plain `Affine`, `Rect` or `BezPath` passed where an API takes
+/// `impl Signal<Output = T>` is a signal that never changes.
+#[cfg(feature = "kurbo")]
+mod impl_kurbo_constant {
+    use kurbo::{
+        Affine, Arc, BezPath, Circle, CircleSegment, CubicBez, Ellipse, Insets, Line, PathEl,
+        Point, QuadBez, Rect, RoundedRect, RoundedRectRadii, Size, Stroke, Vec2,
+    };
+
+    impl_constant!(
+        Affine,
+        Arc,
+        BezPath,
+        Circle,
+        CircleSegment,
+        CubicBez,
+        Ellipse,
+        Insets,
+        Line,
+        PathEl,
+        Point,
+        QuadBez,
+        Rect,
+        RoundedRect,
+        RoundedRectRadii,
+        Size,
+        Stroke,
+        Vec2
+    );
+
+    #[cfg(test)]
+    mod tests {
+        use kurbo::Affine;
+
+        use crate::Signal;
+
+        #[test]
+        fn plain_affine_is_a_constant_signal() {
+            let affine = Affine::translate((1.0, 2.0));
+            assert_eq!(affine.snapshot(), affine);
+            affine.watch(|_| unreachable!("a constant never notifies"));
+        }
+    }
+}
+
 impl<T: Signal> Signal for Option<T> {
     type Output = Option<T::Output>;
     type Guard = Option<T::Guard>;
