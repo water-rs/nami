@@ -1,3 +1,97 @@
+/// Which indices a collection notification changed.
+///
+/// A collection notification always carries the new snapshot; the change says
+/// which positions that snapshot touched. `replaced` and `inserted` name index
+/// ranges in the *new* snapshot; `removed` names index ranges in the
+/// *previous* snapshot — those positions no longer exist. Ranges are
+/// half-open (`start..end`) and in collection-wide index space: a watcher
+/// subscribed to a sub-range still receives indices relative to index 0 of
+/// the whole collection and must intersect them with its range itself.
+///
+/// Every producer states what it changed: a notification that touched no
+/// position carries an empty change, and a producer that knows only that the
+/// whole value was swapped reports [`CollectionChange::everything`]. There is
+/// no "unknown" report, so a consumer can trust an empty change to mean that
+/// nothing needs re-materializing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectionChange {
+    /// Index ranges (new snapshot) whose items were replaced in place: the
+    /// item occupying each of these positions may have different content than
+    /// the previous occupant of the same index.
+    pub replaced: Vec<Range<usize>>,
+    /// Index ranges (new snapshot) holding items that did not exist before.
+    pub inserted: Vec<Range<usize>>,
+    /// Index ranges (previous snapshot) whose items no longer exist.
+    pub removed: Vec<Range<usize>>,
+}
+
+impl CollectionChange {
+    /// A notification that touched no position.
+    #[must_use]
+    pub const fn unchanged() -> Self {
+        Self {
+            replaced: Vec::new(),
+            inserted: Vec::new(),
+            removed: Vec::new(),
+        }
+    }
+
+    /// `range` (new-snapshot indices) was replaced in place.
+    #[must_use]
+    pub fn replaced(range: Range<usize>) -> Self {
+        Self {
+            replaced: alloc::vec![range],
+            ..Self::unchanged()
+        }
+    }
+
+    /// `range` (new-snapshot indices) was inserted.
+    #[must_use]
+    pub fn inserted(range: Range<usize>) -> Self {
+        Self {
+            inserted: alloc::vec![range],
+            ..Self::unchanged()
+        }
+    }
+
+    /// `range` (previous-snapshot indices) was removed.
+    #[must_use]
+    pub fn removed(range: Range<usize>) -> Self {
+        Self {
+            removed: alloc::vec![range],
+            ..Self::unchanged()
+        }
+    }
+
+    /// Every position of a `len`-long snapshot may hold different content —
+    /// the report for a whole-value replacement where nothing finer is known.
+    #[must_use]
+    pub fn everything(len: usize) -> Self {
+        Self::replaced(0..len)
+    }
+
+    /// The first emission to a fresh watcher: `len` items appear from nothing
+    /// starting at `start` — the watched range's insertion.
+    #[must_use]
+    pub fn populated(start: usize, len: usize) -> Self {
+        Self::inserted(start..start + len)
+    }
+
+    /// True when the notification touched no position.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.replaced.is_empty() && self.inserted.is_empty() && self.removed.is_empty()
+    }
+
+    /// Whether new-snapshot index `index` was replaced in place.
+    #[must_use]
+    pub fn is_replaced(&self, index: usize) -> bool {
+        self.replaced
+            .iter()
+            .any(|range| range.start <= index && index < range.end)
+    }
+}
+
 /// A trait for collections that can be observed for changes.
 ///
 /// This trait provides a common interface for collections that support
@@ -25,15 +119,20 @@ pub trait Collection: 'static {
 
     /// Registers a watcher for changes in the specified range of the collection.
     ///
+    /// The watcher receives the new snapshot slice plus a [`CollectionChange`]
+    /// naming which indices the notification touched — the source of truth for
+    /// which items a consumer must re-materialize. The first call reports the
+    /// current contents as inserted.
+    ///
     /// Returns a guard that will unregister the watcher when dropped.
     fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static, // watcher will receive a slice of items, its range is decided by the range parameter
+        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static, // watcher will receive a slice of items, its range is decided by the range parameter
     ) -> Self::Guard;
 }
 
-use core::ops::{Bound, RangeBounds};
+use core::ops::{Bound, Range, RangeBounds};
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 
@@ -52,7 +151,7 @@ impl<T: Clone + 'static> Collection for Vec<T> {
     fn watch(
         &self,
         _range: impl RangeBounds<usize>,
-        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static,
     ) -> Self::Guard {
         // Vec is static - no reactivity, so watch is a no-op
     }
@@ -71,7 +170,7 @@ impl<T: Clone + 'static> Collection for &'static [T] {
     fn watch(
         &self,
         _range: impl RangeBounds<usize>,
-        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static,
     ) -> Self::Guard {
         // Slices are static - no reactivity, so watch is a no-op
     }
@@ -90,7 +189,7 @@ impl<T: Clone + 'static, const N: usize> Collection for [T; N] {
     fn watch(
         &self,
         _range: impl RangeBounds<usize>,
-        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static,
     ) -> Self::Guard {
     }
 }
@@ -108,7 +207,7 @@ impl<T: Clone + 'static> Collection for alloc::rc::Rc<[T]> {
     fn watch(
         &self,
         _range: impl RangeBounds<usize>,
-        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+        _watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static,
     ) -> Self::Guard {
     }
 }
@@ -129,7 +228,7 @@ where
     fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static,
     ) -> Self::Guard {
         (**self).watch(range, watcher)
     }
@@ -151,7 +250,7 @@ where
     fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>) + 'static,
+        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static,
     ) -> Self::Guard {
         (**self).watch(range, watcher)
     }
@@ -173,7 +272,8 @@ impl<T> core::fmt::Debug for AnyCollection<T> {
 }
 
 /// A boxed collection watcher.
-pub type BoxCollectionWatcher<T> = Box<dyn for<'a> Fn(Context<&'a [T]>) + 'static>;
+pub type BoxCollectionWatcher<T> =
+    Box<dyn for<'a> Fn(Context<&'a [T]>, CollectionChange) + 'static>;
 
 /// Internal trait for type-erased collection operations.
 trait AnyCollectionImpl {
@@ -208,7 +308,7 @@ where
     fn watch(
         &self,
         range: (Bound<usize>, Bound<usize>),
-        watcher: Box<dyn for<'a> Fn(Context<&'a [Self::Output]>) + 'static>,
+        watcher: Box<dyn for<'a> Fn(Context<&'a [Self::Output]>, CollectionChange) + 'static>,
     ) -> BoxWatcherGuard {
         Box::new(<T as Collection>::watch(self, range, watcher))
     }
@@ -248,12 +348,13 @@ impl<T> AnyCollection<T> {
 
     /// Registers a watcher for changes in the specified range of the collection.
     ///
-    /// The watcher receives a `Vec<Box<dyn Any>>` of items.
+    /// The watcher receives a slice of items plus the [`CollectionChange`] the
+    /// notification touched.
     /// Returns a type-erased guard that will unregister the watcher when dropped.
     pub fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl for<'a> Fn(Context<&'a [T]>) + 'static,
+        watcher: impl for<'a> Fn(Context<&'a [T]>, CollectionChange) + 'static,
     ) -> BoxWatcherGuard {
         let start_bound = match range.start_bound() {
             Bound::Included(&n) => Bound::Included(n),
