@@ -7,11 +7,7 @@ use core::{
 use executor_core::{DefaultExecutor, LocalExecutor, Task};
 use nami_core::watcher::Context;
 
-use crate::{
-    Signal,
-    utils::sleep,
-    watcher::{WatcherManager, WatcherManagerGuard},
-};
+use crate::{Signal, async_signal::UpstreamGuard, utils::sleep, watcher::WatcherManager};
 use nami_core::{SignalIdentity, observe::Origin};
 
 /// A throttle wrapper that limits the rate of signal updates to at most once per duration.
@@ -103,7 +99,7 @@ where
     E: LocalExecutor + Clone + 'static,
 {
     type Output = S::Output;
-    type Guard = WatcherManagerGuard<S::Output>;
+    type Guard = UpstreamGuard<S>;
 
     fn snapshot(&self) -> Self::Output {
         self.signal.snapshot()
@@ -146,6 +142,13 @@ where
             })
         });
 
-        self.watchers.register_as_guard(watcher)
+        // The upstream subscription lives in `self.guard`, a cell shared by
+        // the combinator's clones — `UpstreamGuard` carries a handle on it so
+        // the upstream lives exactly as long as the watch
+        // (water-rs/hydrolysis#228).
+        UpstreamGuard {
+            _watcher: self.watchers.register_as_guard(watcher),
+            _upstream: self.guard.clone(),
+        }
     }
 }

@@ -184,10 +184,16 @@ where
     }
 
     /// Attaches a cleanup function to a guard.
+    ///
+    /// `drop` (not `let _ =`) moves `guard` into the closure: a `move`
+    /// closure whose body only does `let _ = guard` captures nothing,
+    /// because disjoint closure captures (edition 2021) see no use of
+    /// `guard` — it would stay owned by the caller and die when `attach`
+    /// returns.
     #[allow(clippy::needless_pass_by_value)]
     pub fn attach(guard: impl WatcherGuard, f: F) -> impl WatcherGuard {
         OnDrop::new(move || {
-            let _ = guard;
+            drop(guard);
             f();
         })
     }
@@ -467,7 +473,10 @@ impl<T: 'static> WatcherManagerInner<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Context, WatcherManager};
+    use alloc::rc::Rc;
+    use core::cell::Cell;
+
+    use super::{Context, OnDrop, WatcherGuard, WatcherManager};
 
     /// A watcher whose closure owns a `WatcherManagerGuard` on the same
     /// manager re-enters `cancel` from the guard's `Drop` when the watcher is
@@ -482,5 +491,26 @@ mod tests {
         });
         manager.cancel(owner);
         assert!(manager.is_empty());
+    }
+
+    /// A `move` closure that only did `let _ = guard` would capture nothing
+    /// under edition 2021's disjoint captures, so `attach` returned a guard
+    /// whose payload had already died. `attach` must hold `guard` until the
+    /// returned `OnDrop` itself drops (water-rs/hydrolysis#228).
+    #[test]
+    fn attach_holds_the_guard_until_the_result_drops() {
+        struct Probe(Rc<Cell<bool>>);
+        impl WatcherGuard for Probe {}
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let dropped = Rc::new(Cell::new(false));
+        let attached = OnDrop::attach(Probe(Rc::clone(&dropped)), || ());
+        assert!(!dropped.get(), "attach dropped the guard early");
+        drop(attached);
+        assert!(dropped.get());
     }
 }
