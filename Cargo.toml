@@ -39,6 +39,9 @@ license = { file = "LICENSE" }
 [dev-dependencies]
 nami-derive = { workspace = true }
 trybuild = "1"
+# `async_signal`'s timer tests drive spawned runnables through the same
+# channel-drain executor shape the runners use.
+executor-core = { version = "0.7.1", features = ["std", "async-task"] }
 
 [dependencies]
 log = { version = "0.4.33", default-features = true }
