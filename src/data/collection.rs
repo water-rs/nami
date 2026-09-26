@@ -141,10 +141,13 @@ impl<T: 'static> List<T> {
     where
         T: Clone,
     {
-        self.notify_with_metadata(Metadata::new().with(change));
+        self.notify_with_metadata(change, Metadata::new());
     }
 
-    fn notify_with_metadata(&self, metadata: Metadata)
+    /// Notifies with caller `metadata`; the [`CollectionChange`] rides it, and
+    /// taking it as a separate argument makes a notification without one
+    /// impossible to write.
+    fn notify_with_metadata(&self, change: CollectionChange, metadata: Metadata)
     where
         T: Clone,
     {
@@ -152,7 +155,8 @@ impl<T: 'static> List<T> {
             return;
         }
         let snapshot: Rc<[T]> = Rc::from(self.vec.borrow().as_slice());
-        self.watchers.notify(&Context::new(snapshot, metadata));
+        self.watchers
+            .notify(&Context::new(snapshot, metadata.with(change)));
     }
 
     /// Adds an element to the end of the list.
@@ -280,7 +284,7 @@ impl<T: 'static> List<T> {
     {
         let previous = core::mem::replace(&mut *self.vec.borrow_mut(), value);
         let change = Self::replacement_change(previous.len(), self.vec.borrow().len());
-        self.notify_with_metadata(metadata.with(change));
+        self.notify_with_metadata(change, metadata);
         previous
     }
 
@@ -288,7 +292,7 @@ impl<T: 'static> List<T> {
     /// a grown tail inserted, a shrunk tail removed.
     fn replacement_change(old_len: usize, new_len: usize) -> CollectionChange {
         let shared = old_len.min(new_len);
-        let mut change = CollectionChange::none();
+        let mut change = CollectionChange::unchanged();
         if shared != 0 {
             change.replaced.push(0..shared);
         }
@@ -511,14 +515,14 @@ impl<T: Clone + 'static> Collection for List<T> {
         // Subsequent notifications: slice the Rc<[T]> snapshot carried inside
         // the Context.  Cloning an Rc is O(1), so this avoids the previous
         // O(n) re-borrow + range clone per watcher.  The mutation's
-        // `CollectionChange` rides the metadata; a notification without one
-        // reports "everything replaced" — a producer can never under-report.
+        // `CollectionChange` rides the metadata: every `List` notification goes
+        // through `notify_with_metadata`, which always attaches one.
         self.watchers.register_as_guard(move |ctx| {
             let snapshot: Rc<[T]> = ctx.value().clone(); // O(1) ref-count bump
             let metadata = ctx.metadata().clone();
             let change = metadata
                 .try_get::<CollectionChange>()
-                .unwrap_or_else(|| CollectionChange::everything(snapshot.len()));
+                .expect("every List notification carries its CollectionChange");
             let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
             watcher(Context::new(&snapshot[start..end], metadata), change);
         })

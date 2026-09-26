@@ -8,10 +8,12 @@
 /// subscribed to a sub-range still receives indices relative to index 0 of
 /// the whole collection and must intersect them with its range itself.
 ///
-/// An empty `CollectionChange` (no ranges at all) means the producer knows no
-/// positional detail — consumers must treat it as "anything may have
-/// changed" rather than "nothing changed".
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Every producer states what it changed: a notification that touched no
+/// position carries an empty change, and a producer that knows only that the
+/// whole value was swapped reports [`CollectionChange::everything`]. There is
+/// no "unknown" report, so a consumer can trust an empty change to mean that
+/// nothing needs re-materializing.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CollectionChange {
     /// Index ranges (new snapshot) whose items were replaced in place: the
     /// item occupying each of these positions may have different content than
@@ -24,9 +26,9 @@ pub struct CollectionChange {
 }
 
 impl CollectionChange {
-    /// A change with no recorded positional detail.
+    /// A notification that touched no position.
     #[must_use]
-    pub const fn none() -> Self {
+    pub const fn unchanged() -> Self {
         Self {
             replaced: Vec::new(),
             inserted: Vec::new(),
@@ -39,7 +41,7 @@ impl CollectionChange {
     pub fn replaced(range: Range<usize>) -> Self {
         Self {
             replaced: alloc::vec![range],
-            ..Self::none()
+            ..Self::unchanged()
         }
     }
 
@@ -48,7 +50,7 @@ impl CollectionChange {
     pub fn inserted(range: Range<usize>) -> Self {
         Self {
             inserted: alloc::vec![range],
-            ..Self::none()
+            ..Self::unchanged()
         }
     }
 
@@ -57,7 +59,7 @@ impl CollectionChange {
     pub fn removed(range: Range<usize>) -> Self {
         Self {
             removed: alloc::vec![range],
-            ..Self::none()
+            ..Self::unchanged()
         }
     }
 
@@ -75,8 +77,7 @@ impl CollectionChange {
         Self::inserted(start..start + len)
     }
 
-    /// True when no positional change was recorded. Consumers must treat this
-    /// as "anything may have changed", not "nothing changed".
+    /// True when the notification touched no position.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.replaced.is_empty() && self.inserted.is_empty() && self.removed.is_empty()
