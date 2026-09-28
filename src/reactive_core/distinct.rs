@@ -30,7 +30,7 @@ where
     S::Output: PartialEq,
 {
     /// Creates a new distinct signal from the given signal.
-    pub fn new(signal: S) -> Self {
+    pub const fn new(signal: S) -> Self {
         Self { signal }
     }
 }
