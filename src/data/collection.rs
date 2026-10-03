@@ -317,7 +317,6 @@ impl<T: 'static> List<T> {
     /// Returns an iterator over the list's items.
     ///
     /// Warning: This will clone the entire list, ensuring that modifications during iteration do not affect the iterator.
-    #[must_use]
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter
     where
         T: Clone,
@@ -993,12 +992,12 @@ mod tests {
         let change = changes.borrow()[1].clone();
         assert_eq!(change.replaced, vec![0..3]);
         assert_eq!(change.inserted, vec![3..5]);
-        assert!(change.removed.is_empty());
+        assert_eq!(change.removed, [] as [core::ops::Range<usize>; 0]);
 
         let _ = list.replace(vec![1]);
         let change = changes.borrow()[2].clone();
         assert_eq!(change.replaced, vec![0..1]);
-        assert!(change.inserted.is_empty());
+        assert_eq!(change.inserted, [] as [core::ops::Range<usize>; 0]);
         assert_eq!(change.removed, vec![1..5]);
     }
 

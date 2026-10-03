@@ -188,7 +188,7 @@ fn nothing_is_reported_without_an_installed_observer() {
         let _guard = value.watch(|_| {});
         value.set(1);
     }
-    assert!(recorder.events().is_empty());
+    assert_eq!(recorder.events(), [] as [Event; 0]);
 }
 
 /// A signal parked in a thread-local outlives the observability thread-locals:
