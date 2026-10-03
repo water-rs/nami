@@ -1,0 +1,22 @@
+error[E0277]: `&Binding<f32>` cannot be converted into `Computed<f32>`
+ --> tests/ui/on_unimplemented/into_computed.rs:8:11
+  |
+8 |     takes(&value);
+  |     ----- ^^^^^^ expected a `f32` value, `Binding<f32>`, `Computed<f32>`, or `Signal<Output = f32>`
+  |     |
+  |     required by a bound introduced by this call
+  |
+  = help: the trait `Signal` is not implemented for `&Binding<f32>`
+  = note: a plain `f32` value, `Binding<f32>`, `Computed<f32>`, or any `Signal<Output = f32>` satisfies this bound; if you hold a `&Binding<f32>`, pass `binding.clone()` instead
+  = note: required for `&Binding<f32>` to implement `IntoSignal<f32>`
+  = note: required for `&Binding<f32>` to implement `IntoComputed<f32>`
+note: required by a bound in `takes`
+ --> tests/ui/on_unimplemented/into_computed.rs:4:13
+  |
+4 | fn takes<T: IntoComputed<f32>>(_: T) {}
+  |             ^^^^^^^^^^^^^^^^^ required by this bound in `takes`
+help: consider removing the leading `&`-reference
+  |
+8 -     takes(&value);
+8 +     takes(value);
+  |

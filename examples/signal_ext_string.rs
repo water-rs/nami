@@ -8,44 +8,44 @@ fn main() {
     let is_empty = username.str_is_empty();
     let is_valid = username.str_is_empty().not();
 
-    println!("Username empty: {}", is_empty.get()); // true
-    println!("Username valid: {}", is_valid.get()); // false
+    println!("Username empty: {}", is_empty.snapshot()); // true
+    println!("Username valid: {}", is_valid.snapshot()); // false
 
     username.set("alice".to_string());
-    println!("Username empty: {}", is_empty.get()); // false
-    println!("Username valid: {}", is_valid.get()); // true
+    println!("Username empty: {}", is_empty.snapshot()); // false
+    println!("Username valid: {}", is_valid.snapshot()); // true
 
     // str_len: Get string length
     let message: Binding<String> = binding("Hello, World!".to_string());
     let char_count = message.str_len();
 
-    println!("Message length: {}", char_count.get()); // 13
+    println!("Message length: {}", char_count.snapshot()); // 13
 
     message.set("Hi".to_string());
-    println!("Message length: {}", char_count.get()); // 2
+    println!("Message length: {}", char_count.snapshot()); // 2
 
     // contains: Check if string contains a pattern
     let search_query: Binding<String> = binding("rust programming language".to_string());
     let has_rust = search_query.str_contains("rust");
     let has_python = search_query.str_contains("python");
 
-    println!("Contains 'rust': {}", has_rust.get()); // true
-    println!("Contains 'python': {}", has_python.get()); // false
+    println!("Contains 'rust': {}", has_rust.snapshot()); // true
+    println!("Contains 'python': {}", has_python.snapshot()); // false
 
     search_query.set("python scripting".to_string());
-    println!("Contains 'rust': {}", has_rust.get()); // false
-    println!("Contains 'python': {}", has_python.get()); // true
+    println!("Contains 'rust': {}", has_rust.snapshot()); // false
+    println!("Contains 'python': {}", has_python.snapshot()); // true
 
     // Works with &str too
     let status: Binding<&str> = binding("loading...");
     let is_loading = status.str_contains("loading");
     let is_done = status.str_is_empty().not();
 
-    println!("Is loading: {}", is_loading.get()); // true
-    println!("Has status: {}", is_done.get()); // true
+    println!("Is loading: {}", is_loading.snapshot()); // true
+    println!("Has status: {}", is_done.snapshot()); // true
 
     status.set("complete");
-    println!("Is loading: {}", is_loading.get()); // false
+    println!("Is loading: {}", is_loading.snapshot()); // false
 
     // Combining string methods with other SignalExt methods
     let input: Binding<String> = binding(String::new());
@@ -55,11 +55,11 @@ fn main() {
     let is_long_enough = input.str_len().ge(3);
     let is_valid_input = is_not_empty.zip(&is_long_enough).map(|(a, b)| a && b);
 
-    println!("Valid input: {}", is_valid_input.get()); // false (empty)
+    println!("Valid input: {}", is_valid_input.snapshot()); // false (empty)
 
     input.set("ab".to_string());
-    println!("Valid input: {}", is_valid_input.get()); // false (too short)
+    println!("Valid input: {}", is_valid_input.snapshot()); // false (too short)
 
     input.set("abc".to_string());
-    println!("Valid input: {}", is_valid_input.get()); // true
+    println!("Valid input: {}", is_valid_input.snapshot()); // true
 }

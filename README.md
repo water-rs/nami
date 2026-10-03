@@ -24,13 +24,13 @@ let mut message: Binding<String> = binding("hello");  // &str -> String conversi
 // Derive a new computation from it
 let doubled = nami::map::map(counter.clone(), |n: i32| n * 2);
 
-// Read current values
-assert_eq!(counter.get(), 0);
-assert_eq!(doubled.get(), 0);
+// Take a snapshot: an untracked, one-off read of the current value
+assert_eq!(counter.snapshot(), 0);
+assert_eq!(doubled.snapshot(), 0);
 
 // Update the source and observe derived changes
 counter.set(3);
-assert_eq!(doubled.get(), 6);
+assert_eq!(doubled.snapshot(), 6);
 
 // set_from() also accepts Into<T> for ergonomic updates
 message.set_from("world");  // &str works directly!
@@ -47,12 +47,12 @@ pub trait Signal: Clone + 'static {
     type Output;
     type Guard: WatcherGuard;
 
-    fn get(&self) -> Self::Output;
+    fn snapshot(&self) -> Self::Output;
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard;
 }
 ```
 
-- `get`: compute and return the current value.
+- `snapshot`: compute and return the current value — an untracked, one-off read detached from reactivity. Application code rarely needs it; watchers and derived signals track changes for you.
 - `watch`: subscribe to changes; returns a guard. Drop the guard to unsubscribe.
 
 `Binding`, `Computed`, and all adapters implement `Signal` so you can compose them freely.
@@ -62,7 +62,7 @@ pub trait Signal: Clone + 'static {
 `Binding<T>` is two-way reactive state with ergonomic helpers. Both `binding()` and `set_from()` accept any value implementing `Into<T>`, eliminating the need for manual conversions:
 
 ```rust
-use nami::{binding, Binding};
+use nami::{binding, Binding, Signal};
 
 // Automatic type conversion with Into trait
 let mut text: Binding<String> = binding("hello");           // &str -> String
@@ -74,7 +74,7 @@ let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);  // Vec<i32> binding
 text.set_from("world");                                // Direct &str, no .into() needed
 counter.set(5);
 counter.add_assign(1);
-assert_eq!(counter.get(), 6);
+assert_eq!(counter.snapshot(), 6);
 
 // Works with type conversions
 let mut bignum: Binding<i64> = binding(0);
@@ -118,13 +118,13 @@ let a: Binding<i32> = binding(2);
 let b: Binding<i32> = binding(3);
 
 let sum = nami::utils::add(a.clone(), b.clone());
-assert_eq!(sum.get(), 5);
+assert_eq!(sum.snapshot(), 5);
 
 let pair = zip(a, b);
-assert_eq!(pair.get(), (2, 3));
+assert_eq!(pair.snapshot(), (2, 3));
 
 let squared = map(sum, |n: i32| n * n);
-assert_eq!(squared.get(), 25);
+assert_eq!(squared.snapshot(), 25);
 ```
 
 ## Rate Limiting: Debounce and Throttle
@@ -160,10 +160,10 @@ input.set_from("typing...");
 use nami::{Signal, SignalExt};
 
 let c = 10_i32.computed();
-assert_eq!(c.get(), 10);
+assert_eq!(c.snapshot(), 10);
 
 let plus_one = c.map(|n| n + 1);
-assert_eq!(plus_one.get(), 11);
+assert_eq!(plus_one.snapshot(), 11);
 ```
 
 ## Async Interop
@@ -172,16 +172,16 @@ Bridge async with reactive using adapters:
 
 - `FutureSignal<T>`: `Option<T>` becomes `Some(T)` when a future resolves
 - `SignalStream<S>`: treat a `Signal` as a `Stream` that yields on updates
-- `BindingMailbox<T>`: cross-thread reactive state with `get()`, `set()`, and `get_as()` for type conversion
+- `BindingMailbox<T>`: cross-thread reactive state with `snapshot()`, `set()`, and `snapshot_as()` for type conversion
 
 ```rust,no_run
-use nami::future::FutureSignal;
+use nami::{future::FutureSignal, Signal};
 use executor_core::LocalExecutor;
 
 // Requires an executor; example omitted for brevity
 // let sig = FutureSignal::new(executor, async { 42 });
-// assert_eq!(sig.get(), None);
-// ... later ... sig.get() == Some(42)
+// assert_eq!(sig.snapshot(), None);
+// ... later ... sig.snapshot() == Some(42)
 ```
 
 ```rust
@@ -202,7 +202,7 @@ let text_binding:Binding<Str> = binding("hello");
 let mailbox = text_binding.mailbox();
 
 // Convert to Send type for cross-thread usage
-let owned_string: String = mailbox.get_as().await;
+let owned_string: String = mailbox.snapshot_as().await;
 assert_eq!(owned_string, "hello");
 
 // Regular mailbox operations
@@ -242,7 +242,7 @@ Enable the `derive` feature (enabled by default) to access:
 - `#[derive(nami::Project)]`: project a struct binding into bindings for each field
 
 ```rust
-use nami::{binding, Binding, project::Project};
+use nami::{binding, Binding, project::Project, Signal};
 
 #[derive(Clone, nami::Project)]
 struct Person { name: String, age: u32 }
@@ -251,7 +251,7 @@ let p: Binding<Person> = binding(Person { name: "A".into(), age: 1 });
 // The derive generates `PersonProjected`
 let mut projected: PersonProjected = p.project();
 projected.name.set_from("B");  // Automatic &str -> String conversion
-assert_eq!(p.get().name, "B");
+assert_eq!(p.snapshot().name, "B");
 ```
 
 Feature flags:

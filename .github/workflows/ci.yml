@@ -6,7 +6,7 @@ permissions:
 
 on:
   push:
-    branches: ["**"]
+    branches: [main, dev]
   pull_request:
     branches: ["**"]
 
@@ -15,6 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -57,7 +60,8 @@ jobs:
         with:
           shared-key: ci-ubuntu
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - uses: taiki-e/install-action@nextest
+      - run: cargo llvm-cov nextest --all-features --workspace --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v4
         with:
           use_oidc: true

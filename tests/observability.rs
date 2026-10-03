@@ -153,7 +153,7 @@ fn observer_traffic_is_not_itself_observed() {
             *self.notifications.borrow_mut() += 1;
             // Writing to a binding from inside the callback is exactly the
             // pattern that recurses if reentrancy is unguarded.
-            self.scratch.set(self.scratch.get() + 1);
+            self.scratch.add_assign(1);
         }
         fn on_drop(&self, _node: SignalNode) {}
     }
@@ -175,7 +175,7 @@ fn observer_traffic_is_not_itself_observed() {
         1,
         "the observer's own writes must not re-enter the observer"
     );
-    assert_eq!(scratch.get(), 1);
+    assert_eq!(scratch.snapshot(), 1);
 }
 
 /// With no scope installed, nothing dispatches. Tooling that forgets to install

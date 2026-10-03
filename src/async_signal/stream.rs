@@ -56,8 +56,8 @@ where
     type Guard = <Container<Option<S::Item>> as Signal>::Guard;
 
     /// Returns the latest item produced by the underlying stream, if any.
-    fn get(&self) -> Self::Output {
-        self.container.get()
+    fn snapshot(&self) -> Self::Output {
+        self.container.snapshot()
     }
 
     /// Watches changes to the latest item (i.e., when the stream yields).
