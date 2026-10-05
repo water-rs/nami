@@ -23,6 +23,11 @@ use crate::{
 pub use nami_core::{Signal, SignalIdentity};
 
 /// A trait for converting a value into a computation.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be converted into a signal producing `{Output}`",
+    label = "expected a `{Output}` value, `Binding<{Output}>`, `Computed<{Output}>`, or `Signal<Output = {Output}>`",
+    note = "a plain `{Output}` value, `Binding<{Output}>`, `Computed<{Output}>`, or any `Signal<Output = {Output}>` satisfies this bound; if you hold a `&Binding<{Output}>`, pass `binding.clone()` instead"
+)]
 pub trait IntoSignal<Output> {
     /// The specific computation type that will be produced.
     type Signal: Signal<Output = Output>;
@@ -34,6 +39,11 @@ pub trait IntoSignal<Output> {
 /// A trait for converting a value directly into a `Computed<Output>`.
 ///
 /// This is a convenience trait that builds on `IntoSignal`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be converted into `Computed<{Output}>`",
+    label = "expected a `{Output}` value, `Binding<{Output}>`, `Computed<{Output}>`, or `Signal<Output = {Output}>`",
+    note = "a plain `{Output}` value, `Binding<{Output}>`, `Computed<{Output}>`, or any `Signal<Output = {Output}>` satisfies this bound; if you hold a `&Binding<{Output}>`, pass `binding.clone()` instead"
+)]
 pub trait IntoComputed<Output>: IntoSignal<Output> + 'static {
     /// Convert this value into a `Computed<Output>`.
     fn into_computed(self) -> Computed<Output>;
@@ -102,8 +112,8 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
     type Guard = C::Guard;
 
     /// Execute the underlying computation.
-    fn get(&self) -> Self::Output {
-        self.signal.get()
+    fn snapshot(&self) -> Self::Output {
+        self.signal.snapshot()
     }
 
     fn identity(&self) -> Option<SignalIdentity> {

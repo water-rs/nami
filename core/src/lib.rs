@@ -115,14 +115,25 @@ pub mod watcher;
 ///
 /// Types implementing `Signal` represent a computation that can produce a value
 /// and notify observers when that value changes.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a nami `Signal`",
+    label = "expected a `Signal` implementation",
+    note = "`Signal` is nami's reactive read trait; wrap a value in `nami::Binding` or `nami::Computed`, or create a fixed one with `nami::constant(value)`"
+)]
 pub trait Signal: Clone + 'static {
     /// The type of value produced by this computation.
     type Output: 'static;
     /// The guard type returned by the watch method that manages watcher lifecycle.
     type Guard: WatcherGuard;
 
-    /// Execute the computation and return the current value.
-    fn get(&self) -> Self::Output;
+    /// Takes a snapshot of the computation's current value.
+    ///
+    /// This is a one-off, untracked read: the value is detached from
+    /// reactivity and no dependency is recorded. Application code rarely
+    /// needs it — watchers and derived signals track changes, and
+    /// read-modify-write goes through `set`, `get_mut`, `with_mut` and
+    /// friends on `Binding`.
+    fn snapshot(&self) -> Self::Output;
 
     /// Returns the stable semantic identity of this signal, when one exists.
     ///
@@ -135,7 +146,7 @@ pub trait Signal: Clone + 'static {
     /// Register a watcher to be notified when the computed value changes.
     ///
     /// Returns a guard that, when dropped, will unregister the watcher.
-    #[must_use]
+    #[must_use = "the watcher stops when its guard is dropped"]
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard;
 }
 
@@ -162,7 +173,7 @@ macro_rules! impl_constant {
                 type Output = Self;
                 type Guard = ();
 
-                fn get(&self) -> Self::Output {
+                fn snapshot(&self) -> Self::Output {
                     self.clone()
                 }
 
@@ -186,7 +197,7 @@ macro_rules! impl_generic_constant {
                 type Output = Self;
                 type Guard = ();
 
-                fn get(&self) -> Self::Output {
+                fn snapshot(&self) -> Self::Output {
                     self.clone()
                 }
 
@@ -239,7 +250,7 @@ mod impl_constant {
     impl<T: 'static> Signal for &'static [T] {
         type Output = &'static [T];
         type Guard = ();
-        fn get(&self) -> Self::Output {
+        fn snapshot(&self) -> Self::Output {
             self
         }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
@@ -251,18 +262,65 @@ mod impl_constant {
     impl<T: Clone + 'static, const N: usize> Signal for [T; N] {
         type Output = Self;
         type Guard = ();
-        fn get(&self) -> Self::Output {
+        fn snapshot(&self) -> Self::Output {
             self.clone()
         }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
     }
 }
 
+/// Constant signals for kurbo's geometry types.
+///
+/// A plain `Affine`, `Rect` or `BezPath` passed where an API takes
+/// `impl Signal<Output = T>` is a signal that never changes.
+#[cfg(feature = "kurbo")]
+mod impl_kurbo_constant {
+    use kurbo::{
+        Affine, Arc, BezPath, Circle, CircleSegment, CubicBez, Ellipse, Insets, Line, PathEl,
+        Point, QuadBez, Rect, RoundedRect, RoundedRectRadii, Size, Stroke, Vec2,
+    };
+
+    impl_constant!(
+        Affine,
+        Arc,
+        BezPath,
+        Circle,
+        CircleSegment,
+        CubicBez,
+        Ellipse,
+        Insets,
+        Line,
+        PathEl,
+        Point,
+        QuadBez,
+        Rect,
+        RoundedRect,
+        RoundedRectRadii,
+        Size,
+        Stroke,
+        Vec2
+    );
+
+    #[cfg(test)]
+    mod tests {
+        use kurbo::Affine;
+
+        use crate::Signal;
+
+        #[test]
+        fn plain_affine_is_a_constant_signal() {
+            let affine = Affine::translate((1.0, 2.0));
+            assert_eq!(affine.snapshot(), affine);
+            affine.watch(|_| unreachable!("a constant never notifies"));
+        }
+    }
+}
+
 impl<T: Signal> Signal for Option<T> {
     type Output = Option<T::Output>;
     type Guard = Option<T::Guard>;
-    fn get(&self) -> Self::Output {
-        self.as_ref().map(Signal::get)
+    fn snapshot(&self) -> Self::Output {
+        self.as_ref().map(Signal::snapshot)
     }
     fn identity(&self) -> Option<SignalIdentity> {
         self.as_ref().and_then(Signal::identity)
@@ -276,10 +334,10 @@ impl<T: Signal> Signal for Option<T> {
 impl<T: Signal, E: Signal> Signal for Result<T, E> {
     type Output = Result<T::Output, E::Output>;
     type Guard = Result<T::Guard, E::Guard>;
-    fn get(&self) -> Self::Output {
+    fn snapshot(&self) -> Self::Output {
         match &self {
-            Ok(s) => Ok(s.get()),
-            Err(e) => Err(e.get()),
+            Ok(s) => Ok(s.snapshot()),
+            Err(e) => Err(e.snapshot()),
         }
     }
     fn identity(&self) -> Option<SignalIdentity> {
@@ -312,14 +370,14 @@ where
     type Output = (T::Output, U::Output);
     type Guard = (T::Guard, U::Guard);
 
-    fn get(&self) -> Self::Output {
-        (self.0.get(), self.1.get())
+    fn snapshot(&self) -> Self::Output {
+        (self.0.snapshot(), self.1.snapshot())
     }
 
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         let state = Rc::new(TupleWatchState {
-            latest_left: RefCell::new(self.0.get()),
-            latest_right: RefCell::new(self.1.get()),
+            latest_left: RefCell::new(self.0.snapshot()),
+            latest_right: RefCell::new(self.1.snapshot()),
             watcher,
         });
 
@@ -379,7 +437,7 @@ mod tests {
         type Output = T;
         type Guard = ();
 
-        fn get(&self) -> Self::Output {
+        fn snapshot(&self) -> Self::Output {
             self.value.borrow().clone()
         }
 
@@ -405,7 +463,7 @@ mod tests {
         left.set(3);
         right.set(4);
 
-        assert_eq!(pair.get(), (3, 4));
+        assert_eq!(pair.snapshot(), (3, 4));
         assert_eq!(*updates.borrow(), vec![(3, 2), (3, 4)]);
     }
 }

@@ -4,6 +4,9 @@ on:
   workflow_call:
 
 env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -20,4 +23,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test-${{ matrix.os }}
-      - run: cargo test --verbose --all-features
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --all-features
+      - run: cargo test --doc --all-features

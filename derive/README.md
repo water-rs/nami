@@ -29,7 +29,7 @@ The `Project` derive macro automatically generates implementations that allow yo
 For structs with named fields, the macro generates a corresponding "projected" struct where each field is wrapped in a `Binding`:
 
 ```rust
-use nami::{Binding, binding};
+use nami::{Binding, Signal, binding};
 
 #[derive(nami::Project)]
 struct Person {
@@ -52,7 +52,7 @@ projected.name.set("Bob".to_string());
 projected.age.set(25);
 
 // Changes are reflected in the original binding
-let updated_person = person.get();
+let updated_person = person.snapshot();
 assert_eq!(updated_person.name, "Bob");
 assert_eq!(updated_person.age, 25);
 assert_eq!(updated_person.email, "alice@example.com"); // unchanged
@@ -63,7 +63,7 @@ assert_eq!(updated_person.email, "alice@example.com"); // unchanged
 For tuple structs, the macro generates a tuple of bindings:
 
 ```rust
-use nami::{Binding, binding};
+use nami::{Binding, Signal, binding};
 
 #[derive(nami::Project)]
 struct Point(i32, i32);
@@ -74,8 +74,8 @@ let (x, y) = point.project();
 x.set(100);
 y.set(200);
 
-assert_eq!(point.get().0, 100);
-assert_eq!(point.get().1, 200);
+assert_eq!(point.snapshot().0, 100);
+assert_eq!(point.snapshot().1, 200);
 ```
 
 ### Unit Structs

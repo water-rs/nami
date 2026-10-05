@@ -21,30 +21,30 @@ fn main() {
     let is_success = api_response.is_ok();
     let is_error = api_response.is_err();
 
-    println!("Is success: {}", is_success.get()); // true
-    println!("Is error: {}", is_error.get()); // false
+    println!("Is success: {}", is_success.snapshot()); // true
+    println!("Is error: {}", is_error.snapshot()); // false
 
     api_response.set(Err("Network error".to_string()));
-    println!("Is success: {}", is_success.get()); // false
-    println!("Is error: {}", is_error.get()); // true
+    println!("Is success: {}", is_success.snapshot()); // false
+    println!("Is error: {}", is_error.snapshot()); // true
 
     // ok: Convert Result to Option<T>
     let result: Binding<Result<i32, &str>> = binding(Ok(42));
     let maybe_value = result.ok();
 
-    println!("Value: {:?}", maybe_value.get()); // Some(42)
+    println!("Value: {:?}", maybe_value.snapshot()); // Some(42)
 
     result.set(Err("error"));
-    println!("Value: {:?}", maybe_value.get()); // None
+    println!("Value: {:?}", maybe_value.snapshot()); // None
 
     // err: Convert Result to Option<E>
     let result2: Binding<Result<i32, &str>> = binding(Err("something went wrong"));
     let maybe_error = result2.err();
 
-    println!("Error: {:?}", maybe_error.get()); // Some("something went wrong")
+    println!("Error: {:?}", maybe_error.snapshot()); // Some("something went wrong")
 
     result2.set(Ok(100));
-    println!("Error: {:?}", maybe_error.get()); // None
+    println!("Error: {:?}", maybe_error.snapshot()); // None
 
     // Practical example: API response handling
     let user_fetch: Binding<Result<User, ApiError>> = binding(Ok(User {
@@ -60,9 +60,9 @@ fn main() {
         .map(|opt| opt.map(|err| format!("{}: {}", err.code, err.message)));
 
     println!("\n--- User loaded ---");
-    println!("Show content: {}", show_content.get()); // true
-    println!("Show error: {}", show_error.get()); // false
-    println!("Error details: {:?}", error_details.get()); // None
+    println!("Show content: {}", show_content.snapshot()); // true
+    println!("Show error: {}", show_error.snapshot()); // false
+    println!("Error details: {:?}", error_details.snapshot()); // None
 
     // Simulate an error
     user_fetch.set(Err(ApiError {
@@ -71,9 +71,9 @@ fn main() {
     }));
 
     println!("\n--- Error occurred ---");
-    println!("Show content: {}", show_content.get()); // false
-    println!("Show error: {}", show_error.get()); // true
-    println!("Error details: {:?}", error_details.get()); // Some("404: User not found")
+    println!("Show content: {}", show_content.snapshot()); // false
+    println!("Show error: {}", show_error.snapshot()); // true
+    println!("Error details: {:?}", error_details.snapshot()); // Some("404: User not found")
 
     // Chain with map to extract specific fields
     let user_result: Binding<Result<User, ApiError>> = binding(Ok(User {
@@ -89,11 +89,11 @@ fn main() {
         )
     });
 
-    println!("\nDisplay name: {}", display_name.get()); // Bob
+    println!("\nDisplay name: {}", display_name.snapshot()); // Bob
 
     user_result.set(Err(ApiError {
         code: 500,
         message: "Server error".to_string(),
     }));
-    println!("Display name: {}", display_name.get()); // Unknown
+    println!("Display name: {}", display_name.snapshot()); // Unknown
 }
