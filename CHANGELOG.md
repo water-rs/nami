@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/water-rs/nami/compare/v0.11.2...v0.12.0) - 2026-10-05
+
+### Added
+
+- *(collection)* [**breaking**] notifications carry a typed CollectionChange
+- implement constant Signal for kurbo types behind a kurbo feature
+- [**breaking**] rename BindingMailbox::get/get_as to snapshot/snapshot_as
+- [**breaking**] rename Signal::get to Signal::snapshot
+- add on_unimplemented diagnostics to Signal, Collection, IntoSignal and IntoComputed ([#18](https://github.com/water-rs/nami/pull/18))
+
+### Fixed
+
+- *(ci)* repair lint checks and trusted publishing
+- *(distinct)* make Distinct::new const
+- *(distinct)* deduplicate per watcher, not across clones
+- *(async_signal)* keep debounce/throttle upstream alive for the watch's lifetime
+- *(watcher)* drop cancelled watcher after releasing inner borrow
+
+### Other
+
+- Merge remote-tracking branch 'origin/main' into release/nami-0.12
+- let the PR source gate accept release-plz release branches ([#22](https://github.com/water-rs/nami/pull/22))
+- prebuilt cargo-outdated + incremental/debuginfo trims ([#20](https://github.com/water-rs/nami/pull/20))
+- narrow push trigger to integration branches
+- run tests with cargo nextest ([#17](https://github.com/water-rs/nami/pull/17))
+- publish to crates.io via OIDC trusted publishing ([#13](https://github.com/water-rs/nami/pull/13))
+- gate pull requests into main so only dev may merge ([#14](https://github.com/water-rs/nami/pull/14))
+- add rust-cache to dep-check workflow
+- add weekly dependency check workflow
+
 ## [0.11.2](https://github.com/water-rs/nami/compare/v0.11.1...v0.11.2) - 2026-08-27
 
 ### Other
