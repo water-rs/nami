@@ -131,8 +131,7 @@ where
                     if watchers.is_empty() {
                         return;
                     }
-                    let context = delayed_context;
-                    watchers.notify(&context);
+                    watchers.notify_owned(delayed_context);
                 });
 
                 *timer.borrow_mut() = Some(Box::new(task));

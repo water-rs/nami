@@ -126,7 +126,7 @@ where
                 }
 
                 // Immediately emit the update
-                watchers.notify(&ctx);
+                watchers.notify_owned(ctx);
 
                 // Set throttled state and start timer
                 throttled.set(true);

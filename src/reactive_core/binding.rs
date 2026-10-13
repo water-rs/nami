@@ -259,12 +259,11 @@ impl<T: 'static> Binding<T> {
             // optimize for container bindings
             let mut value = container.value.borrow_mut();
             let result = f(&mut *value);
-            let updated = value.clone();
+            // Clone only for watchers, and notify after releasing the borrow.
+            let updated = (!container.watchers.is_empty()).then(|| value.clone());
             drop(value);
-            // notify watchers manually after releasing the RefCell borrow
-            if !container.watchers.is_empty() {
-                let context = Context::from(updated);
-                container.watchers.notify(&context);
+            if let Some(updated) = updated {
+                container.watchers.notify_owned(Context::from(updated));
             }
             result
         } else {
@@ -1070,12 +1069,13 @@ impl<T: 'static + Clone> Signal for Container<T> {
 impl<T: 'static + Clone> CustomBinding for Container<T> {
     /// Sets a new value and notifies watchers.
     fn set(&self, value: T) {
-        self.value.replace(value.clone());
         if self.watchers.is_empty() {
+            // Nobody to tell: move the value in without cloning it.
+            self.value.replace(value);
             return;
         }
-        let context = Context::from(value);
-        self.watchers.notify(&context);
+        self.value.replace(value.clone());
+        self.watchers.notify_owned(Context::from(value));
     }
 }
 

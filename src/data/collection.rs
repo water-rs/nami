@@ -317,6 +317,7 @@ impl<T: 'static> List<T> {
     /// Returns an iterator over the list's items.
     ///
     /// Warning: This will clone the entire list, ensuring that modifications during iteration do not affect the iterator.
+    #[must_use]
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter
     where
         T: Clone,
