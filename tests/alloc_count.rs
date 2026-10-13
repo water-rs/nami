@@ -144,3 +144,51 @@ fn registering_during_notify_takes_effect_next_round() {
     value.set(2);
     assert_eq!(calls.get(), 1);
 }
+
+type KeyedList = nami::collection::List<u64, fn(&u64) -> u64>;
+type Retained = std::rc::Rc<std::cell::RefCell<Vec<nami::collection::Items<u64>>>>;
+
+/// A watched 1000-item list whose watcher keeps the snapshots it receives
+/// when `retain` is set.
+fn watched_list(retain: bool) -> (KeyedList, impl Sized, Retained) {
+    use nami::collection::{Collection, List};
+
+    let list = List::new(|value: &u64| *value);
+    list.extend(0..1000);
+    let retained = std::rc::Rc::new(std::cell::RefCell::new(Vec::with_capacity(4)));
+    let guard = list.watch(.., {
+        let retained = retained.clone();
+        move |items, change| {
+            assert!(!change.is_empty());
+            if retain {
+                retained.borrow_mut().push(items.into_value());
+            }
+        }
+    });
+    retained.borrow_mut().clear();
+    (list, guard, retained)
+}
+
+#[test]
+fn list_push_with_one_watcher_does_not_allocate() {
+    let (list, _guard, _retained) = watched_list(false);
+    list.push(0); // grow once to known spare capacity
+    let _ = list.pop();
+    assert_eq!(allocations(|| list.push(1000)), 0);
+}
+
+#[test]
+fn list_push_copies_only_while_a_snapshot_is_retained() {
+    let (list, _guard, retained) = watched_list(true);
+    list.push(0);
+    let _ = list.pop();
+    retained.borrow_mut().clear();
+    // Nothing retained: the push writes in place.
+    retained.borrow_mut().reserve(4);
+    assert_eq!(allocations(|| list.push(1000)), 0);
+    // The watcher now holds the snapshot it was given, so the next push
+    // copies the items instead of changing that snapshot: a new `Rc`, the
+    // cloned vector, and its growth for the pushed item.
+    assert_eq!(allocations(|| list.push(1001)), 3);
+    assert_eq!(retained.borrow()[0].len(), 1001);
+}

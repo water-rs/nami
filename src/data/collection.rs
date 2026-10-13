@@ -1,40 +1,48 @@
-//! Reactive collections with watcher support.
-//!
-//! This module provides a trait-based approach for creating observable collections
-//! that can notify watchers when their contents change. It supports both reactive
-//! collections that emit change notifications and static collections that provide
-//! one-time snapshots.
+//! Reactive collections with identity-aware change notifications.
 //!
 //! # Core Components
 //!
-//! - [`Collection`]: A trait defining the interface for observable collections
-//! - [`List<T>`]: A reactive list implementation using `Rc<RefCell<Vec<T>>>`
-//! - [`AnyCollection<T>`]: A type-erased wrapper for storing different collection types
+//! - [`Collection`]: the interface for observable collections, re-exported
+//!   from `nami-core`.
+//! - [`List<T, I>`]: an owned reactive list whose items are identified by `I`
+//!   (a key function, [`ByValue`] or [`ByIndex`]).
+//! - [`SignalCollection`]: adapts a signal of `Vec<T>` snapshots.
+//! - [`AnyCollection<T, Id>`]: a type-erased collection.
 //!
-//! # Collection Types
+//! # Identity
 //!
-//! The module provides `Collection` implementations for:
-//! - `List<T>`: Fully reactive with ongoing change notifications
-//! - `Vec<T>`: Static collection with one-time watcher notifications
-//! - `[T; N]`: Static array with one-time watcher notifications
-//!
-//! # Usage Example
+//! A `List` knows each item's id from creation, the way `SwiftUI`'s
+//! `ForEach(items, id: \.id)` does, and reports every notification as a
+//! [`CollectionChange`] aligned by id. Replacing the whole list with a
+//! reordered or front-inserted vector reports moves and insertions instead of
+//! rewriting every row, so a consumer never diffs snapshots itself.
 //!
 //! ```rust
-//! use nami::collection::{Collection, List};
+//! use nami::collection::{Collection, CollectionChange, Edit, List};
 //!
-//! // Create a reactive list
-//! let mut list = List::new();
-//! list.push(1);
-//! list.push(2);
+//! #[derive(Clone, PartialEq)]
+//! struct Message {
+//!     id: u64,
+//!     text: String,
+//! }
 //!
-//! // Watch for changes in a specific range
-//! let _guard = list.watch(0..2, |ctx, change| {
-//!     println!("Items changed: {:?} ({:?})", ctx.into_value(), change);
+//! let message = |id: u64, text: &str| Message { id, text: text.into() };
+//! let list = List::new(|message: &Message| message.id);
+//! list.extend([message(1, "hi"), message(2, "there")]);
+//!
+//! let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+//! let _guard = list.watch(.., {
+//!     let changes = changes.clone();
+//!     move |_items, change| changes.borrow_mut().push(change.clone())
 //! });
 //!
-//! // Modifications will trigger the watcher
-//! list.push(3);
+//! // A refresh that puts a new message first and edits another.
+//! let _ = list.replace(vec![message(3, "new"), message(1, "hi"), message(2, "there!")]);
+//!
+//! assert_eq!(
+//!     changes.borrow()[1],
+//!     CollectionChange::from_edits([Edit::Insert(0..1), Edit::Update(2..3)]),
+//! );
 //! ```
 //!
 //! # Range-based Watching
@@ -45,25 +53,11 @@
 //! - `collection.watch(2.., watcher)` - Watch from index 2 to end
 //! - `collection.watch(..3, watcher)` - Watch from start to index 2
 //!
-//! # Type Erasure
-//!
-//! The `AnyCollection` wrapper allows storing different collection types
-//! in the same container while preserving the ability to observe them:
-//!
-//! ```rust
-//! use nami::collection::{AnyCollection, List};
-//!
-//! let list = List::from(vec![1, 2, 3]);
-//! let any_collection = AnyCollection::new(list);
-//!
-//! // Still supports watching despite type erasure
-//! let _guard = any_collection.watch(.., |ctx, change| {
-//!     // Handle change notifications
-//! });
-//! ```
+//! Changes always use collection-wide indices.
 
 use core::{
     cell::{Cell, RefCell},
+    fmt,
     ops::{Bound, RangeBounds},
 };
 pub use nami_core::collection::*;
@@ -72,237 +66,157 @@ use alloc::{rc::Rc, vec::Vec};
 use nami_core::{
     SignalIdentity,
     observe::Origin,
-    watcher::{Context, Metadata},
+    watcher::{Context, Metadata, RegistryGuard, WatcherGuard, WatcherRegistry},
 };
 
-use crate::{
-    Signal,
-    watcher::{WatcherManager, WatcherManagerGuard},
-};
+use crate::Signal;
 
-/// Adapts a signal of vector snapshots into a reactive collection.
+/// The callback a [`List`] stores per watcher: the whole snapshot plus the
+/// change. Each registration slices the snapshot to its own range.
+type ListWatcher<T> = dyn Fn(Context<Rc<Vec<T>>>, &CollectionChange);
+
+/// A reactive list whose items have identities.
 ///
-/// Collection consumers reconcile snapshots by item identity, so membership
-/// changes update only inserted, removed, moved, or replaced items instead of
-/// rebuilding the containing view subtree.
-#[derive(Debug, Clone)]
-pub struct SignalCollection<S> {
-    signal: S,
-}
-
-impl<S> SignalCollection<S> {
-    /// Creates a collection backed by vector snapshots from `signal`.
-    pub const fn new(signal: S) -> Self {
-        Self { signal }
-    }
-}
-
-/// A reactive list that can be observed for changes.
+/// `I` gives each item its id (see [`Identify`]):
 ///
-/// Notifications use `Rc<[T]>` snapshots so that cloning a `Context` across
-/// multiple watchers is O(1) (reference-count bump) instead of O(n).
-#[derive(Debug)]
-pub struct List<T> {
-    vec: Rc<RefCell<Vec<T>>>,
-    watchers: WatcherManager<Rc<[T]>>,
+/// - [`List::new`] takes a key function, `List::new(|m: &Message| m.id)`;
+///   the list's type is then `List<Message, fn(&Message) -> u64>`.
+/// - [`List::by_value`] uses the value itself (`T: Ord`), for lists of plain
+///   values such as `List<String, ByValue>`.
+/// - [`List::by_index`] is explicitly positional, for stacks such as a
+///   navigation path.
+///
+/// Cloning a `List` shares it. Storage is copy-on-write: a notification hands
+/// watchers a reference to the current items, and a mutation copies them
+/// only while a watcher still holds an older snapshot.
+pub struct List<T, I> {
+    state: Rc<ListState<T, I>>,
 }
 
-impl<T: 'static> From<Vec<T>> for List<T> {
-    #[track_caller]
-    fn from(value: Vec<T>) -> Self {
-        Self::from_vec(value)
+struct ListState<T, I> {
+    items: RefCell<Rc<Vec<T>>>,
+    identity: I,
+    watchers: WatcherRegistry<ListWatcher<T>>,
+}
+
+impl<T: fmt::Debug, I> fmt::Debug for List<T, I> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("List")
+            .field(&self.state.items.borrow().as_slice())
+            .finish()
     }
 }
 
-impl<T: 'static> List<T> {
-    /// Creates a new empty reactive list.
-    #[must_use]
-    #[track_caller]
-    pub fn new() -> Self {
-        Self::from_vec(Vec::new())
-    }
-
-    /// Builds a list around `value`, attributing the node to the caller.
-    #[track_caller]
-    fn from_vec(value: Vec<T>) -> Self {
-        let vec = Rc::new(RefCell::new(value));
-        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&vec));
+impl<T, I> Clone for List<T, I> {
+    fn clone(&self) -> Self {
         Self {
-            vec,
-            watchers: WatcherManager::with_origin(origin),
+            state: Rc::clone(&self.state),
         }
     }
+}
 
-    /// Takes an `Rc<[T]>` snapshot of the current contents and notifies all
-    /// watchers, reporting `change` as the indices the mutation touched.  The
-    /// snapshot is shared (O(1) clone) across watchers so each notification
-    /// cycle only pays for one allocation.
-    fn notify(&self, change: CollectionChange)
-    where
-        T: Clone,
-    {
-        self.notify_with_metadata(change, Metadata::new());
-    }
-
-    /// Notifies with caller `metadata`; the [`CollectionChange`] rides it, and
-    /// taking it as a separate argument makes a notification without one
-    /// impossible to write.
-    fn notify_with_metadata(&self, change: CollectionChange, metadata: Metadata)
-    where
-        T: Clone,
-    {
-        if self.watchers.is_empty() {
-            return;
-        }
-        let snapshot: Rc<[T]> = Rc::from(self.vec.borrow().as_slice());
-        self.watchers
-            .notify(&Context::new(snapshot, metadata.with(change)));
-    }
-
-    /// Adds an element to the end of the list.
-    pub fn push(&self, value: T)
-    where
-        T: Clone,
-    {
-        let index = self.vec.borrow().len();
-        self.vec.borrow_mut().push(value);
-        self.notify(CollectionChange::inserted(index..index + 1));
-    }
-
-    /// Sorts the list in place.
+impl<T: 'static, K: Ord + Clone + 'static> List<T, fn(&T) -> K> {
+    /// Creates an empty list whose items are identified by `key`.
     ///
-    /// Sorting moves items between positions without changing their content;
-    /// since the API cannot name item identities, every position's occupant is
-    /// reported replaced so positional consumers stay honest.
-    pub fn sort(&self)
-    where
-        T: Ord + Clone,
-    {
-        self.vec.borrow_mut().sort();
-        let len = self.vec.borrow().len();
-        self.notify(CollectionChange::everything(len));
-    }
-
-    /// Removes and returns the last element of the list.
+    /// ```rust
+    /// use nami::collection::List;
+    ///
+    /// struct Todo {
+    ///     id: u32,
+    ///     title: String,
+    /// }
+    ///
+    /// let todos: List<Todo, fn(&Todo) -> u32> = List::new(|todo| todo.id);
+    /// ```
+    ///
+    /// Records such as todos should carry their own id, assigned by the app
+    /// or backend when the record is created. Use [`List::with_identity`] for
+    /// an identity that is not a plain function.
     #[must_use]
-    pub fn pop(&self) -> Option<T>
-    where
-        T: Clone,
-    {
-        let result = self.vec.borrow_mut().pop();
-        if result.is_some() {
-            let index = self.vec.borrow().len();
-            self.notify(CollectionChange::removed(index..index + 1));
-        }
-        result
+    #[track_caller]
+    pub fn new(key: fn(&T) -> K) -> Self {
+        Self::from_vec(Vec::new(), key)
     }
+}
 
-    /// Inserts an element at the specified index.
-    pub fn insert(&self, index: usize, value: T)
-    where
-        T: Clone,
-    {
-        self.vec.borrow_mut().insert(index, value);
-        self.notify(CollectionChange::inserted(index..index + 1));
-    }
-
-    /// Removes and returns the element at the specified index.
+impl<T: Ord + Clone + 'static> List<T, ByValue> {
+    /// Creates an empty list whose items are identified by their value.
     #[must_use]
-    pub fn remove(&self, index: usize) -> T
-    where
-        T: Clone,
-    {
-        let result = self.vec.borrow_mut().remove(index);
-        self.notify(CollectionChange::removed(index..index + 1));
-        result
+    #[track_caller]
+    pub fn by_value() -> Self {
+        Self::from_vec(Vec::new(), ByValue)
     }
+}
 
-    /// Replaces the element at `index`, returning the previous item.
-    ///
-    /// Reports `index` as replaced — a same-identity content change is
-    /// indistinguishable from an item swap at nami's level of knowledge, so
-    /// consumers re-materialize whatever now occupies that position.
-    pub fn set(&self, index: usize, value: T) -> T
-    where
-        T: Clone,
-    {
-        let previous = core::mem::replace(&mut self.vec.borrow_mut()[index], value);
-        self.notify(CollectionChange::replaced(index..index + 1));
-        previous
-    }
-
-    /// Mutates the element at `index` in place.
-    ///
-    /// Reports `index` as replaced, same as [`Self::set`].
-    pub fn update(&self, index: usize, f: impl FnOnce(&mut T))
-    where
-        T: Clone,
-    {
-        f(&mut self.vec.borrow_mut()[index]);
-        self.notify(CollectionChange::replaced(index..index + 1));
-    }
-
-    /// Clears all elements from the list.
-    pub fn clear(&self)
-    where
-        T: Clone,
-    {
-        let was_len = self.vec.borrow().len();
-        self.vec.borrow_mut().clear();
-        if was_len != 0 {
-            self.notify(CollectionChange::removed(0..was_len));
-        }
-    }
-
-    /// Atomically replaces the complete list and returns the previous contents.
-    ///
-    /// Watchers observe only the final replacement snapshot: positions shared
-    /// by both snapshots report as replaced, a grown tail as inserted, a
-    /// shrunk tail as removed.
+impl<T: 'static> List<T, ByIndex> {
+    /// Creates an empty list whose items are identified by their position.
     #[must_use]
-    pub fn replace(&self, value: Vec<T>) -> Vec<T>
-    where
-        T: Clone,
-    {
-        let previous = core::mem::replace(&mut *self.vec.borrow_mut(), value);
-        self.notify(Self::replacement_change(
-            previous.len(),
-            self.vec.borrow().len(),
-        ));
-        previous
+    #[track_caller]
+    pub fn by_index() -> Self {
+        Self::from_vec(Vec::new(), ByIndex)
     }
+}
 
-    /// Atomically replaces the complete list and propagates watcher metadata.
-    ///
-    /// The change report is the same composite [`CollectionChange::replace`]
-    /// computes for [`Self::replace`]; caller metadata passes through
-    /// alongside it.
+impl<T: 'static, I: Identify<T>> List<T, I> {
+    /// Creates an empty list identified by `identity`.
     #[must_use]
-    pub fn replace_with_metadata(&self, value: Vec<T>, metadata: Metadata) -> Vec<T>
+    #[track_caller]
+    pub fn with_identity(identity: I) -> Self {
+        Self::from_vec(Vec::new(), identity)
+    }
+
+    /// Creates a list holding `items`, identified by `identity`.
+    #[must_use]
+    #[track_caller]
+    pub fn from_vec(items: Vec<T>, identity: I) -> Self {
+        Self {
+            state: Rc::new_cyclic(|state| {
+                let origin = Origin::capture::<Self>(SignalIdentity::from_ptr(state.as_ptr()));
+                ListState {
+                    items: RefCell::new(Rc::new(items)),
+                    identity,
+                    watchers: WatcherRegistry::with_origin(origin),
+                }
+            }),
+        }
+    }
+
+    /// Returns the number of items.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.state.items.borrow().len()
+    }
+
+    /// Returns `true` if the list holds no items.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.state.items.borrow().is_empty()
+    }
+
+    /// Returns a clone of the item at `index`, or `None` if out of bounds.
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<T>
     where
         T: Clone,
     {
-        let previous = core::mem::replace(&mut *self.vec.borrow_mut(), value);
-        let change = Self::replacement_change(previous.len(), self.vec.borrow().len());
-        self.notify_with_metadata(change, metadata);
-        previous
+        self.state.items.borrow().as_slice().get(index).cloned()
     }
 
-    /// The change a whole-list replacement reports: shared positions replaced,
-    /// a grown tail inserted, a shrunk tail removed.
-    fn replacement_change(old_len: usize, new_len: usize) -> CollectionChange {
-        let shared = old_len.min(new_len);
-        let mut change = CollectionChange::unchanged();
-        if shared != 0 {
-            change.replaced.push(0..shared);
-        }
-        if new_len > shared {
-            change.inserted.push(shared..new_len);
-        }
-        if old_len > shared {
-            change.removed.push(shared..old_len);
-        }
-        change
+    /// Returns the id of the item at `index`, or `None` if out of bounds.
+    #[must_use]
+    pub fn id(&self, index: usize) -> Option<I::Id> {
+        let items = self.state.items.borrow();
+        items
+            .as_slice()
+            .get(index)
+            .map(|item| self.state.identity.id(index, item))
+    }
+
+    /// Calls `f` with the current items, without cloning them.
+    ///
+    /// The list must not be mutated from inside `f`.
+    pub fn with<R>(&self, f: impl FnOnce(&[T]) -> R) -> R {
+        f(&self.state.items.borrow())
     }
 
     /// Takes a snapshot of the current list contents.
@@ -311,12 +225,13 @@ impl<T: 'static> List<T> {
     where
         T: Clone,
     {
-        self.vec.borrow().clone()
+        self.state.items.borrow().as_ref().clone()
     }
 
-    /// Returns an iterator over the list's items.
+    /// Returns an iterator over a snapshot of the list's items.
     ///
-    /// Warning: This will clone the entire list, ensuring that modifications during iteration do not affect the iterator.
+    /// The items are cloned first, so modifications during iteration do not
+    /// affect the iterator.
     #[must_use]
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter
     where
@@ -324,26 +239,423 @@ impl<T: 'static> List<T> {
     {
         self.snapshot().into_iter()
     }
+
+    /// Adds an element to the end of the list.
+    pub fn push(&self, value: T)
+    where
+        T: Clone,
+    {
+        let index = self.edit(|items| {
+            items.push(value);
+            items.len() - 1
+        });
+        self.notify(&CollectionChange::inserted(index..index + 1));
+    }
+
+    /// Appends every item of `values`.
+    pub fn extend(&self, values: impl IntoIterator<Item = T>)
+    where
+        T: Clone,
+    {
+        let range = self.edit(|items| {
+            let start = items.len();
+            items.extend(values);
+            start..items.len()
+        });
+        self.notify(&CollectionChange::inserted(range));
+    }
+
+    /// Removes and returns the last element of the list.
+    #[must_use]
+    pub fn pop(&self) -> Option<T>
+    where
+        T: Clone,
+    {
+        let (popped, index) = self.edit(|items| (items.pop(), items.len()));
+        if popped.is_some() {
+            self.notify(&CollectionChange::removed(index..index + 1));
+        }
+        popped
+    }
+
+    /// Inserts an element at the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > len`.
+    pub fn insert(&self, index: usize, value: T)
+    where
+        T: Clone,
+    {
+        self.edit(|items| items.insert(index, value));
+        self.notify(&CollectionChange::inserted(index..index + 1));
+    }
+
+    /// Removes and returns the element at the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
+    #[must_use]
+    pub fn remove(&self, index: usize) -> T
+    where
+        T: Clone,
+    {
+        let removed = self.edit(|items| items.remove(index));
+        self.notify(&CollectionChange::removed(index..index + 1));
+        removed
+    }
+
+    /// Replaces the element at `index`, returning the previous item.
+    ///
+    /// Reports an update when the new item has the same id as the old one,
+    /// and a removal plus an insertion when the id changed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
+    pub fn set(&self, index: usize, value: T) -> T
+    where
+        T: Clone,
+    {
+        let watched = !self.state.watchers.is_empty();
+        let (previous, change) = self.edit(|items| {
+            let previous = core::mem::replace(&mut items[index], value);
+            let change = watched.then(|| self.change_at(index, &previous, &items[index]));
+            (previous, change)
+        });
+        if let Some(change) = change {
+            self.notify(&change);
+        }
+        previous
+    }
+
+    /// Mutates the element at `index` in place.
+    ///
+    /// Reported like [`Self::set`]: an update, or a removal plus an insertion
+    /// if `f` changed the item's id.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
+    pub fn update(&self, index: usize, f: impl FnOnce(&mut T))
+    where
+        T: Clone,
+    {
+        let watched = !self.state.watchers.is_empty();
+        let change = self.edit(|items| {
+            let item = &mut items[index];
+            let before = watched.then(|| self.state.identity.id(index, item));
+            f(item);
+            before.map(|before| {
+                if before == self.state.identity.id(index, item) {
+                    CollectionChange::updated(index..index + 1)
+                } else {
+                    Self::reidentified(index)
+                }
+            })
+        });
+        if let Some(change) = change {
+            self.notify(&change);
+        }
+    }
+
+    /// Keeps only the items for which `keep` returns `true`.
+    pub fn retain(&self, mut keep: impl FnMut(&T) -> bool)
+    where
+        T: Clone,
+    {
+        let watched = !self.state.watchers.is_empty();
+        let removed = self.edit(|items| {
+            let mut index = 0;
+            let mut removed = Vec::new();
+            items.retain(|item| {
+                let kept = keep(item);
+                if !kept && watched {
+                    removed.push(Edit::Remove(index..index + 1));
+                }
+                index += 1;
+                kept
+            });
+            removed
+        });
+        self.notify(&CollectionChange::from_edits(removed));
+    }
+
+    /// Clears all elements from the list.
+    pub fn clear(&self) {
+        let len = self.len();
+        if len == 0 {
+            return;
+        }
+        // Drop the items outright instead of copying a shared snapshot first.
+        *self.state.items.borrow_mut() = Rc::new(Vec::new());
+        self.notify(&CollectionChange::removed(0..len));
+    }
+
+    /// Sorts the list, reporting the items that changed relative order as
+    /// moves.
+    pub fn sort(&self)
+    where
+        T: Ord + Clone,
+    {
+        self.sort_by(T::cmp);
+    }
+
+    /// Sorts the list with a key extraction function; see [`Self::sort`].
+    pub fn sort_by_key<K: Ord>(&self, mut key: impl FnMut(&T) -> K)
+    where
+        T: Clone,
+    {
+        self.sort_by(|a, b| key(a).cmp(&key(b)));
+    }
+
+    /// Sorts the list with a comparator; the sort is stable. See
+    /// [`Self::sort`].
+    pub fn sort_by(&self, mut compare: impl FnMut(&T, &T) -> core::cmp::Ordering)
+    where
+        T: Clone,
+    {
+        if self.state.watchers.is_empty() {
+            self.edit(|items| items.sort_by(compare));
+            return;
+        }
+        let change = self.edit(|items| {
+            let mut order: Vec<usize> = (0..items.len()).collect();
+            order.sort_by(|&a, &b| compare(&items[a], &items[b]));
+            let mut slots: Vec<Option<T>> = items.drain(..).map(Some).collect();
+            // `order` is a permutation, so every slot is taken exactly once.
+            items.extend(order.iter().filter_map(|&from| slots[from].take()));
+            // Identify each item by its old position; what moved is what
+            // left its relative order.
+            let before: Vec<usize> = (0..order.len()).collect();
+            diff(&before, &order, |_, from| *from, |_, _| true).change
+        });
+        self.notify(&change);
+    }
+
+    /// Atomically replaces the complete list and returns the previous contents.
+    ///
+    /// The change is computed by aligning the old and new items by id:
+    /// watchers see insertions, removals, moves, and updates for surviving
+    /// items whose content differs (`!=`).
+    #[must_use]
+    pub fn replace(&self, items: Vec<T>) -> Vec<T>
+    where
+        T: Clone + PartialEq,
+    {
+        self.replace_with_metadata(items, Metadata::new())
+    }
+
+    /// [`Self::replace`] that passes `metadata` (such as an animation) to the
+    /// watchers.
+    #[must_use]
+    pub fn replace_with_metadata(&self, items: Vec<T>, metadata: Metadata) -> Vec<T>
+    where
+        T: Clone + PartialEq,
+    {
+        let previous = {
+            let mut current = self.state.items.borrow_mut();
+            if let Some(unshared) = Rc::get_mut(&mut current) {
+                core::mem::replace(unshared, items)
+            } else {
+                let shared = core::mem::replace(&mut *current, Rc::new(items));
+                Rc::unwrap_or_clone(shared)
+            }
+        };
+        if !self.state.watchers.is_empty() {
+            let result = {
+                let current = self.state.items.borrow();
+                let identity = &self.state.identity;
+                diff(
+                    &previous,
+                    &current,
+                    |index, item| identity.id(index, item),
+                    PartialEq::eq,
+                )
+            };
+            warn_on_duplicates(&result);
+            self.notify_with_metadata(&result.change, metadata);
+        }
+        previous
+    }
+
+    /// Runs `f` on the items, copying them first only if a watcher still
+    /// holds a snapshot.
+    fn edit<R>(&self, f: impl FnOnce(&mut Vec<T>) -> R) -> R
+    where
+        T: Clone,
+    {
+        let mut items = self.state.items.borrow_mut();
+        f(Rc::make_mut(&mut items))
+    }
+
+    /// The change for replacing `old` by `new` at `index`.
+    fn change_at(&self, index: usize, old: &T, new: &T) -> CollectionChange {
+        let identity = &self.state.identity;
+        if identity.id(index, old) == identity.id(index, new) {
+            CollectionChange::updated(index..index + 1)
+        } else {
+            Self::reidentified(index)
+        }
+    }
+
+    /// The item at `index` was replaced by one with a different id.
+    fn reidentified(index: usize) -> CollectionChange {
+        CollectionChange::from_edits([
+            Edit::Remove(index..index + 1),
+            Edit::Insert(index..index + 1),
+        ])
+    }
+
+    fn notify(&self, change: &CollectionChange) {
+        self.notify_with_metadata(change, Metadata::new());
+    }
+
+    /// Hands watchers the current snapshot (a refcount, not a copy) and
+    /// `change`. Nothing is sent for an empty change.
+    fn notify_with_metadata(&self, change: &CollectionChange, metadata: Metadata) {
+        if change.is_empty() || self.state.watchers.is_empty() {
+            return;
+        }
+        let snapshot = Rc::clone(&self.state.items.borrow());
+        self.state
+            .watchers
+            .notify_with(Context::new(snapshot, metadata), |watcher, context| {
+                watcher(context, change);
+            });
+    }
 }
 
-/// Iterator implementation for `List<T>`
-/// Tip: This method will attempt to avoid cloning the internal Vec if possible. However, if there are multiple references to the List, it will clone the Vec to ensure safety.
-impl<T: Clone + 'static> IntoIterator for List<T> {
+/// Warns, in debug builds, about a diff that had to match repeated ids.
+fn warn_on_duplicates(result: &Diff) {
+    if cfg!(debug_assertions) && result.duplicate_ids {
+        log::warn!(
+            "nami: a collection holds several items with the same id; they are matched by \
+             occurrence, so identical rows may trade places"
+        );
+    }
+}
+
+/// Guard of a [`List`] watcher; dropping it unregisters the watcher.
+#[must_use]
+pub struct ListGuard<T: 'static>(RegistryGuard<ListWatcher<T>>);
+
+impl<T> fmt::Debug for ListGuard<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ListGuard").field(&self.0).finish()
+    }
+}
+
+impl<T: 'static> WatcherGuard for ListGuard<T> {}
+
+impl<T: Clone + 'static, I: Identify<T>> Collection for List<T, I> {
+    type Item = T;
+    type Id = I::Id;
+    type Guard = ListGuard<T>;
+
+    fn get(&self, index: usize) -> Option<T> {
+        Self::get(self, index)
+    }
+
+    fn len(&self) -> usize {
+        Self::len(self)
+    }
+
+    fn is_empty(&self) -> bool {
+        Self::is_empty(self)
+    }
+
+    fn identify(&self, index: usize, item: &T) -> I::Id {
+        self.state.identity.id(index, item)
+    }
+
+    fn id(&self, index: usize) -> Option<I::Id> {
+        Self::id(self, index)
+    }
+
+    fn watch(
+        &self,
+        range: impl RangeBounds<usize>,
+        watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
+    ) -> ListGuard<T> {
+        let start = range.start_bound().cloned();
+        let end = range.end_bound().cloned();
+
+        // The first emission reports the watched range as inserted.
+        let snapshot = Rc::clone(&self.state.items.borrow());
+        let range = resolve_range(start, end, snapshot.len());
+        let change = CollectionChange::populated(range.start, range.len());
+        watcher(Context::from(Items::new(snapshot, range)), &change);
+
+        let watcher: Rc<ListWatcher<T>> = Rc::new(
+            move |context: Context<Rc<Vec<T>>>, change: &CollectionChange| {
+                let range = resolve_range(start, end, context.value().len());
+                watcher(context.map(|items| Items::new(items, range)), change);
+            },
+        );
+        ListGuard(self.state.watchers.insert_as_guard(watcher))
+    }
+}
+
+impl<T: 'static> Default for List<T, ByIndex> {
+    #[track_caller]
+    fn default() -> Self {
+        Self::by_index()
+    }
+}
+
+impl<T: Ord + Clone + 'static> Default for List<T, ByValue> {
+    #[track_caller]
+    fn default() -> Self {
+        Self::by_value()
+    }
+}
+
+impl<T: 'static> From<Vec<T>> for List<T, ByIndex> {
+    #[track_caller]
+    fn from(items: Vec<T>) -> Self {
+        Self::from_vec(items, ByIndex)
+    }
+}
+
+impl<T: Ord + Clone + 'static> From<Vec<T>> for List<T, ByValue> {
+    #[track_caller]
+    fn from(items: Vec<T>) -> Self {
+        Self::from_vec(items, ByValue)
+    }
+}
+
+impl<T: 'static> FromIterator<T> for List<T, ByIndex> {
+    #[track_caller]
+    fn from_iter<It: IntoIterator<Item = T>>(iter: It) -> Self {
+        Self::from_vec(iter.into_iter().collect(), ByIndex)
+    }
+}
+
+impl<T: Ord + Clone + 'static> FromIterator<T> for List<T, ByValue> {
+    #[track_caller]
+    fn from_iter<It: IntoIterator<Item = T>>(iter: It) -> Self {
+        Self::from_vec(iter.into_iter().collect(), ByValue)
+    }
+}
+
+/// Iterates the items, without cloning them when this is the last handle to
+/// the list and no watcher holds a snapshot.
+impl<T: Clone + 'static, I> IntoIterator for List<T, I> {
     type Item = T;
     type IntoIter = alloc::vec::IntoIter<T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        // if we can unwrap the Rc, we can avoid cloning
-        match Rc::try_unwrap(self.vec) {
-            Ok(vec) => vec.into_inner().into_iter(),
-            Err(rc) => rc.borrow().clone().into_iter(),
+        match Rc::try_unwrap(self.state) {
+            Ok(state) => Rc::unwrap_or_clone(state.items.into_inner()).into_iter(),
+            Err(state) => state.items.borrow().as_ref().clone().into_iter(),
         }
     }
 }
 
-/// Iterator implementation for references to `List<T>`
-/// Warning: This will clone the entire list, ensuring that modifications during iteration do not affect the iterator.
-impl<T: Clone + 'static> IntoIterator for &List<T> {
+/// Iterates a snapshot of the items; see [`List::iter`].
+impl<T: Clone + 'static, I: Identify<T>> IntoIterator for &List<T, I> {
     type Item = T;
     type IntoIter = alloc::vec::IntoIter<T>;
 
@@ -352,70 +664,91 @@ impl<T: Clone + 'static> IntoIterator for &List<T> {
     }
 }
 
-impl<T> Clone for List<T> {
+/// Adapts a signal of vector snapshots into a reactive collection.
+///
+/// Every new snapshot is aligned with the previous one by id, so watchers
+/// receive the same insertions, removals, moves and updates a [`List`]
+/// reports for [`List::replace`].
+#[derive(Debug)]
+pub struct SignalCollection<S, I> {
+    signal: S,
+    identity: Rc<I>,
+}
+
+impl<S: Clone, I> Clone for SignalCollection<S, I> {
     fn clone(&self) -> Self {
         Self {
-            vec: self.vec.clone(),
-            watchers: self.watchers.clone(),
+            signal: self.signal.clone(),
+            identity: Rc::clone(&self.identity),
         }
     }
 }
 
-impl<T: 'static> Default for List<T> {
-    fn default() -> Self {
-        Self::new()
+impl<S, I> SignalCollection<S, I> {
+    /// Creates a collection backed by vector snapshots from `signal`, whose
+    /// items are identified by `identity` (a key function, [`ByValue`] or
+    /// [`ByIndex`]).
+    pub fn new(signal: S, identity: I) -> Self {
+        Self {
+            signal,
+            identity: Rc::new(identity),
+        }
     }
 }
 
-/// Resolve concrete `(start, end)` offsets from captured `Bound` values and
-/// the current snapshot length, clamping to valid indices.
-fn resolve_range(start_bound: Bound<usize>, end_bound: Bound<usize>, len: usize) -> (usize, usize) {
-    let mut start = match start_bound {
-        Bound::Included(n) => n,
-        Bound::Excluded(n) => n.saturating_add(1),
-        Bound::Unbounded => 0,
-    };
-    let mut end = match end_bound {
-        Bound::Included(n) => n.saturating_add(1),
-        Bound::Excluded(n) => n,
-        Bound::Unbounded => len,
-    };
-    start = start.min(len);
-    end = end.min(len);
-    if start > end {
-        start = end;
+/// Per-watcher state of a [`SignalCollection`] watch.
+struct SignalWatch<T, I, W> {
+    identity: Rc<I>,
+    start: Bound<usize>,
+    end: Bound<usize>,
+    watcher: W,
+    /// The snapshot the watcher last saw; `None` until the first emission.
+    previous: RefCell<Option<Rc<Vec<T>>>>,
+    /// Holds a notification that arrives while `watch` is still subscribing.
+    pending: RefCell<Option<Context<Vec<T>>>>,
+    subscribed: Cell<bool>,
+}
+
+impl<T, I, W> SignalWatch<T, I, W>
+where
+    T: PartialEq + 'static,
+    I: Identify<T>,
+    W: Fn(Context<Items<T>>, &CollectionChange),
+{
+    fn deliver(&self, context: Context<Vec<T>>) {
+        let context = context.map(Rc::new);
+        let current = Rc::clone(context.value());
+        let range = resolve_range(self.start, self.end, current.len());
+        let previous = self.previous.replace(Some(Rc::clone(&current)));
+        // The first emission reports the watched contents as inserted.
+        let change = previous.map_or_else(
+            || CollectionChange::populated(range.start, range.len()),
+            |previous| {
+                let result = diff(
+                    &previous,
+                    &current,
+                    |index, item| self.identity.id(index, item),
+                    PartialEq::eq,
+                );
+                warn_on_duplicates(&result);
+                result.change
+            },
+        );
+        (self.watcher)(context.map(|items| Items::new(items, range)), &change);
     }
-    (start, end)
 }
 
-fn notify_signal_collection<T>(
-    watcher: &dyn for<'a> Fn(Context<&'a [T]>, CollectionChange),
-    context: Context<Vec<T>>,
-    start_bound: Bound<usize>,
-    end_bound: Bound<usize>,
-) {
-    let metadata = context.metadata().clone();
-    let snapshot = context.into_value();
-    // A signal reports that its value may have changed; the collection is a
-    // whole-value replacement by definition, so the honest report is
-    // "everything replaced" — unless the producer attached a more precise
-    // `CollectionChange` to the context metadata.
-    let change = metadata
-        .try_get::<CollectionChange>()
-        .unwrap_or_else(|| CollectionChange::everything(snapshot.len()));
-    let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
-    watcher(Context::new(&snapshot[start..end], metadata), change);
-}
-
-impl<S, T> Collection for SignalCollection<S>
+impl<S, T, I> Collection for SignalCollection<S, I>
 where
     S: Signal<Output = Vec<T>> + Clone,
-    T: Clone + 'static,
+    T: Clone + PartialEq + 'static,
+    I: Identify<T>,
 {
     type Item = T;
+    type Id = I::Id;
     type Guard = S::Guard;
 
-    fn get(&self, index: usize) -> Option<Self::Item> {
+    fn get(&self, index: usize) -> Option<T> {
         self.signal.snapshot().as_slice().get(index).cloned()
     }
 
@@ -423,647 +756,381 @@ where
         self.signal.snapshot().len()
     }
 
+    fn identify(&self, index: usize, item: &T) -> I::Id {
+        self.identity.id(index, item)
+    }
+
+    fn id(&self, index: usize) -> Option<I::Id> {
+        let items = self.signal.snapshot();
+        items
+            .as_slice()
+            .get(index)
+            .map(|item| self.identity.id(index, item))
+    }
+
     fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static,
+        watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
     ) -> Self::Guard {
-        let start_bound = range.start_bound().cloned();
-        let end_bound = range.end_bound().cloned();
-        let watcher = Rc::new(watcher);
-        let pending = Rc::new(RefCell::new(None));
-        let subscribed = Rc::new(Cell::new(false));
+        let state = Rc::new(SignalWatch {
+            identity: Rc::clone(&self.identity),
+            start: range.start_bound().cloned(),
+            end: range.end_bound().cloned(),
+            watcher,
+            previous: RefCell::new(None),
+            pending: RefCell::new(None),
+            subscribed: Cell::new(false),
+        });
 
         let guard = self.signal.watch({
-            let watcher = Rc::clone(&watcher);
-            let pending = Rc::clone(&pending);
-            let subscribed = Rc::clone(&subscribed);
+            let state = Rc::clone(&state);
             move |context| {
-                if subscribed.get() {
-                    notify_signal_collection(watcher.as_ref(), context, start_bound, end_bound);
+                if state.subscribed.get() {
+                    state.deliver(context);
                 } else {
-                    *pending.borrow_mut() = Some(context);
+                    *state.pending.borrow_mut() = Some(context);
                 }
             }
         });
 
-        let initial = pending
+        let initial = state
+            .pending
             .borrow_mut()
             .take()
             .unwrap_or_else(|| Context::from(self.signal.snapshot()));
-        subscribed.set(true);
-        // A fresh watcher's first emission reports the watched contents as
-        // appearing from nothing — its insertion.
-        notify_signal_collection_populated(watcher.as_ref(), initial, start_bound, end_bound);
+        state.subscribed.set(true);
+        state.deliver(initial);
 
         guard
-    }
-}
-
-fn notify_signal_collection_populated<T>(
-    watcher: &dyn for<'a> Fn(Context<&'a [T]>, CollectionChange),
-    context: Context<Vec<T>>,
-    start_bound: Bound<usize>,
-    end_bound: Bound<usize>,
-) {
-    let metadata = context.metadata().clone();
-    let snapshot = context.into_value();
-    let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
-    watcher(
-        Context::new(&snapshot[start..end], metadata),
-        CollectionChange::populated(start, end - start),
-    );
-}
-
-impl<T: Clone + 'static> Collection for List<T> {
-    type Item = T;
-    type Guard = WatcherManagerGuard<Rc<[T]>>;
-
-    fn get(&self, index: usize) -> Option<Self::Item> {
-        self.vec.borrow().as_slice().get(index).cloned()
-    }
-    fn len(&self) -> usize {
-        self.vec.borrow().len()
-    }
-    fn watch(
-        &self,
-        range: impl RangeBounds<usize>,
-        watcher: impl for<'a> Fn(Context<&'a [Self::Item]>, CollectionChange) + 'static,
-    ) -> Self::Guard {
-        // Convert range bounds to concrete values for capture
-        let start_bound = match range.start_bound() {
-            Bound::Included(&n) => Bound::Included(n),
-            Bound::Excluded(&n) => Bound::Excluded(n),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-        let end_bound = match range.end_bound() {
-            Bound::Included(&n) => Bound::Included(n),
-            Bound::Excluded(&n) => Bound::Excluded(n),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-
-        // Call watcher immediately with current data, reported as inserted.
-        {
-            let snapshot: Rc<[T]> = Rc::from(self.vec.borrow().as_slice());
-            let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
-            watcher(
-                Context::from(&snapshot[start..end]),
-                CollectionChange::populated(start, end - start),
-            );
-        }
-
-        // Subsequent notifications: slice the Rc<[T]> snapshot carried inside
-        // the Context.  Cloning an Rc is O(1), so this avoids the previous
-        // O(n) re-borrow + range clone per watcher.  The mutation's
-        // `CollectionChange` rides the metadata: every `List` notification goes
-        // through `notify_with_metadata`, which always attaches one.
-        self.watchers.register_as_guard(move |ctx| {
-            let snapshot: Rc<[T]> = ctx.value().clone(); // O(1) ref-count bump
-            let metadata = ctx.metadata().clone();
-            let change = metadata
-                .try_get::<CollectionChange>()
-                .expect("every List notification carries its CollectionChange");
-            let (start, end) = resolve_range(start_bound, end_bound, snapshot.len());
-            watcher(Context::new(&snapshot[start..end], metadata), change);
-        })
-    }
-}
-
-impl<T: 'static> FromIterator<T> for List<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Self::from(iter.into_iter().collect::<Vec<_>>())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{rc::Rc, vec};
-    use core::cell::{Cell, RefCell};
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
+    use core::cell::RefCell;
 
-    #[test]
-    fn test_collection_trait_basic_operations() {
-        let list = List::from(vec![1, 2, 3]);
-
-        assert_eq!(Collection::len(&list), 3);
-        assert!(!Collection::is_empty(&list));
-        assert_eq!(Collection::get(&list, 0), Some(1));
-        assert_eq!(Collection::get(&list, 1), Some(2));
-        assert_eq!(Collection::get(&list, 2), Some(3));
-        assert_eq!(Collection::get(&list, 3), None);
-    }
-
-    #[test]
-    fn replace_notifies_only_the_final_snapshot() {
-        let list = List::from(vec![1, 2]);
-        let observed = Rc::new(RefCell::new(Vec::<Vec<i32>>::new()));
-        let observed_for_watcher = Rc::clone(&observed);
-        let _guard = list.watch(.., move |context, _change| {
-            observed_for_watcher
-                .borrow_mut()
-                .push(context.into_value().to_vec());
+    /// Records every change a watcher of `collection` receives.
+    fn record<C: Collection>(collection: &C) -> (Rc<RefCell<Vec<CollectionChange>>>, C::Guard) {
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        let guard = collection.watch(.., {
+            let changes = changes.clone();
+            move |_items, change| changes.borrow_mut().push(change.clone())
         });
+        (changes, guard)
+    }
 
-        let previous = list.replace(vec![3, 4, 5]);
+    #[derive(Clone, Debug, PartialEq)]
+    struct Row {
+        id: u32,
+        text: &'static str,
+    }
 
-        assert_eq!(previous, vec![1, 2]);
-        assert_eq!(*observed.borrow(), vec![vec![1, 2], vec![3, 4, 5]]);
+    const fn row(id: u32, text: &'static str) -> Row {
+        Row { id, text }
+    }
+
+    fn rows(items: Vec<Row>) -> List<Row, fn(&Row) -> u32> {
+        let list = List::new(|row: &Row| row.id);
+        list.extend(items);
+        list
     }
 
     #[test]
-    fn signal_collection_emits_initial_and_updated_snapshots() {
-        let values = crate::binding(vec![1, 2]);
-        let collection = SignalCollection::new(values.clone());
-        let observed = Rc::new(RefCell::new(Vec::<Vec<i32>>::new()));
-        let observed_for_watcher = Rc::clone(&observed);
-        let _guard = collection.watch(.., move |context, _change| {
-            observed_for_watcher
-                .borrow_mut()
-                .push(context.into_value().to_vec());
-        });
-
-        values.set(vec![2, 3, 4]);
-
-        assert_eq!(*observed.borrow(), vec![vec![1, 2], vec![2, 3, 4]]);
-    }
-
-    #[test]
-    fn test_list_new_and_default() {
-        let list1: List<i32> = List::new();
-        let list2: List<i32> = List::default();
-
-        assert_eq!(Collection::len(&list1), 0);
-        assert!(Collection::is_empty(&list1));
-        assert_eq!(Collection::len(&list2), 0);
-        assert!(Collection::is_empty(&list2));
-    }
-
-    #[test]
-    fn test_list_from_vec() {
-        let vec = vec![1, 2, 3, 4, 5];
-        let list = List::from(vec);
-
-        assert_eq!(Collection::len(&list), 5);
-        for i in 0..5 {
-            assert_eq!(Collection::get(&list, i), Some(i + 1));
-        }
-    }
-
-    #[test]
-    fn test_list_push_and_pop() {
-        let list = List::new();
-
-        list.push(1);
-        list.push(2);
-        list.push(3);
-
-        assert_eq!(Collection::len(&list), 3);
-        assert_eq!(Collection::get(&list, 0), Some(1));
-        assert_eq!(Collection::get(&list, 1), Some(2));
-        assert_eq!(Collection::get(&list, 2), Some(3));
-
-        assert_eq!(list.pop(), Some(3));
-        assert_eq!(Collection::len(&list), 2);
-        assert_eq!(list.pop(), Some(2));
-        assert_eq!(list.pop(), Some(1));
-        assert_eq!(list.pop(), None);
-        assert!(Collection::is_empty(&list));
-    }
-
-    #[test]
-    fn test_list_insert_and_remove() {
-        let list = List::from(vec![1, 3, 5]);
-
-        list.insert(1, 2);
-        list.insert(3, 4);
-
-        assert_eq!(Collection::len(&list), 5);
-        assert_eq!(Collection::get(&list, 0), Some(1));
-        assert_eq!(Collection::get(&list, 1), Some(2));
-        assert_eq!(Collection::get(&list, 2), Some(3));
-        assert_eq!(Collection::get(&list, 3), Some(4));
-        assert_eq!(Collection::get(&list, 4), Some(5));
-
-        assert_eq!(list.remove(1), 2);
-        assert_eq!(list.remove(2), 4);
-        assert_eq!(Collection::len(&list), 3);
-        assert_eq!(Collection::get(&list, 0), Some(1));
-        assert_eq!(Collection::get(&list, 1), Some(3));
-        assert_eq!(Collection::get(&list, 2), Some(5));
-    }
-
-    #[test]
-    fn test_list_clear() {
-        let list = List::from(vec![1, 2, 3, 4, 5]);
-        assert_eq!(Collection::len(&list), 5);
-
-        list.clear();
-        assert_eq!(Collection::len(&list), 0);
-        assert!(Collection::is_empty(&list));
-
-        // Clearing an empty list should not panic
-        list.clear();
-        assert!(Collection::is_empty(&list));
-    }
-
-    #[test]
-    fn test_list_clone() {
-        let list1 = List::from(vec![1, 2, 3]);
-        let list2 = Clone::clone(&list1);
-
-        assert_eq!(Collection::len(&list1), Collection::len(&list2));
-        for i in 0..3 {
-            assert_eq!(Collection::get(&list1, i), Collection::get(&list2, i));
-        }
-
-        // Modifications to one should affect the other (shared ownership)
-        list1.push(4);
-        assert_eq!(Collection::len(&list2), 4);
-        assert_eq!(Collection::get(&list2, 3), Some(4));
-    }
-
-    #[test]
-    fn test_list_watcher_notifications() {
-        let list = List::new();
-        let notification_count = Rc::new(RefCell::new(0));
-
-        let count = notification_count.clone();
-        let _guard = Collection::watch(&list, .., move |_ctx, _change| {
-            *count.borrow_mut() += 1;
-        });
-
-        // Initial snapshot should fire once with empty data.
-        assert_eq!(*notification_count.borrow(), 1);
-        {
-            let mut count_mut = notification_count.borrow_mut();
-            *count_mut = 0;
-        }
-
-        // Push operations should trigger notifications
-        list.push(1);
-        assert_eq!(*notification_count.borrow(), 1);
-
-        list.push(2);
-        assert_eq!(*notification_count.borrow(), 2);
-
-        let _ = list.pop();
-        assert_eq!(*notification_count.borrow(), 3);
-    }
-
-    #[test]
-    fn test_list_watcher_range() {
-        let list = List::from(vec![1, 2, 3, 4, 5]);
-        let notification_count = Rc::new(RefCell::new(0));
-
-        let count = notification_count.clone();
-        let _guard = Collection::watch(&list, 1..4, move |ctx, _change| {
-            *count.borrow_mut() += 1;
-            assert_eq!(ctx.into_value(), vec![2, 3, 4]);
-        });
-
-        list.push(6);
-        assert_eq!(*notification_count.borrow(), 2);
-    }
-
-    #[test]
-    fn test_vec_collection_implementation() {
-        let vec = vec![1, 2, 3, 4, 5];
-
-        assert_eq!(Collection::len(&vec), 5);
-        assert!(!Collection::is_empty(&vec));
-        assert_eq!(Collection::get(&vec, 2), Some(3));
-        assert_eq!(Collection::get(&vec, 10), None);
-
-        // Vec is static - watch should be a no-op and not call the watcher
-        let called = Rc::new(Cell::new(false));
-        let c = called.clone();
-        Collection::watch(&vec, 1..3, move |_ctx, _change| {
-            c.set(true);
-        });
-
-        assert!(!called.get()); // Watcher should not be called for static Vec
-    }
-
-    #[test]
-    fn test_array_collection_implementation() {
-        let arr = [1, 2, 3, 4, 5];
-
-        assert_eq!(Collection::len(&arr), 5);
-        assert!(!Collection::is_empty(&arr));
-        assert_eq!(Collection::get(&arr, 2), Some(3));
-        assert_eq!(Collection::get(&arr, 10), None);
-
-        // Arrays are static - watch should be a no-op and not call the watcher
-        let called = Rc::new(Cell::new(false));
-        let c = called.clone();
-        Collection::watch(&arr, 0..2, move |_ctx, _change| {
-            c.set(true);
-        });
-
-        assert!(!called.get()); // Watcher should not be called for static array
-    }
-
-    #[test]
-    fn test_empty_array_collection() {
-        let arr: [i32; 0] = [];
-
-        assert_eq!(Collection::len(&arr), 0);
-        assert!(Collection::is_empty(&arr));
-        assert_eq!(Collection::get(&arr, 0), None);
-
-        // Empty arrays are static - watch should be a no-op
-        let called = Rc::new(Cell::new(false));
-        let c = called.clone();
-        Collection::watch(&arr, .., move |_ctx, _change| {
-            c.set(true);
-        });
-
-        assert!(!called.get()); // Watcher should not be called for static empty array
-    }
-
-    #[test]
-    fn test_any_collection_basic_operations() {
-        let list = List::from(vec![1, 2, 3]);
-        let any_collection = AnyCollection::new(list);
-
-        assert_eq!(any_collection.len(), 3);
-        assert!(!any_collection.is_empty());
-        assert_eq!(any_collection.get(0), Some(1));
-        assert_eq!(any_collection.get(1), Some(2));
-        assert_eq!(any_collection.get(2), Some(3));
-        assert_eq!(any_collection.get(3), None);
-    }
-
-    #[test]
-    fn test_any_collection_from_vec() {
-        let vec = vec![10, 20, 30];
-        let any_collection = AnyCollection::new(vec);
-
-        assert_eq!(any_collection.len(), 3);
-        assert_eq!(any_collection.get(0), Some(10));
-        assert_eq!(any_collection.get(1), Some(20));
-        assert_eq!(any_collection.get(2), Some(30));
-    }
-
-    #[test]
-    fn test_any_collection_from_array() {
-        let arr = [100, 200, 300];
-        let any_collection = AnyCollection::new(arr);
-
-        assert_eq!(any_collection.len(), 3);
-        assert_eq!(any_collection.get(0), Some(100));
-        assert_eq!(any_collection.get(1), Some(200));
-        assert_eq!(any_collection.get(2), Some(300));
-    }
-
-    #[test]
-    fn test_any_collection_watcher() {
-        let list = List::from(vec![1, 2, 3, 4, 5]);
-        let any_collection = AnyCollection::new(list);
-
-        let called = Rc::new(RefCell::new(false));
-        let c = called.clone();
-        let _guard = any_collection.watch(1..3, move |ctx, _change| {
-            *c.borrow_mut() = true;
-            assert_eq!(ctx.into_value(), vec![2, 3]);
-        });
-
-        assert!(*called.borrow());
-    }
-
-    #[test]
-    fn test_range_bounds_inclusive() {
-        let list = List::from(vec![0, 1, 2, 3, 4]);
-        let called = Rc::new(RefCell::new(false));
-
-        let c = called.clone();
-        let _guard = Collection::watch(&list, 1..=3, move |ctx, _change| {
-            *c.borrow_mut() = true;
-            assert_eq!(ctx.into_value(), vec![1, 2, 3]);
-        });
-
-        assert!(*called.borrow());
-    }
-
-    #[test]
-    fn test_range_bounds_from() {
-        let list = List::from(vec![0, 1, 2, 3, 4]);
-        let called = Rc::new(RefCell::new(false));
-
-        let c = called.clone();
-        let _guard = Collection::watch(&list, 2.., move |ctx, _change| {
-            *c.borrow_mut() = true;
-            assert_eq!(ctx.into_value(), vec![2, 3, 4]);
-        });
-
-        assert!(*called.borrow());
-    }
-
-    #[test]
-    fn test_range_bounds_to() {
-        let list = List::from(vec![0, 1, 2, 3, 4]);
-        let called = Rc::new(RefCell::new(false));
-
-        let c = called.clone();
-        let _guard = Collection::watch(&list, ..3, move |ctx, _change| {
-            *c.borrow_mut() = true;
-            assert_eq!(ctx.into_value(), vec![0, 1, 2]);
-        });
-
-        assert!(*called.borrow());
-    }
-
-    #[test]
-    fn test_range_bounds_full() {
-        let list = List::from(vec![0, 1, 2, 3, 4]);
-        let called = Rc::new(RefCell::new(false));
-
-        let c = called.clone();
-        let _guard = Collection::watch(&list, .., move |ctx, _change| {
-            *c.borrow_mut() = true;
-            assert_eq!(ctx.into_value(), vec![0, 1, 2, 3, 4]);
-        });
-
-        assert!(*called.borrow());
-    }
-
-    #[test]
-    fn test_out_of_bounds_range() {
-        let list = List::from(vec![1, 2, 3]);
-        let called = Rc::new(Cell::new(None::<bool>));
-
-        let c = called.clone();
-        let _guard = Collection::watch(&list, 10..20, move |ctx, _change| {
-            let is_empty = ctx.map(<[i32]>::is_empty).into_value();
-            c.set(Some(is_empty));
-        });
-
-        // Out-of-bounds range should yield an empty snapshot
-        assert_eq!(called.get(), Some(true));
-    }
-
-    #[test]
-    fn test_empty_range() {
-        let list = List::from(vec![1, 2, 3]);
-        let called = Rc::new(Cell::new(None::<bool>));
-
-        let c = called.clone();
-        let _guard = Collection::watch(&list, 2..2, move |ctx, _change| {
-            let is_empty = ctx.map(<[i32]>::is_empty).into_value();
-            c.set(Some(is_empty));
-        });
-
-        // Empty range should snapshot as an empty slice
-        assert_eq!(called.get(), Some(true));
-    }
-
-    #[test]
-    fn test_watcher_guard_cleanup() {
-        let list = List::new();
-        let notification_count = Rc::new(RefCell::new(0));
-
-        {
-            let count = notification_count.clone();
-            let _guard = Collection::watch(&list, .., move |_ctx, _change| {
-                *count.borrow_mut() += 1;
-            });
-
-            // Initial snapshot
-            assert_eq!(*notification_count.borrow(), 1);
-            {
-                let mut count_mut = notification_count.borrow_mut();
-                *count_mut = 0;
+    fn reads_need_no_trait_import() {
+        // `Collection` is in scope here through `super::*`, so call the
+        // inherent methods through a module that does not import it.
+        mod reads {
+            use crate::collection::{ByValue, List};
+
+            pub fn check() {
+                let list: List<i32, ByValue> = List::from(alloc::vec![1, 2, 3]);
+                assert_eq!(list.len(), 3);
+                assert!(!list.is_empty());
+                assert_eq!(list.get(1), Some(2));
+                assert_eq!(list.get(3), None);
+                assert_eq!(list.id(2), Some(3));
+                // `Vec::get` keeps its slice meaning in this module.
+                let plain = alloc::vec![1, 2, 3];
+                assert_eq!(plain.get(1).copied(), Some(2));
             }
-
-            list.push(1);
-            assert_eq!(*notification_count.borrow(), 1);
-        } // Guard is dropped here
-
-        // After guard is dropped, no more notifications should occur
-        list.push(2);
-        assert_eq!(*notification_count.borrow(), 1);
+        }
+        reads::check();
     }
 
     #[test]
-    fn list_mutations_report_the_indices_they_touched() {
-        let list = List::from(vec![10, 20, 30]);
-        let changes = Rc::new(RefCell::new(Vec::<CollectionChange>::new()));
-        let observed = changes.clone();
-        let _guard = Collection::watch(&list, .., move |_ctx, change| {
-            observed.borrow_mut().push(change);
-        });
+    fn mutations_report_what_they_did() {
+        let list = rows(vec![row(1, "a"), row(2, "b"), row(3, "c")]);
+        let (changes, _guard) = record(&list);
 
-        // Initial emission: the whole watched range appears from nothing.
-        assert_eq!(
-            changes.borrow()[..],
-            [CollectionChange::populated(0, 3)][..]
-        );
-
-        list.push(40);
-        list.insert(0, 5);
+        list.push(row(4, "d"));
+        list.insert(0, row(0, "z"));
         let _ = list.remove(2);
         let _ = list.pop();
-        let _ = list.set(1, 21);
-        list.update(0, |value| *value += 100);
+        let _ = list.set(1, row(1, "A")); // same id: update
+        let _ = list.set(1, row(9, "x")); // new id: remove + insert
+        list.update(0, |row| row.text = "Z");
+        list.update(0, |row| row.id = 7);
+        list.extend([row(5, "e"), row(6, "f")]);
 
-        assert_eq!(
-            changes.borrow()[1..],
-            [
-                CollectionChange::inserted(3..4), // push appended at old len
-                CollectionChange::inserted(0..1), // insert at head
-                CollectionChange::removed(2..3),  // remove index 2
-                CollectionChange::removed(3..4),  // pop dropped the tail
-                CollectionChange::replaced(1..2), // set index 1
-                CollectionChange::replaced(0..1), // update index 0
-            ][..]
-        );
+        let expected = [
+            CollectionChange::populated(0, 3),
+            CollectionChange::inserted(3..4),
+            CollectionChange::inserted(0..1),
+            CollectionChange::removed(2..3),
+            CollectionChange::removed(3..4),
+            CollectionChange::updated(1..2),
+            CollectionChange::from_edits([Edit::Remove(1..2), Edit::Insert(1..2)]),
+            CollectionChange::updated(0..1),
+            CollectionChange::from_edits([Edit::Remove(0..1), Edit::Insert(0..1)]),
+            CollectionChange::inserted(3..5),
+        ];
+        assert_eq!(changes.borrow()[..], expected[..]);
     }
 
     #[test]
-    fn replace_reports_replaced_inserted_and_removed_spans() {
-        let list = List::from(vec![1, 2, 3]);
-        let changes = Rc::new(RefCell::new(Vec::<CollectionChange>::new()));
-        let observed = changes.clone();
-        let _guard = Collection::watch(&list, .., move |_ctx, change| {
-            observed.borrow_mut().push(change);
-        });
+    fn clear_and_retain_report_removals() {
+        let list: List<i32, ByValue> = List::from(vec![1, 2, 3, 4, 5]);
+        let (changes, _guard) = record(&list);
 
-        let _ = list.replace(vec![9, 8, 7, 6, 5]);
-
-        let change = changes.borrow()[1].clone();
-        assert_eq!(change.replaced, vec![0..3]);
-        assert_eq!(change.inserted, vec![3..5]);
-        assert_eq!(change.removed, [] as [core::ops::Range<usize>; 0]);
-
-        let _ = list.replace(vec![1]);
-        let change = changes.borrow()[2].clone();
-        assert_eq!(change.replaced, vec![0..1]);
-        assert_eq!(change.inserted, [] as [core::ops::Range<usize>; 0]);
-        assert_eq!(change.removed, vec![1..5]);
-    }
-
-    #[test]
-    fn clear_and_sort_report_conservative_ranges() {
-        let list = List::from(vec![3, 1, 2]);
-        let changes = Rc::new(RefCell::new(Vec::<CollectionChange>::new()));
-        let observed = changes.clone();
-        let _guard = Collection::watch(&list, .., move |_ctx, change| {
-            observed.borrow_mut().push(change);
-        });
-
-        list.sort();
+        list.retain(|value| value % 2 == 1);
+        assert_eq!(list.snapshot(), vec![1, 3, 5]);
         list.clear();
-        list.clear(); // no-op: empty list must not notify
+        list.clear(); // already empty: no notification
 
         assert_eq!(
             changes.borrow()[1..],
             [
-                CollectionChange::everything(3), // sort: every occupant may move
+                CollectionChange::from_edits([Edit::Remove(1..2), Edit::Remove(3..4)]),
                 CollectionChange::removed(0..3),
             ][..]
         );
     }
 
     #[test]
-    fn signal_collection_reports_whole_value_replacement() {
-        let values = crate::binding(vec![1, 2]);
-        let collection = SignalCollection::new(values.clone());
-        let changes = Rc::new(RefCell::new(Vec::<CollectionChange>::new()));
-        let observed = changes.clone();
-        let _guard = collection.watch(.., move |_ctx, change| {
-            observed.borrow_mut().push(change);
-        });
+    fn sort_reports_moves() {
+        let list: List<i32, ByValue> = List::from(vec![1, 2, 3, 0]);
+        let (changes, _guard) = record(&list);
 
-        values.set(vec![9, 9, 9, 9]);
+        list.sort();
+
+        assert_eq!(list.snapshot(), vec![0, 1, 2, 3]);
+        assert_eq!(changes.borrow()[1], CollectionChange::moved(3, 0));
+    }
+
+    #[test]
+    fn replace_aligns_by_id() {
+        let list = rows(vec![row(1, "a"), row(2, "b"), row(3, "c")]);
+        let (changes, _guard) = record(&list);
+
+        // Front insertion: one insert, nothing else.
+        let _ = list.replace(vec![row(0, "z"), row(1, "a"), row(2, "b"), row(3, "c")]);
+        // Reorder: one move.
+        let _ = list.replace(vec![row(0, "z"), row(3, "c"), row(1, "a"), row(2, "b")]);
+        // Removal plus content change of a survivor.
+        let _ = list.replace(vec![row(0, "z"), row(1, "A"), row(2, "b")]);
+        // Identical contents: no notification.
+        let _ = list.replace(vec![row(0, "z"), row(1, "A"), row(2, "b")]);
 
         assert_eq!(
-            changes.borrow()[..],
+            changes.borrow()[1..],
             [
-                CollectionChange::populated(0, 2),
-                CollectionChange::everything(4),
+                CollectionChange::inserted(0..1),
+                CollectionChange::moved(3, 1),
+                CollectionChange::from_edits([Edit::Remove(1..2), Edit::Update(1..2)]),
             ][..]
         );
     }
 
     #[test]
-    fn ranged_watchers_still_see_collection_wide_indices() {
-        let list = List::from(vec![0, 1, 2, 3, 4]);
-        let changes = Rc::new(RefCell::new(Vec::<CollectionChange>::new()));
-        let observed = changes.clone();
-        let _guard = Collection::watch(&list, 2..4, move |ctx, change| {
-            observed.borrow_mut().push(change);
-            // The slice still covers the watched range.
-            assert_eq!(ctx.into_value().len(), 2);
-        });
+    fn duplicate_ids_never_panic() {
+        let list: List<String, ByValue> = List::by_value();
+        list.extend(["buy milk".to_string(), "buy milk".to_string()]);
+        let (changes, _guard) = record(&list);
 
-        list.push(5); // outside the watched range: change delivered, slice untouched
+        let _ = list.replace(vec![
+            "call mom".to_string(),
+            "buy milk".to_string(),
+            "buy milk".to_string(),
+            "buy milk".to_string(),
+        ]);
+
+        // The trailing "buy milk" rows match the old ones by occurrence.
+        assert_eq!(changes.borrow()[1], CollectionChange::inserted(0..2));
+    }
+
+    #[test]
+    fn positional_lists_report_updates_and_tails() {
+        let list: List<i32, ByIndex> = List::from(vec![1, 2, 3]);
+        let (changes, _guard) = record(&list);
+
+        let _ = list.replace(vec![9, 2]);
 
         assert_eq!(
-            changes.borrow()[..],
-            [
-                CollectionChange::populated(2, 2),
-                CollectionChange::inserted(5..6),
-            ][..]
+            changes.borrow()[1],
+            CollectionChange::from_edits([Edit::Remove(2..3), Edit::Update(0..1)])
+        );
+    }
+
+    #[test]
+    fn notifications_carry_no_metadata_unless_given() {
+        let list = rows(vec![row(1, "a")]);
+        let metadata_seen = Rc::new(RefCell::new(Vec::new()));
+        let _guard = list.watch(.., {
+            let metadata_seen = metadata_seen.clone();
+            move |items, _change| {
+                metadata_seen
+                    .borrow_mut()
+                    .push(items.metadata().try_get::<&'static str>());
+            }
+        });
+
+        list.push(row(2, "b"));
+        let _ = list.replace_with_metadata(
+            vec![row(2, "b"), row(1, "a")],
+            Metadata::new().with("animated"),
+        );
+
+        assert_eq!(*metadata_seen.borrow(), vec![None, None, Some("animated")]);
+    }
+
+    #[test]
+    fn retained_snapshots_are_copy_on_write() {
+        let list: List<i32, ByValue> = List::from(vec![1, 2]);
+        let retained = Rc::new(RefCell::new(Vec::new()));
+        let _guard = list.watch(.., {
+            let retained = retained.clone();
+            move |items, _change| retained.borrow_mut().push(items.into_value())
+        });
+
+        list.push(3);
+        list.push(4);
+
+        let retained = retained.borrow();
+        assert_eq!(retained[0], vec![1, 2]);
+        assert_eq!(retained[1], vec![1, 2, 3]);
+        assert_eq!(retained[2], vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn ranged_watchers_get_their_slice_and_collection_wide_changes() {
+        let list: List<i32, ByValue> = List::from(vec![0, 1, 2, 3, 4]);
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let _guard = list.watch(2..4, {
+            let seen = seen.clone();
+            move |items, change| {
+                let items = items.into_value();
+                seen.borrow_mut()
+                    .push((items.range(), items.to_vec(), change.clone()));
+            }
+        });
+
+        list.push(5);
+
+        assert_eq!(
+            *seen.borrow(),
+            vec![
+                (2..4, vec![2, 3], CollectionChange::populated(2, 2)),
+                (2..4, vec![2, 3], CollectionChange::inserted(5..6)),
+            ]
+        );
+    }
+
+    #[test]
+    fn range_bounds_resolve_and_clamp() {
+        use Bound::{Excluded, Included, Unbounded};
+
+        let list: List<i32, ByValue> = List::from(vec![0, 1, 2, 3, 4]);
+        let first = |range: (Bound<usize>, Bound<usize>)| {
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let _guard = list.watch(range, {
+                let seen = seen.clone();
+                move |items, _change| *seen.borrow_mut() = items.value().to_vec()
+            });
+            seen.take()
+        };
+        assert_eq!(first((Included(1), Included(3))), vec![1, 2, 3]);
+        assert_eq!(first((Included(2), Unbounded)), vec![2, 3, 4]);
+        assert_eq!(first((Unbounded, Excluded(3))), vec![0, 1, 2]);
+        assert_eq!(first((Unbounded, Unbounded)), vec![0, 1, 2, 3, 4]);
+        assert_eq!(first((Included(10), Excluded(20))), Vec::<i32>::new());
+        assert_eq!(first((Included(2), Excluded(2))), Vec::<i32>::new());
+    }
+
+    #[test]
+    fn dropping_the_guard_stops_notifications() {
+        let list: List<i32, ByIndex> = List::by_index();
+        let (changes, guard) = record(&list);
+        list.push(1);
+        drop(guard);
+        list.push(2);
+        assert_eq!(changes.borrow().len(), 2);
+    }
+
+    #[test]
+    fn clones_share_the_list() {
+        let a: List<i32, ByIndex> = List::from(vec![1, 2, 3]);
+        let b = a.clone();
+        a.push(4);
+        assert_eq!(b.len(), 4);
+        assert_eq!(b.get(3), Some(4));
+        assert_eq!(b.into_iter().collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn static_collections_are_positional_and_silent() {
+        let vec = vec![10, 20, 30];
+        assert_eq!(Collection::len(&vec), 3);
+        assert_eq!(Collection::get(&vec, 1), Some(20));
+        assert_eq!(Collection::id(&vec, 2), Some(2));
+        let _: () = Collection::watch(&vec, .., |_, _| panic!("a Vec never notifies"));
+
+        let array = [1, 2];
+        assert_eq!(Collection::id(&array, 1), Some(1));
+        let _: () = Collection::watch(&array, .., |_, _| panic!("an array never notifies"));
+    }
+
+    #[test]
+    fn any_collection_forwards_everything() {
+        let list = rows(vec![row(4, "a"), row(5, "b")]);
+        let any = AnyCollection::new(list.clone());
+        assert_eq!(any.len(), 2);
+        assert_eq!(any.id(1), Some(5));
+        assert_eq!(any.get(0), Some(row(4, "a")));
+
+        let (changes, _guard) = record(&any);
+        let _ = list.replace(vec![row(5, "b"), row(4, "a")]);
+        assert_eq!(changes.borrow()[1], CollectionChange::moved(1, 0));
+    }
+
+    #[test]
+    fn signal_collection_aligns_snapshots_by_id() {
+        let values = crate::binding(vec![1, 2, 3]);
+        let collection = SignalCollection::new(values.clone(), ByValue);
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let _guard = collection.watch(.., {
+            let seen = seen.clone();
+            move |items, change| {
+                seen.borrow_mut()
+                    .push((items.value().to_vec(), change.clone()));
+            }
+        });
+
+        values.set(vec![0, 1, 2, 3]);
+        values.set(vec![0, 3, 1, 2]);
+
+        assert_eq!(
+            *seen.borrow(),
+            vec![
+                (vec![1, 2, 3], CollectionChange::populated(0, 3)),
+                (vec![0, 1, 2, 3], CollectionChange::inserted(0..1)),
+                (vec![0, 3, 1, 2], CollectionChange::moved(3, 1)),
+            ]
         );
     }
 }
