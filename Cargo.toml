@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core","derive"]
+members = ["core", "derive", "tests/renamed-dependency"]
 
 [workspace.package]
 edition = "2024"

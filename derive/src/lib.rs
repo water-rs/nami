@@ -239,12 +239,28 @@ impl Parse for SArg {
 
 /// Input structure for the `s!` macro
 struct SInput {
+    /// Path to the `nami` crate the expansion names.
+    krate: TokenStream2,
     format_str: LitStr,
     args: Punctuated<SArg, Token![,]>,
 }
 
 impl Parse for SInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        // `nami::s!` forwards here as `__s!($crate; ...)`, so the expansion
+        // resolves through whatever path reached nami (for example
+        // `waterui::reactive`). A direct call starts with the format string
+        // and falls back to `::nami`.
+        let krate = if input.peek(LitStr) {
+            quote! { ::nami }
+        } else {
+            let mut krate = TokenStream2::new();
+            while !input.peek(Token![;]) {
+                krate.extend(core::iter::once(input.parse::<proc_macro2::TokenTree>()?));
+            }
+            input.parse::<Token![;]>()?;
+            krate
+        };
         let format_str: LitStr = input.parse()?;
         let args = if input.peek(Token![,]) {
             input.parse::<Token![,]>()?;
@@ -252,7 +268,11 @@ impl Parse for SInput {
         } else {
             Punctuated::new()
         };
-        Ok(Self { format_str, args })
+        Ok(Self {
+            krate,
+            format_str,
+            args,
+        })
     }
 }
 
@@ -304,6 +324,7 @@ pub fn s(input: TokenStream) -> TokenStream {
 
 /// Main expansion logic for the `s!` macro, returning a `syn::Result` for clean error handling.
 fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
+    let krate = &input.krate;
     let format_str = input.format_str;
     let analysis = analyze_format_string(&format_str.value());
 
@@ -326,11 +347,11 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
         let entries: Vec<ZipEntry> = named_args
             .iter()
             .map(|(name, expr)| ZipEntry {
-                zip_expr: quote! { ::nami::__alloc::borrow::ToOwned::to_owned(#expr) },
+                zip_expr: quote! { #krate::__alloc::borrow::ToOwned::to_owned(#expr) },
                 name: (*name).clone(),
             })
             .collect();
-        Ok(generate_s_code(&format_str, &entries, &[]))
+        Ok(generate_s_code(krate, &format_str, &entries, &[]))
     } else if !positional_args.is_empty() {
         // Positional argument mode: `s!("{} {}", a, b)`
         let entries: Vec<ZipEntry> = positional_args
@@ -345,13 +366,12 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
             })
             .collect();
         let format_extra: Vec<syn::Ident> = entries.iter().map(|e| e.name.clone()).collect();
-        Ok(generate_s_code(&format_str, &entries, &format_extra))
+        Ok(generate_s_code(krate, &format_str, &entries, &format_extra))
     } else if analysis.named_vars.is_empty() {
         // Constant string, no placeholders
         Ok(quote! {
             {
-                use ::nami::constant;
-                constant(::nami::__alloc::format!(#format_str))
+                #krate::constant(#krate::__alloc::format!(#format_str))
             }
         })
     } else {
@@ -368,7 +388,7 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
                 name: ident.clone(),
             })
             .collect();
-        Ok(generate_s_code(&format_str, &entries, &[]))
+        Ok(generate_s_code(krate, &format_str, &entries, &[]))
     }
 }
 
@@ -475,7 +495,7 @@ fn validate_s_input(
 ///
 /// Splits left-heavy (left gets `ceil(n/2)` elements) to match the existing
 /// shape for 3 args: `zip(zip(a, b), c)`.
-fn build_zip_tree(exprs: &[&TokenStream2]) -> TokenStream2 {
+fn build_zip_tree(krate: &TokenStream2, exprs: &[&TokenStream2]) -> TokenStream2 {
     match exprs.len() {
         0 => unreachable!("build_zip_tree called with 0 expressions"),
         1 => {
@@ -484,9 +504,9 @@ fn build_zip_tree(exprs: &[&TokenStream2]) -> TokenStream2 {
         }
         _ => {
             let mid = exprs.len().div_ceil(2);
-            let left = build_zip_tree(&exprs[..mid]);
-            let right = build_zip_tree(&exprs[mid..]);
-            quote! { ::nami::zip::zip(#left, #right) }
+            let left = build_zip_tree(krate, &exprs[..mid]);
+            let right = build_zip_tree(krate, &exprs[mid..]);
+            quote! { #krate::zip::zip(#left, #right) }
         }
     }
 }
@@ -517,6 +537,7 @@ fn build_destructure_pattern(names: &[&syn::Ident]) -> TokenStream2 {
 /// `format_extra_args` are passed as extra arguments to `format!()` after the
 /// format string (used only for positional mode where format placeholders are `{}`).
 fn generate_s_code(
+    krate: &TokenStream2,
     format_str: &LitStr,
     entries: &[ZipEntry],
     format_extra_args: &[syn::Ident],
@@ -527,9 +548,9 @@ fn generate_s_code(
 
     // Build the format!() call — with or without extra positional args
     let format_call = if format_extra_args.is_empty() {
-        quote! { ::nami::__alloc::format!(#format_str) }
+        quote! { #krate::__alloc::format!(#format_str) }
     } else {
-        quote! { ::nami::__alloc::format!(#format_str, #(#format_extra_args),*) }
+        quote! { #krate::__alloc::format!(#format_str, #(#format_extra_args),*) }
     };
 
     if entries.len() == 1 {
@@ -538,7 +559,7 @@ fn generate_s_code(
         let name = &entries[0].name;
         quote! {
             {
-                use ::nami::SignalExt;
+                use #krate::SignalExt as _;
                 (#zip_expr).map(|#name| #format_call)
             }
         }
@@ -547,12 +568,12 @@ fn generate_s_code(
         let zip_exprs: Vec<&TokenStream2> = entries.iter().map(|e| &e.zip_expr).collect();
         let name_refs: Vec<&syn::Ident> = names.clone();
 
-        let zip_tree = build_zip_tree(&zip_exprs);
+        let zip_tree = build_zip_tree(krate, &zip_exprs);
         let pattern = build_destructure_pattern(&name_refs);
 
         quote! {
             {
-                use ::nami::{SignalExt, zip::zip};
+                use #krate::SignalExt as _;
                 #zip_tree.map(|#pattern| #format_call)
             }
         }
