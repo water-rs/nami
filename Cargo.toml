@@ -37,6 +37,7 @@ maintenance = { status = "actively-developed" }
 license = { file = "LICENSE" }
 
 [dev-dependencies]
+log = "0.4.33"
 nami-derive = { workspace = true }
 trybuild = "1"
 # `async_signal`'s timer tests drive spawned runnables through the same

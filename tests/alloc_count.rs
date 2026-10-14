@@ -149,7 +149,7 @@ fn registering_during_notify_takes_effect_next_round() {
 fn watched_list() -> (nami::collection::List<nami::SelfId<u64>>, impl Sized) {
     use nami::collection::{Collection, List};
 
-    let list = List::new();
+    let mut list = List::new();
     list.extend((0..1000).map(nami::SelfId::new));
     let guard = list.watch(.., move |items, change| {
         assert!(!change.is_empty());
@@ -160,7 +160,7 @@ fn watched_list() -> (nami::collection::List<nami::SelfId<u64>>, impl Sized) {
 
 #[test]
 fn list_push_with_one_watcher_does_not_allocate() {
-    let (list, _guard) = watched_list();
+    let (mut list, _guard) = watched_list();
     list.push(nami::SelfId::new(0)); // grow once to known spare capacity
     let _ = list.pop();
     assert_eq!(allocations(|| list.push(nami::SelfId::new(1000))), 0);
@@ -168,7 +168,7 @@ fn list_push_with_one_watcher_does_not_allocate() {
 
 #[test]
 fn list_pushes_with_a_watcher_never_copy() {
-    let (list, _guard) = watched_list();
+    let (mut list, _guard) = watched_list();
     list.push(nami::SelfId::new(0)); // grow once to known spare capacity
     let _ = list.pop();
     // The watcher only borrows the items, so it cannot hold a snapshot that
