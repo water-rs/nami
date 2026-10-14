@@ -161,10 +161,13 @@ pub trait Collection: 'static {
         self.len() == 0
     }
 
-    /// The id of the item currently at `index`.
-    fn id(&self, index: usize) -> Option<ItemId<Self>> {
-        self.get(index).map(|item| item.id())
-    }
+    /// The id of the item currently at `index`, or `None` if out of bounds.
+    ///
+    /// Implementers must provide this without cloning the item: borrow the
+    /// item in place and call [`Identifiable::id`] on the reference. Diffing
+    /// and keyed rendering call it for every index, so cloning whole items here
+    /// would be costly.
+    fn id(&self, index: usize) -> Option<ItemId<Self>>;
 
     /// Registers a watcher for changes in the specified range of the collection.
     ///
@@ -183,19 +186,24 @@ pub trait Collection: 'static {
 
 /// Static collections: never notify.
 macro_rules! static_collection {
-    ($({$($generics:tt)*} $ty:ty, |$this:ident, $index:ident| $get:expr, |$len_this:ident| $len:expr;)*) => {$(
+    ($({$($generics:tt)*} $ty:ty, |$this:ident| $slice:expr;)*) => {$(
         impl<$($generics)*> Collection for $ty {
             type Item = T;
             type Guard = ();
 
-            fn get(&self, $index: usize) -> Option<T> {
+            fn get(&self, index: usize) -> Option<T> {
                 let $this = self;
-                $get
+                $slice.get(index).cloned()
             }
 
             fn len(&self) -> usize {
-                let $len_this = self;
-                $len
+                let $this = self;
+                $slice.len()
+            }
+
+            fn id(&self, index: usize) -> Option<T::Id> {
+                let $this = self;
+                $slice.get(index).map(T::id)
             }
 
             fn watch(
@@ -210,10 +218,10 @@ macro_rules! static_collection {
 }
 
 static_collection! {
-    {T: Identifiable + Clone + 'static} Vec<T>, |this, index| this.as_slice().get(index).cloned(), |this| this.as_slice().len();
-    {T: Identifiable + Clone + 'static} &'static [T], |this, index| (*this).get(index).cloned(), |this| (*this).len();
-    {T: Identifiable + Clone + 'static, const N: usize} [T; N], |this, index| this.as_slice().get(index).cloned(), |_this| N;
-    {T: Identifiable + Clone + 'static} Rc<[T]>, |this, index| this.as_ref().get(index).cloned(), |this| this.as_ref().len();
+    {T: Identifiable + Clone + 'static} Vec<T>, |this| this.as_slice();
+    {T: Identifiable + Clone + 'static} &'static [T], |this| <[T]>::as_ref(*this);
+    {T: Identifiable + Clone + 'static, const N: usize} [T; N], |this| this.as_slice();
+    {T: Identifiable + Clone + 'static} Rc<[T]>, |this| <[T]>::as_ref(this);
 }
 
 macro_rules! forward_collection {
