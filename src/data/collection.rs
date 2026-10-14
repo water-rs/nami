@@ -470,8 +470,9 @@ impl<T: Identifiable + 'static> List<T> {
         previous
     }
 
-    /// Runs `f` on the items, copying them first only if a watcher still
-    /// holds a snapshot.
+    /// Runs `f` on the items, copying them first only if a snapshot is still
+    /// shared (watchers only borrow the items, so normally none is: a copy
+    /// happens only when a mutation runs re-entrantly during a notification).
     fn edit<R>(&self, f: impl FnOnce(&mut Vec<T>) -> R) -> R
     where
         T: Clone,
