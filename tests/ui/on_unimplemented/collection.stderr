@@ -7,15 +7,15 @@ error[E0277]: `Binding<_>` is not a reactive collection
   |     required by a bound introduced by this call
   |
   = help: the trait `Collection` is not implemented for `Binding<_>`
-  = note: use `nami::collection::List<T, _>` for an owned reactive sequence; for a sequence derived from a signal such as a `Binding<Vec<T>>`, wrap it in `nami::collection::SignalCollection`
+  = note: use `nami::collection::List<T>` for an owned reactive sequence; for a sequence derived from a signal such as a `Binding<Vec<T>>`, wrap it in `nami::collection::SignalCollection`
   = help: the following other types implement trait `Collection`:
             &'static [T]
-            AnyCollection<T, Id>
+            AnyCollection<T>
             Box<C>
-            List<T, I>
+            List<T>
             Rc<C>
             Rc<[T]>
-            SignalCollection<S, I>
+            SignalCollection<S>
             Vec<T>
             [T; N]
 note: required by a bound in `takes`

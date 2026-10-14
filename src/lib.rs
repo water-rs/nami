@@ -76,4 +76,5 @@ macro_rules! s {
 #[doc(hidden)]
 pub extern crate alloc as __alloc;
 
+pub use nami_core::{Identifiable, IdentifiableExt, SelfId, UseId, id};
 pub use nami_core::{impl_constant, observe, watcher};

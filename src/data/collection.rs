@@ -4,20 +4,20 @@
 //!
 //! - [`Collection`]: the interface for observable collections, re-exported
 //!   from `nami-core`.
-//! - [`List<T, I>`]: an owned reactive list whose items are identified by `I`
-//!   (a key function, [`ByValue`] or [`ByIndex`]).
+//! - [`List<T>`]: an owned reactive list of [`Identifiable`] items.
 //! - [`SignalCollection`]: adapts a signal of `Vec<T>` snapshots.
-//! - [`AnyCollection<T, Id>`]: a type-erased collection.
+//! - [`AnyCollection<T>`]: a type-erased collection.
 //!
 //! # Identity
 //!
-//! A `List` knows each item's id from creation, the way `SwiftUI`'s
-//! `ForEach(items, id: \.id)` does, and reports every notification as a
+//! Every item knows its own id through [`Identifiable`], the way `SwiftUI`'s
+//! `Identifiable` works, and a `List` reports every notification as a
 //! [`CollectionChange`] aligned by id. Replacing the whole list with a
 //! reordered or front-inserted vector reports moves and insertions instead of
 //! rewriting every row, so a consumer never diffs snapshots itself.
 //!
 //! ```rust
+//! use nami::Identifiable;
 //! use nami::collection::{Collection, CollectionChange, Edit, List};
 //!
 //! #[derive(Clone, PartialEq)]
@@ -26,8 +26,16 @@
 //!     text: String,
 //! }
 //!
+//! impl Identifiable for Message {
+//!     type Id = u64;
+//!
+//!     fn id(&self) -> u64 {
+//!         self.id
+//!     }
+//! }
+//!
 //! let message = |id: u64, text: &str| Message { id, text: text.into() };
-//! let list = List::new(|message: &Message| message.id);
+//! let list = List::new();
 //! list.extend([message(1, "hi"), message(2, "there")]);
 //!
 //! let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -43,6 +51,17 @@
 //!     changes.borrow()[1],
 //!     CollectionChange::from_edits([Edit::Insert(0..1), Edit::Update(2..3)]),
 //! );
+//! ```
+//!
+//! Plain values that are their own identity, such as tags, are wrapped in
+//! [`SelfId`]:
+//!
+//! ```rust
+//! use nami::SelfId;
+//! use nami::collection::List;
+//!
+//! let tags: List<SelfId<String>> = ["rust", "ui"].map(|t| SelfId::new(t.to_string())).into_iter().collect();
+//! assert_eq!(tags.id(1).as_deref(), Some("ui"));
 //! ```
 //!
 //! # Range-based Watching
@@ -75,33 +94,25 @@ use crate::Signal;
 /// change. Each registration slices the snapshot to its own range.
 type ListWatcher<T> = dyn Fn(Context<Rc<Vec<T>>>, &CollectionChange);
 
-/// A reactive list whose items have identities.
+/// A reactive list of [`Identifiable`] items.
 ///
-/// `I` gives each item its id (see [`Identify`]):
-///
-/// - [`List::new`] takes a key closure, `List::new(|m: &Message| m.id)`.
-/// - [`ByIndex`] is the default: `List<T>` is `List<T, ByIndex>`, and
-///   [`Default`], `From<Vec<T>>` and [`FromIterator`] build it without
-///   annotations. It is the only identity with no bound on `T`.
-/// - [`List::by_value`] uses the value itself (`T: Ord`), for lists of plain
-///   values such as `List<String, ByValue>`.
-/// - [`List::by_index`] spells out the positional default, for stacks such
-///   as a navigation path.
+/// Each item's id is [`Identifiable::id`]; wrap plain values in [`SelfId`]
+/// (`List<SelfId<String>>`) when the value is its own identity. Build one
+/// with [`List::new`], [`Default`], `From<Vec<T>>` or [`FromIterator`].
 ///
 /// Cloning a `List` shares it. Storage is copy-on-write: a notification hands
 /// watchers a reference to the current items, and a mutation copies them
 /// only while a watcher still holds an older snapshot.
-pub struct List<T, I = ByIndex> {
-    state: Rc<ListState<T, I>>,
+pub struct List<T> {
+    state: Rc<ListState<T>>,
 }
 
-struct ListState<T, I> {
+struct ListState<T> {
     items: RefCell<Rc<Vec<T>>>,
-    identity: I,
     watchers: WatcherRegistry<ListWatcher<T>>,
 }
 
-impl<T: fmt::Debug, I> fmt::Debug for List<T, I> {
+impl<T: fmt::Debug> fmt::Debug for List<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("List")
             .field(&self.state.items.borrow().as_slice())
@@ -109,7 +120,7 @@ impl<T: fmt::Debug, I> fmt::Debug for List<T, I> {
     }
 }
 
-impl<T, I> Clone for List<T, I> {
+impl<T> Clone for List<T> {
     fn clone(&self) -> Self {
         Self {
             state: Rc::clone(&self.state),
@@ -117,48 +128,11 @@ impl<T, I> Clone for List<T, I> {
     }
 }
 
-impl<T: 'static> List<T> {
-    /// Creates an empty list whose items are identified by their position.
-    ///
-    /// The same as [`List::default`]; the explicit name reads better where
-    /// positional identity is a deliberate choice, such as a navigation path.
-    #[must_use]
-    #[track_caller]
-    pub fn by_index() -> Self {
-        Self::new(ByIndex)
-    }
-}
-
-impl<T: Ord + Clone + 'static> List<T, ByValue> {
-    /// Creates an empty list whose items are identified by their value.
-    #[must_use]
-    #[track_caller]
-    pub fn by_value() -> Self {
-        Self::new(ByValue)
-    }
-
-    /// Creates a list holding `items`, identified by their value.
+impl<T: Identifiable + 'static> List<T> {
+    /// Creates an empty list.
     ///
     /// ```rust
-    /// use nami::collection::List;
-    ///
-    /// let tags = List::by_value_from(vec!["rust".to_string(), "ui".to_string()]);
-    /// assert_eq!(tags.id(1).as_deref(), Some("ui"));
-    /// ```
-    #[must_use]
-    #[track_caller]
-    pub fn by_value_from(items: Vec<T>) -> Self {
-        Self::new_from(ByValue, items)
-    }
-}
-
-impl<T: 'static, I: Identify<T>> List<T, I> {
-    /// Creates an empty list whose items are identified by `identity`.
-    ///
-    /// `identity` is usually a key closure; any [`Identify`] works, including
-    /// closures that capture state, [`ByValue`] and [`ByIndex`].
-    ///
-    /// ```rust
+    /// use nami::Identifiable;
     /// use nami::collection::List;
     ///
     /// #[derive(Clone)]
@@ -167,71 +141,38 @@ impl<T: 'static, I: Identify<T>> List<T, I> {
     ///     title: String,
     /// }
     ///
-    /// let todos = List::new(|t: &Todo| t.id);
-    /// todos.push(Todo { id: 1, title: "write docs".into() });
-    /// assert_eq!(todos.id(0), Some(1));
-    /// ```
-    ///
-    /// A closure's type cannot be named, so to store such a list in a struct
-    /// field, make the struct generic over the identity, return
-    /// `List<T, impl Identify<T>>`, or use a named identity type:
-    ///
-    /// ```rust
-    /// use nami::collection::{Identify, List};
-    ///
-    /// #[derive(Clone)]
-    /// struct Todo {
-    ///     id: u32,
-    /// }
-    ///
-    /// struct TodoId;
-    ///
-    /// impl Identify<Todo> for TodoId {
+    /// impl Identifiable for Todo {
     ///     type Id = u32;
     ///
-    ///     fn id(&self, _index: usize, todo: &Todo) -> u32 {
-    ///         todo.id
+    ///     fn id(&self) -> u32 {
+    ///         self.id
     ///     }
     /// }
     ///
     /// struct App {
-    ///     todos: List<Todo, TodoId>,
+    ///     todos: List<Todo>,
     /// }
     ///
-    /// fn todo_list() -> List<Todo, impl Identify<Todo, Id = u32>> {
-    ///     List::new(|t: &Todo| t.id)
-    /// }
-    ///
-    /// let app = App { todos: List::new(TodoId) };
-    /// assert!(app.todos.is_empty());
-    /// assert!(todo_list().is_empty());
+    /// let app = App { todos: List::new() };
+    /// app.todos.push(Todo { id: 1, title: "write docs".into() });
+    /// assert_eq!(app.todos.id(0), Some(1));
     /// ```
     ///
     /// Records such as todos should carry their own id, assigned by the app
     /// or backend when the record is created.
     #[must_use]
     #[track_caller]
-    pub fn new(identity: I) -> Self {
-        Self::new_from(identity, Vec::new())
+    pub fn new() -> Self {
+        Self::from_vec(Vec::new())
     }
 
-    /// Creates a list holding `items`, identified by `identity`.
-    ///
-    /// ```rust
-    /// use nami::collection::List;
-    ///
-    /// let list = List::new_from(|n: &u32| *n, vec![3, 1, 2]);
-    /// assert_eq!(list.id(0), Some(3));
-    /// ```
-    #[must_use]
     #[track_caller]
-    pub fn new_from(identity: I, items: Vec<T>) -> Self {
+    fn from_vec(items: Vec<T>) -> Self {
         Self {
             state: Rc::new_cyclic(|state| {
                 let origin = Origin::capture::<Self>(SignalIdentity::from_ptr(state.as_ptr()));
                 ListState {
                     items: RefCell::new(Rc::new(items)),
-                    identity,
                     watchers: WatcherRegistry::with_origin(origin),
                 }
             }),
@@ -261,12 +202,8 @@ impl<T: 'static, I: Identify<T>> List<T, I> {
 
     /// Returns the id of the item at `index`, or `None` if out of bounds.
     #[must_use]
-    pub fn id(&self, index: usize) -> Option<I::Id> {
-        let items = self.state.items.borrow();
-        items
-            .as_slice()
-            .get(index)
-            .map(|item| self.state.identity.id(index, item))
+    pub fn id(&self, index: usize) -> Option<T::Id> {
+        self.state.items.borrow().as_slice().get(index).map(T::id)
     }
 
     /// Calls `f` with the current items, without cloning them.
@@ -377,7 +314,7 @@ impl<T: 'static, I: Identify<T>> List<T, I> {
         let watched = !self.state.watchers.is_empty();
         let (previous, change) = self.edit(|items| {
             let previous = core::mem::replace(&mut items[index], value);
-            let change = watched.then(|| self.change_at(index, &previous, &items[index]));
+            let change = watched.then(|| Self::change_at(index, &previous, &items[index]));
             (previous, change)
         });
         if let Some(change) = change {
@@ -401,10 +338,10 @@ impl<T: 'static, I: Identify<T>> List<T, I> {
         let watched = !self.state.watchers.is_empty();
         let change = self.edit(|items| {
             let item = &mut items[index];
-            let before = watched.then(|| self.state.identity.id(index, item));
+            let before = watched.then(|| item.id());
             f(item);
             before.map(|before| {
-                if before == self.state.identity.id(index, item) {
+                if before == item.id() {
                     CollectionChange::updated(index..index + 1)
                 } else {
                     Self::reidentified(index)
@@ -522,13 +459,7 @@ impl<T: 'static, I: Identify<T>> List<T, I> {
         if !self.state.watchers.is_empty() {
             let result = {
                 let current = self.state.items.borrow();
-                let identity = &self.state.identity;
-                diff(
-                    &previous,
-                    &current,
-                    |index, item| identity.id(index, item),
-                    PartialEq::eq,
-                )
+                diff(&previous, &current, |_, item| item.id(), PartialEq::eq)
             };
             warn_on_duplicates(&result);
             self.notify_with_metadata(&result.change, metadata);
@@ -547,9 +478,8 @@ impl<T: 'static, I: Identify<T>> List<T, I> {
     }
 
     /// The change for replacing `old` by `new` at `index`.
-    fn change_at(&self, index: usize, old: &T, new: &T) -> CollectionChange {
-        let identity = &self.state.identity;
-        if identity.id(index, old) == identity.id(index, new) {
+    fn change_at(index: usize, old: &T, new: &T) -> CollectionChange {
+        if old.id() == new.id() {
             CollectionChange::updated(index..index + 1)
         } else {
             Self::reidentified(index)
@@ -605,9 +535,8 @@ impl<T> fmt::Debug for ListGuard<T> {
 
 impl<T: 'static> WatcherGuard for ListGuard<T> {}
 
-impl<T: Clone + 'static, I: Identify<T>> Collection for List<T, I> {
+impl<T: Identifiable + Clone + 'static> Collection for List<T> {
     type Item = T;
-    type Id = I::Id;
     type Guard = ListGuard<T>;
 
     fn get(&self, index: usize) -> Option<T> {
@@ -622,11 +551,7 @@ impl<T: Clone + 'static, I: Identify<T>> Collection for List<T, I> {
         Self::is_empty(self)
     }
 
-    fn identify(&self, index: usize, item: &T) -> I::Id {
-        self.state.identity.id(index, item)
-    }
-
-    fn id(&self, index: usize) -> Option<I::Id> {
+    fn id(&self, index: usize) -> Option<T::Id> {
         Self::id(self, index)
     }
 
@@ -654,30 +579,30 @@ impl<T: Clone + 'static, I: Identify<T>> Collection for List<T, I> {
     }
 }
 
-impl<T: 'static> Default for List<T> {
+impl<T: Identifiable + 'static> Default for List<T> {
     #[track_caller]
     fn default() -> Self {
-        Self::by_index()
+        Self::new()
     }
 }
 
-impl<T: 'static> From<Vec<T>> for List<T> {
+impl<T: Identifiable + 'static> From<Vec<T>> for List<T> {
     #[track_caller]
     fn from(items: Vec<T>) -> Self {
-        Self::new_from(ByIndex, items)
+        Self::from_vec(items)
     }
 }
 
-impl<T: 'static> FromIterator<T> for List<T> {
+impl<T: Identifiable + 'static> FromIterator<T> for List<T> {
     #[track_caller]
     fn from_iter<It: IntoIterator<Item = T>>(iter: It) -> Self {
-        Self::new_from(ByIndex, iter.into_iter().collect())
+        Self::from_vec(iter.into_iter().collect())
     }
 }
 
 /// Iterates the items, without cloning them when this is the last handle to
 /// the list and no watcher holds a snapshot.
-impl<T: Clone + 'static, I> IntoIterator for List<T, I> {
+impl<T: Clone + 'static> IntoIterator for List<T> {
     type Item = T;
     type IntoIter = alloc::vec::IntoIter<T>;
 
@@ -690,7 +615,7 @@ impl<T: Clone + 'static, I> IntoIterator for List<T, I> {
 }
 
 /// Iterates a snapshot of the items; see [`List::iter`].
-impl<T: Clone + 'static, I: Identify<T>> IntoIterator for &List<T, I> {
+impl<T: Identifiable + Clone + 'static> IntoIterator for &List<T> {
     type Item = T;
     type IntoIter = alloc::vec::IntoIter<T>;
 
@@ -704,36 +629,21 @@ impl<T: Clone + 'static, I: Identify<T>> IntoIterator for &List<T, I> {
 /// Every new snapshot is aligned with the previous one by id, so watchers
 /// receive the same insertions, removals, moves and updates a [`List`]
 /// reports for [`List::replace`].
-#[derive(Debug)]
-pub struct SignalCollection<S, I> {
+#[derive(Debug, Clone)]
+pub struct SignalCollection<S> {
     signal: S,
-    identity: Rc<I>,
 }
 
-impl<S: Clone, I> Clone for SignalCollection<S, I> {
-    fn clone(&self) -> Self {
-        Self {
-            signal: self.signal.clone(),
-            identity: Rc::clone(&self.identity),
-        }
-    }
-}
-
-impl<S, I> SignalCollection<S, I> {
-    /// Creates a collection backed by vector snapshots from `signal`, whose
-    /// items are identified by `identity` (a key function, [`ByValue`] or
-    /// [`ByIndex`]).
-    pub fn new(signal: S, identity: I) -> Self {
-        Self {
-            signal,
-            identity: Rc::new(identity),
-        }
+impl<S> SignalCollection<S> {
+    /// Creates a collection backed by vector snapshots from `signal`; items
+    /// are identified by [`Identifiable::id`].
+    pub const fn new(signal: S) -> Self {
+        Self { signal }
     }
 }
 
 /// Per-watcher state of a [`SignalCollection`] watch.
-struct SignalWatch<T, I, W> {
-    identity: Rc<I>,
+struct SignalWatch<T, W> {
     start: Bound<usize>,
     end: Bound<usize>,
     watcher: W,
@@ -744,10 +654,9 @@ struct SignalWatch<T, I, W> {
     subscribed: Cell<bool>,
 }
 
-impl<T, I, W> SignalWatch<T, I, W>
+impl<T, W> SignalWatch<T, W>
 where
-    T: PartialEq + 'static,
-    I: Identify<T>,
+    T: Identifiable + PartialEq + 'static,
     W: Fn(Context<Items<T>>, &CollectionChange),
 {
     fn deliver(&self, context: Context<Vec<T>>) {
@@ -759,12 +668,7 @@ where
         let change = previous.map_or_else(
             || CollectionChange::populated(range.start, range.len()),
             |previous| {
-                let result = diff(
-                    &previous,
-                    &current,
-                    |index, item| self.identity.id(index, item),
-                    PartialEq::eq,
-                );
+                let result = diff(&previous, &current, |_, item| item.id(), PartialEq::eq);
                 warn_on_duplicates(&result);
                 result.change
             },
@@ -773,14 +677,12 @@ where
     }
 }
 
-impl<S, T, I> Collection for SignalCollection<S, I>
+impl<S, T> Collection for SignalCollection<S>
 where
     S: Signal<Output = Vec<T>> + Clone,
-    T: Clone + PartialEq + 'static,
-    I: Identify<T>,
+    T: Identifiable + Clone + PartialEq + 'static,
 {
     type Item = T;
-    type Id = I::Id;
     type Guard = S::Guard;
 
     fn get(&self, index: usize) -> Option<T> {
@@ -791,16 +693,8 @@ where
         self.signal.snapshot().len()
     }
 
-    fn identify(&self, index: usize, item: &T) -> I::Id {
-        self.identity.id(index, item)
-    }
-
-    fn id(&self, index: usize) -> Option<I::Id> {
-        let items = self.signal.snapshot();
-        items
-            .as_slice()
-            .get(index)
-            .map(|item| self.identity.id(index, item))
+    fn id(&self, index: usize) -> Option<T::Id> {
+        self.signal.snapshot().as_slice().get(index).map(T::id)
     }
 
     fn watch(
@@ -809,7 +703,6 @@ where
         watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
     ) -> Self::Guard {
         let state = Rc::new(SignalWatch {
-            identity: Rc::clone(&self.identity),
             start: range.start_bound().cloned(),
             end: range.end_bound().cloned(),
             watcher,
@@ -866,14 +759,29 @@ mod tests {
         text: &'static str,
     }
 
+    impl Identifiable for Row {
+        type Id = u32;
+
+        fn id(&self) -> u32 {
+            self.id
+        }
+    }
+
     const fn row(id: u32, text: &'static str) -> Row {
         Row { id, text }
     }
 
-    fn rows(items: Vec<Row>) -> List<Row, impl Identify<Row, Id = u32>> {
-        let list = List::new(|row: &Row| row.id);
-        list.extend(items);
-        list
+    fn rows(items: Vec<Row>) -> List<Row> {
+        List::from(items)
+    }
+
+    /// Value-identified items.
+    fn vals<const N: usize>(values: [i32; N]) -> Vec<SelfId<i32>> {
+        values.into_iter().map(SelfId::new).collect()
+    }
+
+    fn values(list: &List<SelfId<i32>>) -> Vec<i32> {
+        list.iter().map(SelfId::into_inner).collect()
     }
 
     #[test]
@@ -881,13 +789,14 @@ mod tests {
         // `Collection` is in scope here through `super::*`, so call the
         // inherent methods through a module that does not import it.
         mod reads {
-            use crate::collection::{ByValue, List};
+            use crate::SelfId;
+            use crate::collection::List;
 
             pub fn check() {
-                let list: List<i32, ByValue> = List::by_value_from(alloc::vec![1, 2, 3]);
+                let list: List<SelfId<i32>> = [1, 2, 3].into_iter().map(SelfId::new).collect();
                 assert_eq!(list.len(), 3);
                 assert!(!list.is_empty());
-                assert_eq!(list.get(1), Some(2));
+                assert_eq!(list.get(1), Some(SelfId::new(2)));
                 assert_eq!(list.get(3), None);
                 assert_eq!(list.id(2), Some(3));
                 // `Vec::get` keeps its slice meaning in this module.
@@ -930,11 +839,11 @@ mod tests {
 
     #[test]
     fn clear_and_retain_report_removals() {
-        let list: List<i32, ByValue> = List::by_value_from(vec![1, 2, 3, 4, 5]);
+        let list = List::from(vals([1, 2, 3, 4, 5]));
         let (changes, _guard) = record(&list);
 
-        list.retain(|value| value % 2 == 1);
-        assert_eq!(list.snapshot(), vec![1, 3, 5]);
+        list.retain(|value| **value % 2 == 1);
+        assert_eq!(values(&list), vec![1, 3, 5]);
         list.clear();
         list.clear(); // already empty: no notification
 
@@ -949,12 +858,12 @@ mod tests {
 
     #[test]
     fn sort_reports_moves() {
-        let list: List<i32, ByValue> = List::by_value_from(vec![1, 2, 3, 0]);
+        let list = List::from(vals([1, 2, 3, 0]));
         let (changes, _guard) = record(&list);
 
         list.sort();
 
-        assert_eq!(list.snapshot(), vec![0, 1, 2, 3]);
+        assert_eq!(values(&list), vec![0, 1, 2, 3]);
         assert_eq!(changes.borrow()[1], CollectionChange::moved(3, 0));
     }
 
@@ -984,31 +893,56 @@ mod tests {
 
     #[test]
     fn duplicate_ids_never_panic() {
-        let list: List<String, ByValue> = List::by_value();
-        list.extend(["buy milk".to_string(), "buy milk".to_string()]);
+        let list: List<SelfId<String>> = List::new();
+        list.extend(["buy milk", "buy milk"].map(|s| SelfId::new(s.to_string())));
         let (changes, _guard) = record(&list);
 
-        let _ = list.replace(vec![
-            "call mom".to_string(),
-            "buy milk".to_string(),
-            "buy milk".to_string(),
-            "buy milk".to_string(),
-        ]);
+        let _ = list.replace(
+            ["call mom", "buy milk", "buy milk", "buy milk"]
+                .map(|s| SelfId::new(s.to_string()))
+                .into(),
+        );
 
         // The trailing "buy milk" rows match the old ones by occurrence.
         assert_eq!(changes.borrow()[1], CollectionChange::inserted(0..2));
     }
 
     #[test]
-    fn positional_lists_report_updates_and_tails() {
-        let list: List<i32, ByIndex> = List::from(vec![1, 2, 3]);
+    fn self_id_lists_align_by_value() {
+        let list: List<SelfId<String>> = ["a", "b", "c"]
+            .map(|s| s.to_string().self_id())
+            .into_iter()
+            .collect();
+        assert_eq!(list.id(1).as_deref(), Some("b"));
         let (changes, _guard) = record(&list);
 
-        let _ = list.replace(vec![9, 2]);
+        let _ = list.replace(["c", "a", "b"].map(|s| s.to_string().self_id()).into());
+        let _ = list.replace(["c", "b"].map(|s| s.to_string().self_id()).into());
+
+        assert_eq!(
+            changes.borrow()[1..],
+            [
+                CollectionChange::moved(2, 0),
+                CollectionChange::removed(1..2),
+            ][..]
+        );
+    }
+
+    #[test]
+    fn use_id_lists_align_by_key() {
+        let key: fn(&(u32, &'static str)) -> u32 = |pair| pair.0;
+        let list: List<UseId<(u32, &'static str), _>> = [(1, "a"), (2, "b")]
+            .map(|pair| pair.use_id(key))
+            .into_iter()
+            .collect();
+        assert_eq!(list.id(1), Some(2));
+        let (changes, _guard) = record(&list);
+
+        let _ = list.replace([(2, "B"), (1, "a")].map(|pair| pair.use_id(key)).into());
 
         assert_eq!(
             changes.borrow()[1],
-            CollectionChange::from_edits([Edit::Remove(2..3), Edit::Update(0..1)])
+            CollectionChange::from_edits([Edit::Move { from: 1, to: 0 }, Edit::Update(0..1)])
         );
     }
 
@@ -1036,25 +970,25 @@ mod tests {
 
     #[test]
     fn retained_snapshots_are_copy_on_write() {
-        let list: List<i32, ByValue> = List::by_value_from(vec![1, 2]);
+        let list = List::from(vals([1, 2]));
         let retained = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(.., {
             let retained = retained.clone();
             move |items, _change| retained.borrow_mut().push(items.into_value())
         });
 
-        list.push(3);
-        list.push(4);
+        list.push(SelfId::new(3));
+        list.push(SelfId::new(4));
 
         let retained = retained.borrow();
-        assert_eq!(retained[0], vec![1, 2]);
-        assert_eq!(retained[1], vec![1, 2, 3]);
-        assert_eq!(retained[2], vec![1, 2, 3, 4]);
+        assert_eq!(retained[0], vals([1, 2]));
+        assert_eq!(retained[1], vals([1, 2, 3]));
+        assert_eq!(retained[2], vals([1, 2, 3, 4]));
     }
 
     #[test]
     fn ranged_watchers_get_their_slice_and_collection_wide_changes() {
-        let list: List<i32, ByValue> = List::by_value_from(vec![0, 1, 2, 3, 4]);
+        let list = List::from(vals([0, 1, 2, 3, 4]));
         let seen = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(2..4, {
             let seen = seen.clone();
@@ -1065,13 +999,13 @@ mod tests {
             }
         });
 
-        list.push(5);
+        list.push(SelfId::new(5));
 
         assert_eq!(
             *seen.borrow(),
             vec![
-                (2..4, vec![2, 3], CollectionChange::populated(2, 2)),
-                (2..4, vec![2, 3], CollectionChange::inserted(5..6)),
+                (2..4, vals([2, 3]), CollectionChange::populated(2, 2)),
+                (2..4, vals([2, 3]), CollectionChange::inserted(5..6)),
             ]
         );
     }
@@ -1080,12 +1014,14 @@ mod tests {
     fn range_bounds_resolve_and_clamp() {
         use Bound::{Excluded, Included, Unbounded};
 
-        let list: List<i32, ByValue> = List::by_value_from(vec![0, 1, 2, 3, 4]);
+        let list = List::from(vals([0, 1, 2, 3, 4]));
         let first = |range: (Bound<usize>, Bound<usize>)| {
             let seen = Rc::new(RefCell::new(Vec::new()));
             let _guard = list.watch(range, {
                 let seen = seen.clone();
-                move |items, _change| *seen.borrow_mut() = items.value().to_vec()
+                move |items, _change| {
+                    *seen.borrow_mut() = items.value().iter().map(|v| **v).collect();
+                }
             });
             seen.take()
         };
@@ -1099,34 +1035,34 @@ mod tests {
 
     #[test]
     fn dropping_the_guard_stops_notifications() {
-        let list: List<i32, ByIndex> = List::by_index();
+        let list: List<SelfId<i32>> = List::new();
         let (changes, guard) = record(&list);
-        list.push(1);
+        list.push(SelfId::new(1));
         drop(guard);
-        list.push(2);
+        list.push(SelfId::new(2));
         assert_eq!(changes.borrow().len(), 2);
     }
 
     #[test]
     fn clones_share_the_list() {
-        let a: List<i32, ByIndex> = List::from(vec![1, 2, 3]);
+        let a = List::from(vals([1, 2, 3]));
         let b = a.clone();
-        a.push(4);
+        a.push(SelfId::new(4));
         assert_eq!(b.len(), 4);
-        assert_eq!(b.get(3), Some(4));
-        assert_eq!(b.into_iter().collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+        assert_eq!(b.get(3), Some(SelfId::new(4)));
+        assert_eq!(b.into_iter().collect::<Vec<_>>(), vals([1, 2, 3, 4]));
     }
 
     #[test]
-    fn static_collections_are_positional_and_silent() {
-        let vec = vec![10, 20, 30];
-        assert_eq!(Collection::len(&vec), 3);
-        assert_eq!(Collection::get(&vec, 1), Some(20));
-        assert_eq!(Collection::id(&vec, 2), Some(2));
+    fn static_collections_are_silent() {
+        let vec = vec![row(10, "a"), row(20, "b")];
+        assert_eq!(Collection::len(&vec), 2);
+        assert_eq!(Collection::get(&vec, 1), Some(row(20, "b")));
+        assert_eq!(Collection::id(&vec, 1), Some(20));
         let _: () = Collection::watch(&vec, .., |_, _| panic!("a Vec never notifies"));
 
-        let array = [1, 2];
-        assert_eq!(Collection::id(&array, 1), Some(1));
+        let array = [SelfId::new(1), SelfId::new(2)];
+        assert_eq!(Collection::id(&array, 1), Some(2));
         let _: () = Collection::watch(&array, .., |_, _| panic!("an array never notifies"));
     }
 
@@ -1145,8 +1081,8 @@ mod tests {
 
     #[test]
     fn signal_collection_aligns_snapshots_by_id() {
-        let values = crate::binding(vec![1, 2, 3]);
-        let collection = SignalCollection::new(values.clone(), ByValue);
+        let values = crate::binding(vals([1, 2, 3]));
+        let collection = SignalCollection::new(values.clone());
         let seen = Rc::new(RefCell::new(Vec::new()));
         let _guard = collection.watch(.., {
             let seen = seen.clone();
@@ -1156,55 +1092,40 @@ mod tests {
             }
         });
 
-        values.set(vec![0, 1, 2, 3]);
-        values.set(vec![0, 3, 1, 2]);
+        values.set(vals([0, 1, 2, 3]));
+        values.set(vals([0, 3, 1, 2]));
 
         assert_eq!(
             *seen.borrow(),
             vec![
-                (vec![1, 2, 3], CollectionChange::populated(0, 3)),
-                (vec![0, 1, 2, 3], CollectionChange::inserted(0..1)),
-                (vec![0, 3, 1, 2], CollectionChange::moved(3, 1)),
+                (vals([1, 2, 3]), CollectionChange::populated(0, 3)),
+                (vals([0, 1, 2, 3]), CollectionChange::inserted(0..1)),
+                (vals([0, 3, 1, 2]), CollectionChange::moved(3, 1)),
             ]
         );
     }
 
     #[test]
-    fn new_accepts_capturing_closure() {
-        let offset = 100_u32;
-        let list = List::new(move |n: &u32| *n + offset);
-        list.extend([1, 2]);
-        assert_eq!(list.id(1), Some(102));
-
-        let list = List::new_from(move |n: &u32| *n * offset, vec![3]);
-        assert_eq!(list.id(0), Some(300));
-    }
-
-    #[test]
-    fn default_identity_is_by_index() {
+    fn conversions_infer_the_item_type() {
         struct Holder {
-            list: List<String>,
+            list: List<SelfId<String>>,
         }
-        let holder = Holder {
-            list: List::default(),
-        };
-        holder.list.push("a".into());
-        assert_eq!(holder.list.id(0), Some(0_usize));
-        let _explicit: List<String, ByIndex> = holder.list;
-    }
 
-    #[test]
-    fn conversions_infer_for_ord_items() {
-        let from = List::from(vec![5, 6, 7]);
-        assert_eq!(from.id(2), Some(2_usize));
+        let from = List::from(vec![row(5, "a"), row(6, "b")]);
+        assert_eq!(from.id(1), Some(6));
 
-        let collected = (0..3).collect::<List<_>>();
-        assert_eq!(collected.snapshot(), vec![0, 1, 2]);
+        let collected: List<_> = (0..3).map(SelfId::new).collect();
+        assert_eq!(collected.id(2), Some(2));
+        assert_eq!(values(&collected), vec![0, 1, 2]);
 
-        let default: List<i32> = List::default();
+        let collected = core::iter::once(row(1, "a")).collect::<List<_>>();
+        assert_eq!(collected.id(0), Some(1));
+
+        let default: List<Row> = List::default();
         assert!(default.is_empty());
 
-        let by_value = List::by_value_from(vec![5, 6]);
-        assert_eq!(by_value.id(1), Some(6));
+        let holder = Holder { list: List::new() };
+        holder.list.push(SelfId::new("a".into()));
+        assert_eq!(holder.list.id(0).as_deref(), Some("a"));
     }
 }
