@@ -8,7 +8,7 @@ fn str_array_is_a_collection_with_index_ids() {
 
     let names: [&str; 3] = ["a", "b", "c"];
     assert_index_ids(&names);
-    assert_eq!(Collection::len(&names), 3);
+    assert_eq!(Collection::count(&names), 3);
     assert_eq!(Collection::get(&names, 1), Some("b"));
     assert_eq!(Collection::id(&names, 0), Some(0));
     assert_eq!(Collection::id(&names, 2), Some(2));

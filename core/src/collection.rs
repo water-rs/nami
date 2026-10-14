@@ -57,12 +57,26 @@ pub trait Collection: 'static {
     fn get(&self, index: usize) -> Option<Self::Item>;
 
     /// Returns the number of items in the collection.
-    fn len(&self) -> usize;
+    ///
+    /// Named `count` rather than `len` (and with no `is_empty`; write
+    /// `count() == 0`) so that importing `Collection` never shadows the
+    /// slice and `Vec` methods: `&'static [T]` implements this trait.
+    fn count(&self) -> usize;
 
-    /// Returns `true` if the collection contains no elements.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+    /// Lends the items of `range` to `f`, without copying them.
+    ///
+    /// The range is clamped to the current length, like [`resolve_range`]:
+    /// an end past the length stops at the length and a start past the end
+    /// yields an empty slice; it never panics.
+    ///
+    /// Mutating the same collection inside `f` (through a cloned handle) is
+    /// the same anti-pattern as mutating it inside a watcher: it is safe, but
+    /// costs a copy of the items.
+    fn with_range<R>(
+        &self,
+        range: impl RangeBounds<usize>,
+        f: impl FnOnce(&[Self::Item]) -> R,
+    ) -> R;
 
     /// The id of the item currently at `index`, or `None` if out of bounds.
     ///
@@ -159,9 +173,19 @@ macro_rules! static_collection {
                 $slice.get(index).cloned()
             }
 
-            fn len(&self) -> usize {
+            fn count(&self) -> usize {
                 let $this = self;
                 $slice.len()
+            }
+
+            fn with_range<R>(
+                &self,
+                range: impl RangeBounds<usize>,
+                f: impl FnOnce(&[T]) -> R,
+            ) -> R {
+                let $this = self;
+                let slice: &[T] = $slice;
+                f(&slice[clamp_range(&range, slice.len())])
             }
 
             fn id(&self, $index: usize) -> Option<$id> {
@@ -206,12 +230,16 @@ macro_rules! forward_collection {
                 (**self).get(index)
             }
 
-            fn len(&self) -> usize {
-                (**self).len()
+            fn count(&self) -> usize {
+                (**self).count()
             }
 
-            fn is_empty(&self) -> bool {
-                (**self).is_empty()
+            fn with_range<R>(
+                &self,
+                range: impl RangeBounds<usize>,
+                f: impl FnOnce(&[Self::Item]) -> R,
+            ) -> R {
+                (**self).with_range(range, f)
             }
 
             fn id(&self, index: usize) -> Option<Self::Id> {
@@ -254,8 +282,8 @@ trait AnyCollectionImpl {
     type Item;
     type Id;
     fn get(&self, index: usize) -> Option<Self::Item>;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool;
+    fn count(&self) -> usize;
+    fn with_bounds(&self, range: (Bound<usize>, Bound<usize>), f: &mut dyn FnMut(&[Self::Item]));
     fn id(&self, index: usize) -> Option<Self::Id>;
     fn watch(
         &self,
@@ -272,12 +300,12 @@ impl<C: Collection> AnyCollectionImpl for C {
         Collection::get(self, index)
     }
 
-    fn len(&self) -> usize {
-        Collection::len(self)
+    fn count(&self) -> usize {
+        Collection::count(self)
     }
 
-    fn is_empty(&self) -> bool {
-        Collection::is_empty(self)
+    fn with_bounds(&self, range: (Bound<usize>, Bound<usize>), f: &mut dyn FnMut(&[Self::Item])) {
+        Collection::with_range(self, range, f);
     }
 
     fn id(&self, index: usize) -> Option<C::Id> {
@@ -312,14 +340,34 @@ impl<T: 'static, Id: Ord + Clone> AnyCollection<T, Id> {
 
     /// Returns the number of items in the collection.
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.inner.len()
+    pub fn count(&self) -> usize {
+        self.inner.count()
     }
 
     /// Returns `true` if the collection contains no elements.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.inner.count() == 0
+    }
+
+    /// Lends the items of `range` to `f`; see [`Collection::with_range`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the erased collection's `with_range` broke its contract by
+    /// not calling `f`.
+    pub fn with_range<R>(&self, range: impl RangeBounds<usize>, f: impl FnOnce(&[T]) -> R) -> R {
+        let mut f = Some(f);
+        let mut result = None;
+        self.inner.with_bounds(
+            (range.start_bound().cloned(), range.end_bound().cloned()),
+            &mut |items| {
+                if let Some(f) = f.take() {
+                    result = Some(f(items));
+                }
+            },
+        );
+        result.expect("a collection must call the `with_range` callback exactly once")
     }
 
     /// The id of the item at `index`, or `None` if out of bounds.
@@ -350,12 +398,12 @@ impl<T: 'static, Id: Ord + Clone + 'static> Collection for AnyCollection<T, Id> 
         Self::get(self, index)
     }
 
-    fn len(&self) -> usize {
-        Self::len(self)
+    fn count(&self) -> usize {
+        Self::count(self)
     }
 
-    fn is_empty(&self) -> bool {
-        Self::is_empty(self)
+    fn with_range<R>(&self, range: impl RangeBounds<usize>, f: impl FnOnce(&[T]) -> R) -> R {
+        Self::with_range(self, range, f)
     }
 
     fn id(&self, index: usize) -> Option<Id> {
@@ -369,6 +417,16 @@ impl<T: 'static, Id: Ord + Clone + 'static> Collection for AnyCollection<T, Id> 
     ) -> BoxCollectionWatcherGuard {
         Self::watch(self, range, watcher)
     }
+}
+
+/// Resolves any `range` against a length, clamping like [`resolve_range`].
+#[must_use]
+pub fn clamp_range(range: &impl RangeBounds<usize>, len: usize) -> Range<usize> {
+    resolve_range(
+        range.start_bound().cloned(),
+        range.end_bound().cloned(),
+        len,
+    )
 }
 
 /// Resolves `bounds` against a snapshot of length `len`, clamping to valid
