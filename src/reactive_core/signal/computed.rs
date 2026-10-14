@@ -1,70 +1,19 @@
-use core::any::Any;
-
-use alloc::{boxed::Box, rc::Rc};
+use alloc::rc::Rc;
 
 use crate::{
-    SignalExt, SignalIdentity, constant,
-    watcher::{BoxWatcherGuard, Context, Watcher},
+    SignalIdentity, constant,
+    reactive_core::erased::ErasedSignal,
+    watcher::{BoxWatcherGuard, Context},
 };
 
 use super::Signal;
 
-/// A wrapper around a boxed implementation of the `ComputedImpl` trait.
+/// A wrapper around an erased signal implementation.
 ///
-/// This type represents a computation that can be evaluated to produce a result of type `T`.
-/// The computation is stored as a boxed trait object, allowing for dynamic dispatch.
-pub struct Computed<T>(pub(crate) Box<dyn ComputedImpl<Output = T>>);
-
-/// Internal trait that defines the interface for computed values.
-///
-/// This trait is implemented by types that can compute a value, register watchers,
-/// and provide a cloned version of themselves.
-#[allow(clippy::redundant_pub_crate)]
-pub(crate) trait ComputedImpl: Any {
-    /// The result type of the computation
-    type Output;
-
-    /// Computes and returns the current value
-    fn compute(&self) -> Self::Output;
-
-    /// Object-safe [`Signal::with_ref`]: lends the value to `f` (called
-    /// exactly once).
-    fn with_dyn(&self, f: &mut dyn FnMut(&Self::Output));
-
-    /// Registers a watcher that will be notified when the computed value changes
-    fn add_watcher(&self, watcher: Watcher<Self::Output>) -> BoxWatcherGuard;
-
-    /// Stable identity propagated from the underlying signal, when available.
-    fn identity(&self) -> Option<SignalIdentity>;
-
-    fn cloned(&self) -> Computed<Self::Output>;
-}
-
-/// Implements `ComputedImpl` for any type that implements `Compute`.
-///
-/// This allows any `Compute` type to be used as a `ComputedImpl`, providing
-/// a bridge between the public and internal interfaces.
-impl<C: Signal + 'static> ComputedImpl for C {
-    type Output = C::Output;
-
-    fn compute(&self) -> Self::Output {
-        <Self as Signal>::snapshot(self)
-    }
-
-    fn with_dyn(&self, f: &mut dyn FnMut(&Self::Output)) {
-        <Self as Signal>::with_ref(self, f);
-    }
-
-    fn add_watcher(&self, watcher: Watcher<Self::Output>) -> BoxWatcherGuard {
-        Box::new(<Self as Signal>::watch(self, move |ctx| watcher(ctx)))
-    }
-    fn identity(&self) -> Option<SignalIdentity> {
-        <Self as Signal>::identity(self)
-    }
-    fn cloned(&self) -> Computed<Self::Output> {
-        self.clone().computed()
-    }
-}
+/// The signal is stored in the single-pointer erased block shared with
+/// [`Binding`](crate::Binding), allowing for dynamic dispatch without a fat
+/// pointer.
+pub struct Computed<T>(pub(crate) ErasedSignal<T>);
 
 impl_signal_ops!(Computed<T>, [T], T);
 
@@ -86,20 +35,18 @@ impl<T> core::fmt::Debug for Computed<T> {
     }
 }
 
-/// Implements `Compute` for `Computed<T>`.
-///
-/// This delegates to the internal boxed implementation.
+/// Implements `Signal` for `Computed<T>` by delegating to the erased signal.
 impl<T: 'static> Signal for Computed<T> {
     type Output = T;
     type Guard = BoxWatcherGuard;
 
     fn snapshot(&self) -> Self::Output {
-        self.0.compute()
+        self.0.snapshot()
     }
 
     /// Forwards to the erased signal: zero-copy when it is.
     fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        with_erased(&*self.0, f)
+        self.0.with_ref(f)
     }
 
     fn identity(&self) -> Option<SignalIdentity> {
@@ -107,41 +54,25 @@ impl<T: 'static> Signal for Computed<T> {
     }
 
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
-        self.0.add_watcher(Rc::new(watcher))
+        self.0.watch(Rc::new(watcher))
     }
 }
 
-/// Calls the generic `f` through [`ComputedImpl::with_dyn`].
-#[allow(clippy::redundant_pub_crate)]
-pub(crate) fn with_erased<T, R>(
-    erased: &(impl ComputedImpl<Output = T> + ?Sized),
-    f: impl FnOnce(&T) -> R,
-) -> R {
-    let mut f = Some(f);
-    let mut result = None;
-    erased.with_dyn(&mut |value| {
-        if let Some(f) = f.take() {
-            result = Some(f(value));
-        }
-    });
-    result.expect("`with_dyn` must call its callback")
-}
-
-impl<T: 'static> Clone for Computed<T> {
+impl<T> Clone for Computed<T> {
     fn clone(&self) -> Self {
-        self.0.cloned()
+        Self(self.0.clone())
     }
 }
 
-impl<T> Computed<T> {
-    /// Creates a new `Computed<T>` from a value that implements `Compute<Output = T>`.
+impl<T: 'static> Computed<T> {
+    /// Creates a new `Computed<T>` from a value that implements `Signal<Output = T>`.
     ///
-    /// The provided value is boxed and stored internally.
+    /// The provided value is stored in the erased block.
     pub fn new<C>(value: C) -> Self
     where
         C: Signal<Output = T> + Clone + 'static,
     {
-        Self(Box::new(value))
+        Self(ErasedSignal::signal(value))
     }
 }
 

@@ -44,6 +44,7 @@ divan = "0.1"
 # `async_signal`'s timer tests drive spawned runnables through the same
 # channel-drain executor shape the runners use.
 executor-core = { version = "0.7.1", features = ["std", "async-task"] }
+static_assertions = "1.1.0"
 
 [dependencies]
 log = { version = "0.4.33", default-features = true }
