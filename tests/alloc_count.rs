@@ -145,55 +145,35 @@ fn registering_during_notify_takes_effect_next_round() {
     assert_eq!(calls.get(), 1);
 }
 
-type Retained = std::rc::Rc<std::cell::RefCell<Vec<nami::collection::Items<nami::SelfId<u64>>>>>;
-
-/// A watched 1000-item list whose watcher keeps the snapshots it receives
-/// when `retain` is set.
-fn watched_list(
-    retain: bool,
-) -> (
-    nami::collection::List<nami::SelfId<u64>>,
-    impl Sized,
-    Retained,
-) {
+/// A watched 1000-item list whose watcher reads every item it is given.
+fn watched_list() -> (nami::collection::List<nami::SelfId<u64>>, impl Sized) {
     use nami::collection::{Collection, List};
 
     let list = List::new();
     list.extend((0..1000).map(nami::SelfId::new));
-    let retained = std::rc::Rc::new(std::cell::RefCell::new(Vec::with_capacity(4)));
-    let guard = list.watch(.., {
-        let retained = retained.clone();
-        move |items, change| {
-            assert!(!change.is_empty());
-            if retain {
-                retained.borrow_mut().push(items.into_value());
-            }
-        }
+    let guard = list.watch(.., move |items, change| {
+        assert!(!change.is_empty());
+        assert!(items.value().iter().all(|item| **item < u64::MAX));
     });
-    retained.borrow_mut().clear();
-    (list, guard, retained)
+    (list, guard)
 }
 
 #[test]
 fn list_push_with_one_watcher_does_not_allocate() {
-    let (list, _guard, _retained) = watched_list(false);
+    let (list, _guard) = watched_list();
     list.push(nami::SelfId::new(0)); // grow once to known spare capacity
     let _ = list.pop();
     assert_eq!(allocations(|| list.push(nami::SelfId::new(1000))), 0);
 }
 
 #[test]
-fn list_push_copies_only_while_a_snapshot_is_retained() {
-    let (list, _guard, retained) = watched_list(true);
-    list.push(nami::SelfId::new(0));
+fn list_pushes_with_a_watcher_never_copy() {
+    let (list, _guard) = watched_list();
+    list.push(nami::SelfId::new(0)); // grow once to known spare capacity
     let _ = list.pop();
-    retained.borrow_mut().clear();
-    // Nothing retained: the push writes in place.
-    retained.borrow_mut().reserve(4);
-    assert_eq!(allocations(|| list.push(nami::SelfId::new(1000))), 0);
-    // The watcher now holds the snapshot it was given, so the next push
-    // copies the items instead of changing that snapshot: a new `Rc`, the
-    // cloned vector, and its growth for the pushed item.
-    assert_eq!(allocations(|| list.push(nami::SelfId::new(1001))), 3);
-    assert_eq!(retained.borrow()[0].len(), 1001);
+    // The watcher only borrows the items, so it cannot hold a snapshot that
+    // would force the next mutation to copy the storage.
+    for id in 1000..1010 {
+        assert_eq!(allocations(|| list.push(nami::SelfId::new(id))), 0);
+    }
 }

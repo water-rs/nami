@@ -572,10 +572,10 @@ trait ListRangeWatch<T> {
     fn set_bounds(&self, snapshot: Rc<Vec<T>>, start: Bound<usize>, end: Bound<usize>);
 }
 
-impl<T, W: Fn(Context<Items<T>>, &CollectionChange)> ListRangeWatch<T> for ListWatch<W> {
+impl<T, W: Fn(Context<&[T]>, &CollectionChange)> ListRangeWatch<T> for ListWatch<W> {
     fn set_bounds(&self, snapshot: Rc<Vec<T>>, start: Bound<usize>, end: Bound<usize>) {
         if let Some((range, change)) = self.range.replace(start, end, snapshot.len()) {
-            (self.watcher)(Context::from(Items::new(snapshot, range)), &change);
+            (self.watcher)(Context::from(&snapshot[range]), &change);
         }
     }
 }
@@ -632,7 +632,7 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
     fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
+        watcher: impl Fn(Context<&[T]>, &CollectionChange) + 'static,
     ) -> ListGuard<T> {
         let watch = Rc::new(ListWatch {
             range: RangeCell::new(&range),
@@ -643,13 +643,14 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
         let snapshot = Rc::clone(&self.state.items.borrow());
         let range = watch.range.resolve(snapshot.len());
         let change = CollectionChange::populated(range.start, range.len());
-        (watch.watcher)(Context::from(Items::new(snapshot, range)), &change);
+        (watch.watcher)(Context::from(&snapshot[range]), &change);
 
         let callback: Rc<ListWatcher<T>> = Rc::new({
             let watch = Rc::clone(&watch);
             move |context: Context<Rc<Vec<T>>>, change: &CollectionChange| {
                 let range = watch.range.resolve(context.value().len());
-                (watch.watcher)(context.map(|items| Items::new(items, range)), change);
+                let (items, metadata) = context.into_parts();
+                (watch.watcher)(Context::new(&items[range], metadata), change);
             }
         });
         ListGuard {
@@ -682,7 +683,7 @@ impl<T: Identifiable + 'static> FromIterator<T> for List<T> {
 }
 
 /// Iterates the items, without cloning them when this is the last handle to
-/// the list and no watcher holds a snapshot.
+/// the list.
 impl<T: Clone + 'static> IntoIterator for List<T> {
     type Item = T;
     type IntoIter = alloc::vec::IntoIter<T>;
@@ -737,7 +738,7 @@ struct SignalWatch<T, W> {
 impl<T, W> SignalWatch<T, W>
 where
     T: Identifiable + PartialEq + 'static,
-    W: Fn(Context<Items<T>>, &CollectionChange),
+    W: Fn(Context<&[T]>, &CollectionChange),
 {
     fn deliver(&self, context: Context<Vec<T>>) {
         let context = context.map(Rc::new);
@@ -753,7 +754,8 @@ where
                 result.change
             },
         );
-        (self.watcher)(context.map(|items| Items::new(items, range)), &change);
+        let (items, metadata) = context.into_parts();
+        (self.watcher)(Context::new(&items[range], metadata), &change);
     }
 }
 
@@ -765,7 +767,7 @@ trait SignalRangeWatch {
 
 impl<T, W> SignalRangeWatch for SignalWatch<T, W>
 where
-    W: Fn(Context<Items<T>>, &CollectionChange),
+    W: Fn(Context<&[T]>, &CollectionChange),
 {
     /// Re-ranges over the snapshot the watcher last saw, so the change only
     /// describes the range move.
@@ -775,7 +777,7 @@ where
             return;
         };
         if let Some((range, change)) = self.range.replace(start, end, snapshot.len()) {
-            (self.watcher)(Context::from(Items::new(snapshot, range)), &change);
+            (self.watcher)(Context::from(&snapshot[range]), &change);
         }
     }
 }
@@ -827,7 +829,7 @@ where
     fn watch(
         &self,
         range: impl RangeBounds<usize>,
-        watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
+        watcher: impl Fn(Context<&[T]>, &CollectionChange) + 'static,
     ) -> Self::Guard {
         let state = Rc::new(SignalWatch {
             range: RangeCell::new(&range),
@@ -1098,12 +1100,14 @@ mod tests {
     }
 
     #[test]
-    fn retained_snapshots_are_copy_on_write() {
+    fn watchers_see_each_state_and_clone_what_they_keep() {
         let list = List::from(vals([1, 2]));
         let retained = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(.., {
             let retained = retained.clone();
-            move |items, _change| retained.borrow_mut().push(items.into_value())
+            move |items: Context<&[SelfId<i32>]>, _change| {
+                retained.borrow_mut().push(items.value().to_vec());
+            }
         });
 
         list.push(SelfId::new(3));
@@ -1121,10 +1125,11 @@ mod tests {
         let seen = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(2..4, {
             let seen = seen.clone();
-            move |items, change| {
-                let items = items.into_value();
+            move |items: Context<&[SelfId<i32>]>, change: &CollectionChange| {
+                let items: &[SelfId<i32>] = items.into_value();
+                let len: usize = items.len();
                 seen.borrow_mut()
-                    .push((items.range(), items.to_vec(), change.clone()));
+                    .push((len, items.to_vec(), change.clone()));
             }
         });
 
@@ -1133,8 +1138,8 @@ mod tests {
         assert_eq!(
             *seen.borrow(),
             vec![
-                (2..4, vals([2, 3]), CollectionChange::populated(2, 2)),
-                (2..4, vals([2, 3]), CollectionChange::inserted(5..6)),
+                (2, vals([2, 3]), CollectionChange::populated(2, 2)),
+                (2, vals([2, 3]), CollectionChange::inserted(5..6)),
             ]
         );
     }
