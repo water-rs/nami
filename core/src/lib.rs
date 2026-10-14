@@ -139,6 +139,20 @@ pub trait Signal: Clone + 'static {
     /// friends on `Binding`.
     fn snapshot(&self) -> Self::Output;
 
+    /// Lends the current value to `f`, untracked like [`Self::snapshot`].
+    ///
+    /// The default takes a [`snapshot`](Self::snapshot). Signals that store
+    /// their value immutably (constants) or forward to one (`Computed`,
+    /// `Binding` over such a signal) lend it without copying. Signals whose
+    /// value can be mutated in place while `f` runs (such as a `Binding`'s
+    /// `RefCell` storage) keep the snapshot, so mutating the signal inside
+    /// `f` never panics.
+    ///
+    /// Named `with_ref` because `SignalExt::with` already attaches metadata.
+    fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+        f(&self.snapshot())
+    }
+
     /// Returns the stable semantic identity of this signal, when one exists.
     ///
     /// Constant signals intentionally return `None` because they do not own
@@ -181,6 +195,10 @@ macro_rules! impl_constant {
                     self.clone()
                 }
 
+                fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+                    f(self)
+                }
+
                 fn watch(
                     &self,
                     _watcher: impl Fn($crate::watcher::Context<Self::Output>)+'static,
@@ -203,6 +221,10 @@ macro_rules! impl_generic_constant {
 
                 fn snapshot(&self) -> Self::Output {
                     self.clone()
+                }
+
+                fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+                    f(self)
                 }
 
                 fn watch(
@@ -257,6 +279,9 @@ mod impl_constant {
         fn snapshot(&self) -> Self::Output {
             self
         }
+        fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+            f(self)
+        }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
     }
 
@@ -268,6 +293,9 @@ mod impl_constant {
         type Guard = ();
         fn snapshot(&self) -> Self::Output {
             self.clone()
+        }
+        fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+            f(self)
         }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
     }

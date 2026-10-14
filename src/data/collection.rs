@@ -859,21 +859,22 @@ where
     type Guard = SignalCollectionGuard<S::Guard>;
 
     fn get_item(&self, index: usize) -> Option<T> {
-        self.signal.snapshot().as_slice().get(index).cloned()
+        self.signal.with_ref(|items| items.get(index).cloned())
     }
 
     fn count(&self) -> usize {
-        self.signal.snapshot().len()
+        self.signal.with_ref(Vec::len)
     }
 
-    /// Computes the signal's value once and lends the range of it.
+    /// Lends the range of the signal's value through [`Signal::with_ref`]:
+    /// zero-copy for constant or forwarding signals, one snapshot otherwise.
     fn with_range<R>(&self, range: impl RangeBounds<usize>, f: impl FnOnce(&[T]) -> R) -> R {
-        let items = self.signal.snapshot();
-        f(&items[clamp_range(&range, items.len())])
+        self.signal
+            .with_ref(|items| f(&items[clamp_range(&range, items.len())]))
     }
 
     fn get_id(&self, index: usize) -> Option<T::Id> {
-        self.signal.snapshot().as_slice().get(index).map(T::id)
+        self.signal.with_ref(|items| items.get(index).map(T::id))
     }
 
     fn watch(
