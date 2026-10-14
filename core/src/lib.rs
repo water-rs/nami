@@ -142,11 +142,11 @@ pub trait Signal: Clone + 'static {
     /// Lends the current value to `f`, untracked like [`Self::snapshot`].
     ///
     /// The default takes a [`snapshot`](Self::snapshot). Signals that store
-    /// their value immutably (constants) or forward to one (`Computed`,
-    /// `Binding` over such a signal) lend it without copying. Signals whose
-    /// value can be mutated in place while `f` runs (such as a `Binding`'s
-    /// `RefCell` storage) keep the snapshot, so mutating the signal inside
-    /// `f` never panics.
+    /// their value immutably (constants), share it copy-on-write (`Binding`),
+    /// or forward to one of those (`Computed`) lend it without copying, and a
+    /// mutation made inside `f` still never panics: copy-on-write storage
+    /// leaves `f` reading the value it was lent. Signals that recompute
+    /// (maps, zips) keep the snapshot.
     ///
     /// Named `with_ref` because `SignalExt::with` already attaches metadata.
     fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {

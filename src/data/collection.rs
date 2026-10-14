@@ -877,7 +877,8 @@ where
     }
 
     /// Lends the range of the signal's value through [`Signal::with_ref`]:
-    /// zero-copy for constant or forwarding signals, one snapshot otherwise.
+    /// zero-copy for constant, container and forwarding signals, one
+    /// snapshot otherwise.
     fn with_range<R>(&self, range: impl RangeBounds<usize>, f: impl FnOnce(&[T]) -> R) -> R {
         self.signal
             .with_ref(|items| f(&items[clamp_range(&range, items.len())]))

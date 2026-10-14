@@ -1,9 +1,10 @@
-//! Debug builds warn when a `List` is mutated from inside its own watcher.
+//! Debug builds warn when a `List` is mutated from inside its own watcher
+//! or a `Binding` while a `with_ref` borrow of its value is live.
 
 use std::sync::Mutex;
 
-use nami::SelfId;
 use nami::collection::{Collection, List};
+use nami::{Binding, SelfId, Signal, binding};
 
 static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -32,7 +33,9 @@ fn reentrant_warnings() -> usize {
 
 #[test]
 fn reentrant_mutation_warns_in_debug_builds_only() {
-    log::set_logger(&Capture).unwrap();
+    // The logger may already be installed by the `Binding` test in this
+    // binary; both share `Capture`/`LOGGED`.
+    let _ = log::set_logger(&Capture);
     log::set_max_level(log::LevelFilter::Warn);
 
     let mut list: List<SelfId<i32>> = List::new();
@@ -62,4 +65,36 @@ fn reentrant_mutation_warns_in_debug_builds_only() {
     list.with_range(.., |_| list.clone().push(SelfId::new(4)));
     assert_eq!(list.len(), 4);
     assert_eq!(reentrant_warnings(), 2 * expected);
+}
+
+fn borrow_warnings() -> usize {
+    LOGGED
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|message| message.contains("`with_ref` borrow"))
+        .count()
+}
+
+#[test]
+fn mutation_during_with_ref_warns_in_debug_builds_only() {
+    // The logger may already be installed by the `List` test in this binary.
+    let _ = log::set_logger(&Capture);
+    log::set_max_level(log::LevelFilter::Warn);
+
+    let value: Binding<i32> = binding(1);
+    let expected = usize::from(cfg!(debug_assertions));
+
+    // An ordinary write does not warn.
+    value.set(2);
+    assert_eq!(borrow_warnings(), 0);
+
+    // Writing while the value is lent out copies it and warns.
+    value.with_ref(|_| value.set(3));
+    assert_eq!(value.snapshot(), 3);
+    assert_eq!(borrow_warnings(), expected);
+
+    value.with_ref(|v| value.with_mut(|inner| *inner = *v + 10));
+    assert_eq!(value.snapshot(), 13);
+    assert_eq!(borrow_warnings(), 2 * expected);
 }
