@@ -73,6 +73,14 @@ impl<T> Context<T> {
         self.value
     }
 
+    /// Consumes the context and returns the value and the metadata.
+    ///
+    /// Useful to re-wrap a borrow of the value with the same metadata, without
+    /// cloning it: `Context::new(&value[..], metadata)`.
+    pub fn into_parts(self) -> (T, Metadata) {
+        (self.value, self.metadata)
+    }
+
     /// Returns a reference to the inner value.
     pub const fn value(&self) -> &T {
         &self.value
