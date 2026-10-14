@@ -79,17 +79,19 @@ type ListWatcher<T> = dyn Fn(Context<Rc<Vec<T>>>, &CollectionChange);
 ///
 /// `I` gives each item its id (see [`Identify`]):
 ///
-/// - [`List::new`] takes a key function, `List::new(|m: &Message| m.id)`;
-///   the list's type is then `List<Message, fn(&Message) -> u64>`.
+/// - [`List::new`] takes a key closure, `List::new(|m: &Message| m.id)`.
+/// - [`ByIndex`] is the default: `List<T>` is `List<T, ByIndex>`, and
+///   [`Default`], `From<Vec<T>>` and [`FromIterator`] build it without
+///   annotations. It is the only identity with no bound on `T`.
 /// - [`List::by_value`] uses the value itself (`T: Ord`), for lists of plain
 ///   values such as `List<String, ByValue>`.
-/// - [`List::by_index`] is explicitly positional, for stacks such as a
-///   navigation path.
+/// - [`List::by_index`] spells out the positional default, for stacks such
+///   as a navigation path.
 ///
 /// Cloning a `List` shares it. Storage is copy-on-write: a notification hands
 /// watchers a reference to the current items, and a mutation copies them
 /// only while a watcher still holds an older snapshot.
-pub struct List<T, I> {
+pub struct List<T, I = ByIndex> {
     state: Rc<ListState<T, I>>,
 }
 
@@ -115,27 +117,15 @@ impl<T, I> Clone for List<T, I> {
     }
 }
 
-impl<T: 'static, K: Ord + Clone + 'static> List<T, fn(&T) -> K> {
-    /// Creates an empty list whose items are identified by `key`.
+impl<T: 'static> List<T> {
+    /// Creates an empty list whose items are identified by their position.
     ///
-    /// ```rust
-    /// use nami::collection::List;
-    ///
-    /// struct Todo {
-    ///     id: u32,
-    ///     title: String,
-    /// }
-    ///
-    /// let todos: List<Todo, fn(&Todo) -> u32> = List::new(|todo| todo.id);
-    /// ```
-    ///
-    /// Records such as todos should carry their own id, assigned by the app
-    /// or backend when the record is created. Use [`List::with_identity`] for
-    /// an identity that is not a plain function.
+    /// The same as [`List::default`]; the explicit name reads better where
+    /// positional identity is a deliberate choice, such as a navigation path.
     #[must_use]
     #[track_caller]
-    pub fn new(key: fn(&T) -> K) -> Self {
-        Self::from_vec(Vec::new(), key)
+    pub fn by_index() -> Self {
+        Self::new(ByIndex)
     }
 }
 
@@ -144,31 +134,98 @@ impl<T: Ord + Clone + 'static> List<T, ByValue> {
     #[must_use]
     #[track_caller]
     pub fn by_value() -> Self {
-        Self::from_vec(Vec::new(), ByValue)
+        Self::new(ByValue)
     }
-}
 
-impl<T: 'static> List<T, ByIndex> {
-    /// Creates an empty list whose items are identified by their position.
+    /// Creates a list holding `items`, identified by their value.
+    ///
+    /// ```rust
+    /// use nami::collection::List;
+    ///
+    /// let tags = List::by_value_from(vec!["rust".to_string(), "ui".to_string()]);
+    /// assert_eq!(tags.id(1).as_deref(), Some("ui"));
+    /// ```
     #[must_use]
     #[track_caller]
-    pub fn by_index() -> Self {
-        Self::from_vec(Vec::new(), ByIndex)
+    pub fn by_value_from(items: Vec<T>) -> Self {
+        Self::new_from(ByValue, items)
     }
 }
 
 impl<T: 'static, I: Identify<T>> List<T, I> {
-    /// Creates an empty list identified by `identity`.
+    /// Creates an empty list whose items are identified by `identity`.
+    ///
+    /// `identity` is usually a key closure; any [`Identify`] works, including
+    /// closures that capture state, [`ByValue`] and [`ByIndex`].
+    ///
+    /// ```rust
+    /// use nami::collection::List;
+    ///
+    /// #[derive(Clone)]
+    /// struct Todo {
+    ///     id: u32,
+    ///     title: String,
+    /// }
+    ///
+    /// let todos = List::new(|t: &Todo| t.id);
+    /// todos.push(Todo { id: 1, title: "write docs".into() });
+    /// assert_eq!(todos.id(0), Some(1));
+    /// ```
+    ///
+    /// A closure's type cannot be named, so to store such a list in a struct
+    /// field, make the struct generic over the identity, return
+    /// `List<T, impl Identify<T>>`, or use a named identity type:
+    ///
+    /// ```rust
+    /// use nami::collection::{Identify, List};
+    ///
+    /// #[derive(Clone)]
+    /// struct Todo {
+    ///     id: u32,
+    /// }
+    ///
+    /// struct TodoId;
+    ///
+    /// impl Identify<Todo> for TodoId {
+    ///     type Id = u32;
+    ///
+    ///     fn id(&self, _index: usize, todo: &Todo) -> u32 {
+    ///         todo.id
+    ///     }
+    /// }
+    ///
+    /// struct App {
+    ///     todos: List<Todo, TodoId>,
+    /// }
+    ///
+    /// fn todo_list() -> List<Todo, impl Identify<Todo, Id = u32>> {
+    ///     List::new(|t: &Todo| t.id)
+    /// }
+    ///
+    /// let app = App { todos: List::new(TodoId) };
+    /// assert!(app.todos.is_empty());
+    /// assert!(todo_list().is_empty());
+    /// ```
+    ///
+    /// Records such as todos should carry their own id, assigned by the app
+    /// or backend when the record is created.
     #[must_use]
     #[track_caller]
-    pub fn with_identity(identity: I) -> Self {
-        Self::from_vec(Vec::new(), identity)
+    pub fn new(identity: I) -> Self {
+        Self::new_from(identity, Vec::new())
     }
 
     /// Creates a list holding `items`, identified by `identity`.
+    ///
+    /// ```rust
+    /// use nami::collection::List;
+    ///
+    /// let list = List::new_from(|n: &u32| *n, vec![3, 1, 2]);
+    /// assert_eq!(list.id(0), Some(3));
+    /// ```
     #[must_use]
     #[track_caller]
-    pub fn from_vec(items: Vec<T>, identity: I) -> Self {
+    pub fn new_from(identity: I, items: Vec<T>) -> Self {
         Self {
             state: Rc::new_cyclic(|state| {
                 let origin = Origin::capture::<Self>(SignalIdentity::from_ptr(state.as_ptr()));
@@ -597,45 +654,24 @@ impl<T: Clone + 'static, I: Identify<T>> Collection for List<T, I> {
     }
 }
 
-impl<T: 'static> Default for List<T, ByIndex> {
+impl<T: 'static> Default for List<T> {
     #[track_caller]
     fn default() -> Self {
         Self::by_index()
     }
 }
 
-impl<T: Ord + Clone + 'static> Default for List<T, ByValue> {
-    #[track_caller]
-    fn default() -> Self {
-        Self::by_value()
-    }
-}
-
-impl<T: 'static> From<Vec<T>> for List<T, ByIndex> {
+impl<T: 'static> From<Vec<T>> for List<T> {
     #[track_caller]
     fn from(items: Vec<T>) -> Self {
-        Self::from_vec(items, ByIndex)
+        Self::new_from(ByIndex, items)
     }
 }
 
-impl<T: Ord + Clone + 'static> From<Vec<T>> for List<T, ByValue> {
-    #[track_caller]
-    fn from(items: Vec<T>) -> Self {
-        Self::from_vec(items, ByValue)
-    }
-}
-
-impl<T: 'static> FromIterator<T> for List<T, ByIndex> {
+impl<T: 'static> FromIterator<T> for List<T> {
     #[track_caller]
     fn from_iter<It: IntoIterator<Item = T>>(iter: It) -> Self {
-        Self::from_vec(iter.into_iter().collect(), ByIndex)
-    }
-}
-
-impl<T: Ord + Clone + 'static> FromIterator<T> for List<T, ByValue> {
-    #[track_caller]
-    fn from_iter<It: IntoIterator<Item = T>>(iter: It) -> Self {
-        Self::from_vec(iter.into_iter().collect(), ByValue)
+        Self::new_from(ByIndex, iter.into_iter().collect())
     }
 }
 
@@ -834,7 +870,7 @@ mod tests {
         Row { id, text }
     }
 
-    fn rows(items: Vec<Row>) -> List<Row, fn(&Row) -> u32> {
+    fn rows(items: Vec<Row>) -> List<Row, impl Identify<Row, Id = u32>> {
         let list = List::new(|row: &Row| row.id);
         list.extend(items);
         list
@@ -848,7 +884,7 @@ mod tests {
             use crate::collection::{ByValue, List};
 
             pub fn check() {
-                let list: List<i32, ByValue> = List::from(alloc::vec![1, 2, 3]);
+                let list: List<i32, ByValue> = List::by_value_from(alloc::vec![1, 2, 3]);
                 assert_eq!(list.len(), 3);
                 assert!(!list.is_empty());
                 assert_eq!(list.get(1), Some(2));
@@ -894,7 +930,7 @@ mod tests {
 
     #[test]
     fn clear_and_retain_report_removals() {
-        let list: List<i32, ByValue> = List::from(vec![1, 2, 3, 4, 5]);
+        let list: List<i32, ByValue> = List::by_value_from(vec![1, 2, 3, 4, 5]);
         let (changes, _guard) = record(&list);
 
         list.retain(|value| value % 2 == 1);
@@ -913,7 +949,7 @@ mod tests {
 
     #[test]
     fn sort_reports_moves() {
-        let list: List<i32, ByValue> = List::from(vec![1, 2, 3, 0]);
+        let list: List<i32, ByValue> = List::by_value_from(vec![1, 2, 3, 0]);
         let (changes, _guard) = record(&list);
 
         list.sort();
@@ -1000,7 +1036,7 @@ mod tests {
 
     #[test]
     fn retained_snapshots_are_copy_on_write() {
-        let list: List<i32, ByValue> = List::from(vec![1, 2]);
+        let list: List<i32, ByValue> = List::by_value_from(vec![1, 2]);
         let retained = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(.., {
             let retained = retained.clone();
@@ -1018,7 +1054,7 @@ mod tests {
 
     #[test]
     fn ranged_watchers_get_their_slice_and_collection_wide_changes() {
-        let list: List<i32, ByValue> = List::from(vec![0, 1, 2, 3, 4]);
+        let list: List<i32, ByValue> = List::by_value_from(vec![0, 1, 2, 3, 4]);
         let seen = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(2..4, {
             let seen = seen.clone();
@@ -1044,7 +1080,7 @@ mod tests {
     fn range_bounds_resolve_and_clamp() {
         use Bound::{Excluded, Included, Unbounded};
 
-        let list: List<i32, ByValue> = List::from(vec![0, 1, 2, 3, 4]);
+        let list: List<i32, ByValue> = List::by_value_from(vec![0, 1, 2, 3, 4]);
         let first = |range: (Bound<usize>, Bound<usize>)| {
             let seen = Rc::new(RefCell::new(Vec::new()));
             let _guard = list.watch(range, {
@@ -1131,5 +1167,44 @@ mod tests {
                 (vec![0, 3, 1, 2], CollectionChange::moved(3, 1)),
             ]
         );
+    }
+
+    #[test]
+    fn new_accepts_capturing_closure() {
+        let offset = 100_u32;
+        let list = List::new(move |n: &u32| *n + offset);
+        list.extend([1, 2]);
+        assert_eq!(list.id(1), Some(102));
+
+        let list = List::new_from(move |n: &u32| *n * offset, vec![3]);
+        assert_eq!(list.id(0), Some(300));
+    }
+
+    #[test]
+    fn default_identity_is_by_index() {
+        struct Holder {
+            list: List<String>,
+        }
+        let holder = Holder {
+            list: List::default(),
+        };
+        holder.list.push("a".into());
+        assert_eq!(holder.list.id(0), Some(0_usize));
+        let _explicit: List<String, ByIndex> = holder.list;
+    }
+
+    #[test]
+    fn conversions_infer_for_ord_items() {
+        let from = List::from(vec![5, 6, 7]);
+        assert_eq!(from.id(2), Some(2_usize));
+
+        let collected = (0..3).collect::<List<_>>();
+        assert_eq!(collected.snapshot(), vec![0, 1, 2]);
+
+        let default: List<i32> = List::default();
+        assert!(default.is_empty());
+
+        let by_value = List::by_value_from(vec![5, 6]);
+        assert_eq!(by_value.id(1), Some(6));
     }
 }

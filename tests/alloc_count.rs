@@ -145,12 +145,17 @@ fn registering_during_notify_takes_effect_next_round() {
     assert_eq!(calls.get(), 1);
 }
 
-type KeyedList = nami::collection::List<u64, fn(&u64) -> u64>;
 type Retained = std::rc::Rc<std::cell::RefCell<Vec<nami::collection::Items<u64>>>>;
 
 /// A watched 1000-item list whose watcher keeps the snapshots it receives
 /// when `retain` is set.
-fn watched_list(retain: bool) -> (KeyedList, impl Sized, Retained) {
+fn watched_list(
+    retain: bool,
+) -> (
+    nami::collection::List<u64, impl nami::collection::Identify<u64, Id = u64>>,
+    impl Sized,
+    Retained,
+) {
     use nami::collection::{Collection, List};
 
     let list = List::new(|value: &u64| *value);
