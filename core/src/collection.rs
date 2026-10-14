@@ -78,8 +78,12 @@ pub trait Collection: 'static {
     /// The watcher receives the items of the range, borrowed only for the
     /// duration of the call (clone what it needs to keep), plus the
     /// [`CollectionChange`] since its previous notification, in
-    /// collection-wide indices. The first call reports the current contents of
-    /// the range as inserted.
+    /// collection-wide indices.
+    ///
+    /// The watcher is only called when the collection actually changes:
+    /// registering does not deliver the current contents, and neither does
+    /// moving the range ([`CollectionWatcherGuard::set_range`]). Read the
+    /// current contents with [`Self::get`] / [`Self::id`].
     ///
     /// Returns a guard that will unregister the watcher when dropped.
     fn watch(
@@ -93,18 +97,17 @@ pub trait Collection: 'static {
 ///
 /// Dropping it unregisters the watcher, as for any [`WatcherGuard`]. It can
 /// also move the watched range in place, for example while a list view
-/// scrolls, without re-reporting the rows that stay visible.
+/// scrolls; the move itself is not notified.
 ///
 /// The required method takes explicit bounds so the trait stays object safe
 /// (see [`BoxCollectionWatcherGuard`]); call the generic [`Self::set_range`]
 /// on concrete guards.
 pub trait CollectionWatcherGuard: WatcherGuard {
-    /// Replaces the watched range by `start..end` and immediately notifies
-    /// the watcher with the current snapshot: positions that left the range
-    /// are reported as [`Edit::Remove`] and positions that entered it as
-    /// [`Edit::Insert`] (see [`CollectionChange::range_changed`]). Positions
-    /// that stay in range produce no edit. Nothing is delivered when the
-    /// resolved range did not change.
+    /// Replaces the watched range by `start..end` for future notifications.
+    ///
+    /// Nothing is delivered: the watcher is only notified when the
+    /// collection itself changes. Read the contents of the new range with
+    /// [`Collection::get`] / [`Collection::id`].
     fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>);
 
     /// [`Self::set_bounds`] taking any range, such as `10..30`.

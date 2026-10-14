@@ -126,25 +126,11 @@ impl CollectionChange {
         Self::from(Edit::Move { from, to })
     }
 
-    /// The first emission to a fresh watcher: `len` items appear from nothing
-    /// starting at `start`.
+    /// `len` items appear from nothing starting at `start`, for example to
+    /// seed a view with contents read through [`Collection::get`](crate::collection::Collection::get).
     #[must_use]
     pub fn populated(start: usize, len: usize) -> Self {
         Self::inserted(start..start + len)
-    }
-
-    /// The change a watcher sees when its watched range moves from `from` to
-    /// `to` over an unchanged snapshot: positions of `from` outside `to` are
-    /// removed, positions of `to` outside `from` are inserted, and positions
-    /// in both are left untouched. Both ranges are collection-wide.
-    #[must_use]
-    pub fn range_changed(from: Range<usize>, to: Range<usize>) -> Self {
-        fn minus(a: &Range<usize>, b: &Range<usize>) -> [Range<usize>; 2] {
-            [a.start..a.end.min(b.start), a.start.max(b.end)..a.end]
-        }
-        let removed = minus(&from, &to).map(Edit::Remove);
-        let inserted = minus(&to, &from).map(Edit::Insert);
-        Self::from_edits(removed.into_iter().chain(inserted))
     }
 
     /// Builds a change from edits in any order.
