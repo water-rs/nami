@@ -1467,7 +1467,7 @@ mod tests {
 
         let any = AnyCollection::new(list.clone());
         assert_eq!(any.with_range(..=1, ids), vec![0, 1]);
-        let boxed = alloc::boxed::Box::new(list.clone());
+        let boxed = alloc::boxed::Box::new(list);
         assert_eq!(Collection::with_range(&boxed, 4.., ids), vec![4]);
 
         let signal = SignalCollection::new(crate::binding(vals([7, 8, 9])));
