@@ -26,3 +26,10 @@ observability = ["std"]
 # Constant `Signal` implementations for kurbo's geometry types, so that APIs taking
 # `impl Signal<Output = Affine>` accept a plain value.
 kurbo = ["dep:kurbo"]
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false }
+
+[[bench]]
+name = "diff"
+harness = false
