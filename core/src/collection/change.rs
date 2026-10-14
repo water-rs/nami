@@ -75,7 +75,7 @@ impl Edit {
 /// collection and intersects them with its range itself.
 ///
 /// Collections compute the change by item id (see
-/// [`Collection::Id`](super::Collection::Id)): a reordered or front-inserted
+/// [`Identifiable::Id`](super::Identifiable::Id)): a reordered or front-inserted
 /// replacement reports moves and insertions instead of rewriting every
 /// position.
 ///

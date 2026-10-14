@@ -145,21 +145,21 @@ fn registering_during_notify_takes_effect_next_round() {
     assert_eq!(calls.get(), 1);
 }
 
-type Retained = std::rc::Rc<std::cell::RefCell<Vec<nami::collection::Items<u64>>>>;
+type Retained = std::rc::Rc<std::cell::RefCell<Vec<nami::collection::Items<nami::SelfId<u64>>>>>;
 
 /// A watched 1000-item list whose watcher keeps the snapshots it receives
 /// when `retain` is set.
 fn watched_list(
     retain: bool,
 ) -> (
-    nami::collection::List<u64, impl nami::collection::Identify<u64, Id = u64>>,
+    nami::collection::List<nami::SelfId<u64>>,
     impl Sized,
     Retained,
 ) {
     use nami::collection::{Collection, List};
 
-    let list = List::new(|value: &u64| *value);
-    list.extend(0..1000);
+    let list = List::new();
+    list.extend((0..1000).map(nami::SelfId::new));
     let retained = std::rc::Rc::new(std::cell::RefCell::new(Vec::with_capacity(4)));
     let guard = list.watch(.., {
         let retained = retained.clone();
@@ -177,23 +177,23 @@ fn watched_list(
 #[test]
 fn list_push_with_one_watcher_does_not_allocate() {
     let (list, _guard, _retained) = watched_list(false);
-    list.push(0); // grow once to known spare capacity
+    list.push(nami::SelfId::new(0)); // grow once to known spare capacity
     let _ = list.pop();
-    assert_eq!(allocations(|| list.push(1000)), 0);
+    assert_eq!(allocations(|| list.push(nami::SelfId::new(1000))), 0);
 }
 
 #[test]
 fn list_push_copies_only_while_a_snapshot_is_retained() {
     let (list, _guard, retained) = watched_list(true);
-    list.push(0);
+    list.push(nami::SelfId::new(0));
     let _ = list.pop();
     retained.borrow_mut().clear();
     // Nothing retained: the push writes in place.
     retained.borrow_mut().reserve(4);
-    assert_eq!(allocations(|| list.push(1000)), 0);
+    assert_eq!(allocations(|| list.push(nami::SelfId::new(1000))), 0);
     // The watcher now holds the snapshot it was given, so the next push
     // copies the items instead of changing that snapshot: a new `Rc`, the
     // cloned vector, and its growth for the pushed item.
-    assert_eq!(allocations(|| list.push(1001)), 3);
+    assert_eq!(allocations(|| list.push(nami::SelfId::new(1001))), 3);
     assert_eq!(retained.borrow()[0].len(), 1001);
 }

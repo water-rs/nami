@@ -1,6 +1,7 @@
 //! Observable collections whose items have identities.
 //!
-//! A [`Collection`] gives every item an id ([`Collection::Id`]) and reports
+//! Every item of a [`Collection`] is [`Identifiable`]: its id comes from the
+//! data ([`Identifiable::id`]). A collection reports
 //! each notification as a [`CollectionChange`] computed by id: insertions,
 //! removals, moves and in-place updates. Consumers such as a UI `ForEach`
 //! follow a collection by applying those edits ([`CollectionChange::apply`])
@@ -12,6 +13,8 @@ mod diff;
 pub use change::{CollectionChange, Edit};
 pub use diff::{Diff, diff};
 
+pub use crate::id::{Identifiable, IdentifiableExt, SelfId, UseId};
+
 use core::{
     fmt,
     ops::{Bound, Deref, Range, RangeBounds},
@@ -20,69 +23,6 @@ use core::{
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 
 use crate::watcher::{BoxWatcherGuard, Context, WatcherGuard};
-
-/// Gives each item of a collection its id.
-///
-/// Ids come from the data: a record's key field, the value itself
-/// ([`ByValue`]) or its position ([`ByIndex`]). A collection never invents
-/// ids, because invented ids would not survive a whole-list replacement,
-/// persistence or sync.
-///
-/// Any `Fn(&T) -> K` is an identity, so `|message: &Message| message.id`
-/// works directly.
-pub trait Identify<T>: 'static {
-    /// The id type. `Ord` is all alignment needs, so no hasher is involved.
-    type Id: Ord + Clone + 'static;
-
-    /// The id of `item` when it stands at `index`.
-    ///
-    /// Must depend only on its arguments: the same item at the same index
-    /// always has the same id.
-    fn id(&self, index: usize, item: &T) -> Self::Id;
-}
-
-impl<T, K, F> Identify<T> for F
-where
-    F: Fn(&T) -> K + 'static,
-    K: Ord + Clone + 'static,
-{
-    type Id = K;
-
-    fn id(&self, _index: usize, item: &T) -> K {
-        self(item)
-    }
-}
-
-/// Identifies each item by its value: equal values are the same item.
-///
-/// Suits lists of plain values such as `String`s. Equal values may repeat;
-/// see [`Diff::duplicate_ids`] for how repeats are matched.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ByValue;
-
-impl<T: Ord + Clone + 'static> Identify<T> for ByValue {
-    type Id = T;
-
-    fn id(&self, _index: usize, item: &T) -> T {
-        item.clone()
-    }
-}
-
-/// Identifies each item by its position.
-///
-/// Explicitly positional: a whole-list replacement never reports moves, only
-/// in-place updates and a grown or shrunk tail. Suits stacks such as a
-/// navigation path, where position is the identity.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ByIndex;
-
-impl<T> Identify<T> for ByIndex {
-    type Id = usize;
-
-    fn id(&self, index: usize, _item: &T) -> usize {
-        index
-    }
-}
 
 /// A shared, immutable snapshot of a collection, limited to the range a
 /// watcher asked for.
@@ -187,6 +127,9 @@ impl<T: PartialEq<U>, U, const N: usize> PartialEq<[U; N]> for Items<T> {
     }
 }
 
+/// The id type of the items of collection `C`.
+pub type ItemId<C> = <<C as Collection>::Item as Identifiable>::Id;
+
 /// A watcher of a [`Collection`]: receives the new snapshot of its range and
 /// the change, by id, since the previous notification.
 pub type BoxCollectionWatcher<T> = Box<dyn Fn(Context<Items<T>>, &CollectionChange) + 'static>;
@@ -198,13 +141,12 @@ pub type BoxCollectionWatcher<T> = Box<dyn Fn(Context<Items<T>>, &CollectionChan
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a reactive collection",
     label = "expected a `Collection` implementation",
-    note = "use `nami::collection::List<T, _>` for an owned reactive sequence; for a sequence derived from a signal such as a `Binding<Vec<T>>`, wrap it in `nami::collection::SignalCollection`"
+    note = "use `nami::collection::List<T>` for an owned reactive sequence; for a sequence derived from a signal such as a `Binding<Vec<T>>`, wrap it in `nami::collection::SignalCollection`"
 )]
 pub trait Collection: 'static {
-    /// The type of items stored in the collection.
-    type Item: 'static;
-    /// The id of an item: the identity changes are computed by.
-    type Id: Ord + Clone + 'static;
+    /// The type of items stored in the collection. Changes are computed by
+    /// [`Identifiable::id`].
+    type Item: Identifiable + 'static;
     /// The type of guard returned when registering a watcher.
     type Guard: WatcherGuard;
 
@@ -219,16 +161,9 @@ pub trait Collection: 'static {
         self.len() == 0
     }
 
-    /// The id this collection gives `item` when it stands at `index`.
-    ///
-    /// A pure function of its arguments, so a consumer can label the items
-    /// of a snapshot it received from [`Collection::watch`] even after the
-    /// collection has moved on.
-    fn identify(&self, index: usize, item: &Self::Item) -> Self::Id;
-
     /// The id of the item currently at `index`.
-    fn id(&self, index: usize) -> Option<Self::Id> {
-        self.get(index).map(|item| self.identify(index, &item))
+    fn id(&self, index: usize) -> Option<ItemId<Self>> {
+        self.get(index).map(|item| item.id())
     }
 
     /// Registers a watcher for changes in the specified range of the collection.
@@ -246,12 +181,11 @@ pub trait Collection: 'static {
     ) -> Self::Guard;
 }
 
-/// Static collections: identified by position, never notify.
+/// Static collections: never notify.
 macro_rules! static_collection {
     ($({$($generics:tt)*} $ty:ty, |$this:ident, $index:ident| $get:expr, |$len_this:ident| $len:expr;)*) => {$(
         impl<$($generics)*> Collection for $ty {
             type Item = T;
-            type Id = usize;
             type Guard = ();
 
             fn get(&self, $index: usize) -> Option<T> {
@@ -262,10 +196,6 @@ macro_rules! static_collection {
             fn len(&self) -> usize {
                 let $len_this = self;
                 $len
-            }
-
-            fn identify(&self, index: usize, _item: &T) -> usize {
-                index
             }
 
             fn watch(
@@ -280,17 +210,16 @@ macro_rules! static_collection {
 }
 
 static_collection! {
-    {T: Clone + 'static} Vec<T>, |this, index| this.as_slice().get(index).cloned(), |this| this.as_slice().len();
-    {T: Clone + 'static} &'static [T], |this, index| (*this).get(index).cloned(), |this| (*this).len();
-    {T: Clone + 'static, const N: usize} [T; N], |this, index| this.as_slice().get(index).cloned(), |_this| N;
-    {T: Clone + 'static} Rc<[T]>, |this, index| this.as_ref().get(index).cloned(), |this| this.as_ref().len();
+    {T: Identifiable + Clone + 'static} Vec<T>, |this, index| this.as_slice().get(index).cloned(), |this| this.as_slice().len();
+    {T: Identifiable + Clone + 'static} &'static [T], |this, index| (*this).get(index).cloned(), |this| (*this).len();
+    {T: Identifiable + Clone + 'static, const N: usize} [T; N], |this, index| this.as_slice().get(index).cloned(), |_this| N;
+    {T: Identifiable + Clone + 'static} Rc<[T]>, |this, index| this.as_ref().get(index).cloned(), |this| this.as_ref().len();
 }
 
 macro_rules! forward_collection {
     ($($wrapper:ident),*) => {$(
         impl<C: Collection> Collection for $wrapper<C> {
             type Item = C::Item;
-            type Id = C::Id;
             type Guard = C::Guard;
 
             fn get(&self, index: usize) -> Option<Self::Item> {
@@ -305,11 +234,7 @@ macro_rules! forward_collection {
                 (**self).is_empty()
             }
 
-            fn identify(&self, index: usize, item: &Self::Item) -> Self::Id {
-                (**self).identify(index, item)
-            }
-
-            fn id(&self, index: usize) -> Option<Self::Id> {
+            fn id(&self, index: usize) -> Option<ItemId<Self>> {
                 (**self).id(index)
             }
 
@@ -331,11 +256,11 @@ forward_collection!(Box, Rc);
 /// This allows storing collections of different concrete types in the same
 /// container while preserving the ability to observe them through the
 /// `Collection` interface.
-pub struct AnyCollection<T, Id> {
-    inner: Box<dyn AnyCollectionImpl<Item = T, Id = Id>>,
+pub struct AnyCollection<T> {
+    inner: Box<dyn AnyCollectionImpl<Item = T>>,
 }
 
-impl<T, Id> fmt::Debug for AnyCollection<T, Id> {
+impl<T> fmt::Debug for AnyCollection<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AnyCollection").finish_non_exhaustive()
     }
@@ -343,13 +268,11 @@ impl<T, Id> fmt::Debug for AnyCollection<T, Id> {
 
 /// Internal trait for type-erased collection operations.
 trait AnyCollectionImpl {
-    type Item;
-    type Id;
+    type Item: Identifiable;
     fn get(&self, index: usize) -> Option<Self::Item>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
-    fn identify(&self, index: usize, item: &Self::Item) -> Self::Id;
-    fn id(&self, index: usize) -> Option<Self::Id>;
+    fn id(&self, index: usize) -> Option<<Self::Item as Identifiable>::Id>;
     fn watch(
         &self,
         range: (Bound<usize>, Bound<usize>),
@@ -359,7 +282,6 @@ trait AnyCollectionImpl {
 
 impl<C: Collection> AnyCollectionImpl for C {
     type Item = C::Item;
-    type Id = C::Id;
 
     fn get(&self, index: usize) -> Option<Self::Item> {
         Collection::get(self, index)
@@ -373,11 +295,7 @@ impl<C: Collection> AnyCollectionImpl for C {
         Collection::is_empty(self)
     }
 
-    fn identify(&self, index: usize, item: &Self::Item) -> Self::Id {
-        Collection::identify(self, index, item)
-    }
-
-    fn id(&self, index: usize) -> Option<Self::Id> {
+    fn id(&self, index: usize) -> Option<ItemId<Self>> {
         Collection::id(self, index)
     }
 
@@ -390,11 +308,11 @@ impl<C: Collection> AnyCollectionImpl for C {
     }
 }
 
-impl<T: 'static, Id: Ord + Clone + 'static> AnyCollection<T, Id> {
+impl<T: Identifiable + 'static> AnyCollection<T> {
     /// Creates a new `AnyCollection` from any type that implements `Collection`.
     pub fn new<C>(collection: C) -> Self
     where
-        C: Collection<Item = T, Id = Id>,
+        C: Collection<Item = T>,
     {
         Self {
             inner: Box::new(collection),
@@ -421,7 +339,7 @@ impl<T: 'static, Id: Ord + Clone + 'static> AnyCollection<T, Id> {
 
     /// The id of the item at `index`, or `None` if out of bounds.
     #[must_use]
-    pub fn id(&self, index: usize) -> Option<Id> {
+    pub fn id(&self, index: usize) -> Option<T::Id> {
         self.inner.id(index)
     }
 
@@ -438,9 +356,8 @@ impl<T: 'static, Id: Ord + Clone + 'static> AnyCollection<T, Id> {
     }
 }
 
-impl<T: 'static, Id: Ord + Clone + 'static> Collection for AnyCollection<T, Id> {
+impl<T: Identifiable + 'static> Collection for AnyCollection<T> {
     type Item = T;
-    type Id = Id;
     type Guard = BoxWatcherGuard;
 
     fn get(&self, index: usize) -> Option<T> {
@@ -455,11 +372,7 @@ impl<T: 'static, Id: Ord + Clone + 'static> Collection for AnyCollection<T, Id> 
         Self::is_empty(self)
     }
 
-    fn identify(&self, index: usize, item: &T) -> Id {
-        self.inner.identify(index, item)
-    }
-
-    fn id(&self, index: usize) -> Option<Id> {
+    fn id(&self, index: usize) -> Option<T::Id> {
         Self::id(self, index)
     }
 

@@ -109,8 +109,12 @@ impl Hasher for IdentityDiscriminatorHasher {
 /// Collection types for Nami.
 pub mod collection;
 pub mod dictionary;
+pub mod id;
 pub mod observe;
 pub mod watcher;
+
+pub use id::{Identifiable, IdentifiableExt, SelfId, UseId};
+
 /// The core trait for reactive system.
 ///
 /// Types implementing `Signal` represent a computation that can produce a value
