@@ -1088,6 +1088,13 @@ impl<T: 'static> Signal for Binding<T> {
         self.0.compute()
     }
 
+    /// Forwards to the erased binding. A [`Container`]-backed binding keeps
+    /// the default snapshot: its value lives in a `RefCell` that `set`
+    /// inside `f` would need to borrow mutably.
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        crate::signal::with_erased(&*self.0, f)
+    }
+
     fn identity(&self) -> Option<SignalIdentity> {
         self.0.identity()
     }

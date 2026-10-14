@@ -27,6 +27,10 @@ pub(crate) trait ComputedImpl: Any {
     /// Computes and returns the current value
     fn compute(&self) -> Self::Output;
 
+    /// Object-safe [`Signal::with_ref`]: lends the value to `f` (called
+    /// exactly once).
+    fn with_dyn(&self, f: &mut dyn FnMut(&Self::Output));
+
     /// Registers a watcher that will be notified when the computed value changes
     fn add_watcher(&self, watcher: Watcher<Self::Output>) -> BoxWatcherGuard;
 
@@ -45,6 +49,10 @@ impl<C: Signal + 'static> ComputedImpl for C {
 
     fn compute(&self) -> Self::Output {
         <Self as Signal>::snapshot(self)
+    }
+
+    fn with_dyn(&self, f: &mut dyn FnMut(&Self::Output)) {
+        <Self as Signal>::with_ref(self, f);
     }
 
     fn add_watcher(&self, watcher: Watcher<Self::Output>) -> BoxWatcherGuard {
@@ -89,6 +97,11 @@ impl<T: 'static> Signal for Computed<T> {
         self.0.compute()
     }
 
+    /// Forwards to the erased signal: zero-copy when it is.
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        with_erased(&*self.0, f)
+    }
+
     fn identity(&self) -> Option<SignalIdentity> {
         self.0.identity()
     }
@@ -96,6 +109,22 @@ impl<T: 'static> Signal for Computed<T> {
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
         self.0.add_watcher(Rc::new(watcher))
     }
+}
+
+/// Calls the generic `f` through [`ComputedImpl::with_dyn`].
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn with_erased<T, R>(
+    erased: &(impl ComputedImpl<Output = T> + ?Sized),
+    f: impl FnOnce(&T) -> R,
+) -> R {
+    let mut f = Some(f);
+    let mut result = None;
+    erased.with_dyn(&mut |value| {
+        if let Some(f) = f.take() {
+            result = Some(f(value));
+        }
+    });
+    result.expect("`with_dyn` must call its callback")
 }
 
 impl<T: 'static> Clone for Computed<T> {
