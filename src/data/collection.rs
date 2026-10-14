@@ -692,7 +692,7 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
     type Id = T::Id;
     type Guard = ListGuard<T>;
 
-    fn get(&self, index: usize) -> Option<T> {
+    fn get_item(&self, index: usize) -> Option<T> {
         Self::get(self, index)
     }
 
@@ -704,7 +704,7 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
         Self::with_range(self, range, f)
     }
 
-    fn id(&self, index: usize) -> Option<T::Id> {
+    fn get_id(&self, index: usize) -> Option<T::Id> {
         Self::id(self, index)
     }
 
@@ -858,7 +858,7 @@ where
     type Id = T::Id;
     type Guard = SignalCollectionGuard<S::Guard>;
 
-    fn get(&self, index: usize) -> Option<T> {
+    fn get_item(&self, index: usize) -> Option<T> {
         self.signal.snapshot().as_slice().get(index).cloned()
     }
 
@@ -872,7 +872,7 @@ where
         f(&items[clamp_range(&range, items.len())])
     }
 
-    fn id(&self, index: usize) -> Option<T::Id> {
+    fn get_id(&self, index: usize) -> Option<T::Id> {
         self.signal.snapshot().as_slice().get(index).map(T::id)
     }
 
@@ -1217,13 +1217,13 @@ mod tests {
     fn static_collections_are_silent() {
         let vec = vec![row(10, "a"), row(20, "b")];
         assert_eq!(Collection::count(&vec), 2);
-        assert_eq!(Collection::get(&vec, 1), Some(row(20, "b")));
-        assert_eq!(Collection::id(&vec, 1), Some(20));
+        assert_eq!(Collection::get_item(&vec, 1), Some(row(20, "b")));
+        assert_eq!(Collection::get_id(&vec, 1), Some(20));
         let _: () = Collection::watch(&vec, .., |_, _| panic!("a Vec never notifies"));
 
         let array = [SelfId::new(1), SelfId::new(2)];
         assert_eq!(
-            Collection::id(&array, 1),
+            Collection::get_id(&array, 1),
             Some(1),
             "arrays are identified by index"
         );
@@ -1235,8 +1235,8 @@ mod tests {
         let mut list = rows(vec![row(4, "a"), row(5, "b")]);
         let any = AnyCollection::new(list.clone());
         assert_eq!(any.count(), 2);
-        assert_eq!(any.id(1), Some(5));
-        assert_eq!(any.get(0), Some(row(4, "a")));
+        assert_eq!(any.get_id(1), Some(5));
+        assert_eq!(any.get_item(0), Some(row(4, "a")));
 
         let (changes, _guard) = record(&any);
         let _ = list.replace(vec![row(5, "b"), row(4, "a")]);
@@ -1320,8 +1320,8 @@ mod tests {
             C::Id: fmt::Debug,
         {
             let before = CLONES.load(Ordering::Relaxed);
-            assert_eq!(Collection::id(c, 1), Some(expected));
-            assert_eq!(Collection::id(c, 9), None);
+            assert_eq!(Collection::get_id(c, 1), Some(expected));
+            assert_eq!(Collection::get_id(c, 9), None);
             assert_eq!(CLONES.load(Ordering::Relaxed), before);
         }
 
@@ -1494,21 +1494,27 @@ mod tests {
     }
 
     #[test]
-    fn importing_collection_does_not_shadow_slice_len() {
+    fn importing_collection_does_not_shadow_slice_methods() {
         // `Collection` is in scope here and implemented for `&'static [T]`;
-        // the slice's own `len`/`is_empty` must still be picked.
+        // the slice's own `len`/`is_empty`/`get` must still be picked.
         let list = List::from(vals([1, 2]));
         let lens = Rc::new(RefCell::new(Vec::new()));
         let mut handle = list.clone();
         let _guard = list.watch(.., {
             let lens = lens.clone();
             move |items, _change| {
-                lens.borrow_mut()
-                    .push((items.value().len(), items.value().is_empty()));
+                let second = items.value().get(1).map(|v| **v);
+                let third_item = items.value().get(2).copied();
+                lens.borrow_mut().push((
+                    items.value().len(),
+                    items.value().is_empty(),
+                    first,
+                    last,
+                ));
             }
         });
         handle.push(SelfId::new(3));
-        assert_eq!(*lens.borrow(), [(3, false)]);
+        assert_eq!(*lens.borrow(), [(3, false, Some(2), Some(SelfId::new(3)))]);
     }
 
     #[test]
