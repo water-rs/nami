@@ -177,3 +177,58 @@ fn list_pushes_with_a_watcher_never_copy() {
         assert_eq!(allocations(|| list.push(nami::SelfId::new(id))), 0);
     }
 }
+
+#[test]
+fn empty_metadata_and_context_do_not_allocate() {
+    use nami::watcher::Metadata;
+    assert_eq!(allocations(|| drop(Metadata::new())), 0);
+    let metadata = Metadata::new();
+    assert_eq!(allocations(|| drop(metadata.clone())), 0);
+    assert_eq!(allocations(|| drop(Context::from(1_i32))), 0);
+}
+
+#[test]
+fn manager_notify_with_many_watchers_does_not_allocate() {
+    use nami::watcher::WatcherManager;
+    for count in [1_usize, 2, 10, 100] {
+        let manager = WatcherManager::<i32>::new();
+        let ids: Vec<_> = (0..count).map(|_| manager.register(|_| {})).collect();
+        assert_eq!(allocations(|| manager.notify(&Context::from(1))), 0);
+        assert_eq!(allocations(|| manager.notify_owned(Context::from(1))), 0);
+        for id in ids {
+            manager.cancel(id);
+        }
+    }
+}
+
+#[test]
+fn notify_owned_moves_context_into_last_watcher() {
+    use nami::watcher::WatcherManager;
+    // `String` clones allocate, so the count is the number of clones.
+    for count in [1_usize, 2, 5] {
+        let manager = WatcherManager::<String>::new();
+        let ids: Vec<_> = (0..count).map(|_| manager.register(|_| {})).collect();
+        let ctx = Context::from(String::from("value"));
+        assert_eq!(allocations(move || manager.notify_owned(ctx)), count - 1);
+        drop(ids);
+    }
+}
+
+#[test]
+fn registering_a_watcher_costs_its_rc_plus_list_growth() {
+    use nami::watcher::WatcherManager;
+    let manager = WatcherManager::<i32>::new();
+    let mut ids = Vec::with_capacity(64);
+    let mut total = 0;
+    for _ in 0..64 {
+        let mut id = None;
+        total += allocations(|| id = Some(manager.register(|_| {})));
+        ids.extend(id);
+    }
+    // 64 closure `Rc`s plus amortised `Vec` growth (no snapshot alive, so
+    // the copy-on-write list is mutated in place).
+    assert!(total <= 64 + 8, "registration allocated {total}");
+    for id in ids {
+        manager.cancel(id);
+    }
+}
