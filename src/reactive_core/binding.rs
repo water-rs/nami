@@ -256,12 +256,12 @@ impl<T: 'static> Binding<T> {
         T: Clone,
     {
         if let Some(container) = self.as_container() {
-            // optimize for container bindings
-            let mut value = container.value.borrow_mut();
-            let result = f(&mut *value);
-            // Clone only for watchers, and notify after releasing the borrow.
-            let updated = (!container.watchers.is_empty()).then(|| value.clone());
-            drop(value);
+            // optimize for container bindings; a `with_ref` borrow still
+            // live on the value makes the edit copy-on-write
+            let result = container.edit(f);
+            // Clone only for watchers, after releasing the borrow.
+            let updated =
+                (!container.watchers.is_empty()).then(|| container.value.borrow().as_ref().clone());
             if let Some(updated) = updated {
                 container.watchers.notify_owned(Context::from(updated));
             }
@@ -1009,10 +1009,21 @@ impl<T> Clone for Binding<T> {
 ///
 /// The container is the basic implementation of a binding that holds a value
 /// and notifies watchers when the value changes.
+///
+/// # Reentrant mutation
+///
+/// The value is stored copy-on-write: a [`Signal::with_ref`] borrow holds the
+/// `Rc` while its callback runs, so a `set` or [`Binding::with_mut`] made from
+/// inside the callback does not panic — the borrower keeps the old value and
+/// the write copies or re-boxes it. Like [`List`](crate::collection::List)'s
+/// reentrant mutation, this is an anti-pattern, and debug builds warn about it.
 #[derive(Debug, Clone)]
 pub struct Container<T: 'static> {
-    /// The contained value, wrapped in Reference-counted [`RefCell`] for interior mutability
-    value: Rc<RefCell<T>>,
+    /// The contained value behind copy-on-write shared ownership: a borrowed
+    /// read clones the inner `Rc` (a refcount bump, not the value), a write
+    /// replaces it or copies it through [`Rc::make_mut`] when a borrow is
+    /// still live.
+    value: Rc<RefCell<Rc<T>>>,
     /// Manager for watchers that are interested in changes to the value
     watchers: WatcherManager<T>,
 }
@@ -1038,11 +1049,53 @@ impl<T: 'static + Clone> Container<T> {
     /// Creates a new container with the given value.
     #[track_caller]
     pub fn new(value: T) -> Self {
-        let value = Rc::new(RefCell::new(value));
+        let value = Rc::new(RefCell::new(Rc::new(value)));
         let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&value));
         Self {
             value,
             watchers: WatcherManager::with_origin(origin),
+        }
+    }
+
+    /// Stores `value`. While a `with_ref` borrow is live the stored `Rc` is
+    /// shared, so the new value gets fresh storage and the borrower keeps
+    /// reading the old one; otherwise the existing allocation is reused.
+    fn store(&self, value: T) {
+        let mut slot = self.value.borrow_mut();
+        if let Some(current) = Rc::get_mut(&mut slot) {
+            *current = value;
+        } else {
+            #[cfg(debug_assertions)]
+            Self::warn_if_shared(&slot);
+            *slot = Rc::new(value);
+        }
+    }
+
+    /// Runs `f` on the stored value, copying it through [`Rc::make_mut`]
+    /// first when a `with_ref` borrow still shares it.
+    ///
+    /// The `RefCell` borrow is held while `f` runs, so a `set`, `snapshot`
+    /// or `with_ref` nested inside `f` panics — the same as before the
+    /// copy-on-write storage.
+    fn edit<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        let mut slot = self.value.borrow_mut();
+        #[cfg(debug_assertions)]
+        Self::warn_if_shared(&slot);
+        f(Rc::make_mut(&mut slot))
+    }
+
+    /// Warns, in debug builds, that `current` is shared: a `with_ref` borrow
+    /// of the value is still running, so the write leaves the borrower with
+    /// the old value and pays copy-on-write for its own storage.
+    #[cfg(debug_assertions)]
+    fn warn_if_shared(current: &Rc<T>) {
+        if Rc::strong_count(current) > 1 {
+            log::warn!(
+                "nami: a `Binding` was mutated while a `with_ref` borrow of its value \
+                 was still live; the borrow keeps the old value and the write pays \
+                 copy-on-write for fresh storage. Mutate the binding outside \
+                 `with_ref` instead"
+            );
         }
     }
 }
@@ -1053,7 +1106,15 @@ impl<T: 'static + Clone> Signal for Container<T> {
 
     /// Retrieves the current value.
     fn snapshot(&self) -> Self::Output {
-        self.value.borrow().deref().clone()
+        self.value.borrow().as_ref().clone()
+    }
+
+    /// Lends the value to `f` through a refcount bump on the shared `Rc`:
+    /// no `RefCell` borrow is held while `f` runs, so a `set` or `with_mut`
+    /// inside `f` takes the copy-on-write path instead of panicking.
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        let value = Rc::clone(&self.value.borrow());
+        f(&value)
     }
 
     fn identity(&self) -> Option<SignalIdentity> {
@@ -1071,10 +1132,10 @@ impl<T: 'static + Clone> CustomBinding for Container<T> {
     fn set(&self, value: T) {
         if self.watchers.is_empty() {
             // Nobody to tell: move the value in without cloning it.
-            self.value.replace(value);
+            self.store(value);
             return;
         }
-        self.value.replace(value.clone());
+        self.store(value.clone());
         self.watchers.notify_owned(Context::from(value));
     }
 }
@@ -1088,9 +1149,10 @@ impl<T: 'static> Signal for Binding<T> {
         self.0.compute()
     }
 
-    /// Forwards to the erased binding. A [`Container`]-backed binding keeps
-    /// the default snapshot: its value lives in a `RefCell` that `set`
-    /// inside `f` would need to borrow mutably.
+    /// Forwards to the erased binding. A [`Container`]-backed binding lends
+    /// its value through a refcount bump on the shared `Rc`: mutating it
+    /// inside `f` copies the value for the write and leaves `f` reading the
+    /// old one, so it never panics.
     fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         crate::signal::with_erased(&*self.0, f)
     }
