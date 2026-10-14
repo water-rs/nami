@@ -118,8 +118,8 @@ pub struct List<T> {
 struct ListState<T> {
     items: RefCell<Rc<Vec<T>>>,
     watchers: WatcherRegistry<ListWatcher<T>>,
-    /// How many notifications are running; debug builds only, to warn about
-    /// mutations made from inside a watcher.
+    /// How many notifications or [`List::with_range`] loans are running;
+    /// debug builds only, to warn about mutations made from inside them.
     #[cfg(debug_assertions)]
     notifying: Cell<usize>,
 }
@@ -225,6 +225,21 @@ impl<T: Identifiable + 'static> List<T> {
     /// The list must not be mutated from inside `f`.
     pub fn with<R>(&self, f: impl FnOnce(&[T]) -> R) -> R {
         f(&self.state.items.borrow())
+    }
+
+    /// Lends the items of `range` to `f` without copying them.
+    ///
+    /// The range is clamped to the length (see
+    /// [`Collection::with_range`]). Only the storage's reference count is
+    /// bumped, and the list is not borrowed while `f` runs, so mutating it
+    /// inside `f` through a clone works (via copy-on-write); it is the same
+    /// anti-pattern as [reentrant mutation](List#reentrant-mutation) and
+    /// debug builds warn about it.
+    pub fn with_range<R>(&self, range: impl RangeBounds<usize>, f: impl FnOnce(&[T]) -> R) -> R {
+        let items = Rc::clone(&self.state.items.borrow());
+        #[cfg(debug_assertions)]
+        let _lending = NotifyingScope::enter(&self.state.notifying);
+        f(&items[clamp_range(&range, items.len())])
     }
 
     /// Takes a snapshot of the current list contents.
@@ -561,8 +576,9 @@ impl<T: Identifiable + 'static> List<T> {
         #[cfg(debug_assertions)]
         if self.state.notifying.get() > 0 {
             log::warn!(
-                "nami: a List was mutated from inside one of its own watchers; this copies \
-                 every item and nests notifications. Mutate it outside the watcher instead"
+                "nami: a List was mutated from inside one of its own watchers or a \
+                 `with_range` callback; this copies every item and nests notifications. \
+                 Mutate it outside the callback instead"
             );
         }
     }
@@ -680,12 +696,12 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
         Self::get(self, index)
     }
 
-    fn len(&self) -> usize {
+    fn count(&self) -> usize {
         Self::len(self)
     }
 
-    fn is_empty(&self) -> bool {
-        Self::is_empty(self)
+    fn with_range<R>(&self, range: impl RangeBounds<usize>, f: impl FnOnce(&[T]) -> R) -> R {
+        Self::with_range(self, range, f)
     }
 
     fn id(&self, index: usize) -> Option<T::Id> {
@@ -846,8 +862,14 @@ where
         self.signal.snapshot().as_slice().get(index).cloned()
     }
 
-    fn len(&self) -> usize {
+    fn count(&self) -> usize {
         self.signal.snapshot().len()
+    }
+
+    /// Computes the signal's value once and lends the range of it.
+    fn with_range<R>(&self, range: impl RangeBounds<usize>, f: impl FnOnce(&[T]) -> R) -> R {
+        let items = self.signal.snapshot();
+        f(&items[clamp_range(&range, items.len())])
     }
 
     fn id(&self, index: usize) -> Option<T::Id> {
@@ -1194,7 +1216,7 @@ mod tests {
     #[test]
     fn static_collections_are_silent() {
         let vec = vec![row(10, "a"), row(20, "b")];
-        assert_eq!(Collection::len(&vec), 2);
+        assert_eq!(Collection::count(&vec), 2);
         assert_eq!(Collection::get(&vec, 1), Some(row(20, "b")));
         assert_eq!(Collection::id(&vec, 1), Some(20));
         let _: () = Collection::watch(&vec, .., |_, _| panic!("a Vec never notifies"));
@@ -1212,7 +1234,7 @@ mod tests {
     fn any_collection_forwards_everything() {
         let mut list = rows(vec![row(4, "a"), row(5, "b")]);
         let any = AnyCollection::new(list.clone());
-        assert_eq!(any.len(), 2);
+        assert_eq!(any.count(), 2);
         assert_eq!(any.id(1), Some(5));
         assert_eq!(any.get(0), Some(row(4, "a")));
 
@@ -1431,6 +1453,62 @@ mod tests {
         // Every watcher gets both changes, so applying them in order
         // reproduces the list.
         assert_eq!(other.borrow().len(), 2);
+    }
+
+    #[test]
+    fn with_range_lends_a_clamped_slice() {
+        let list = List::from(vals([0, 1, 2, 3, 4]));
+        let ids = |items: &[SelfId<i32>]| items.iter().map(|v| **v).collect::<Vec<_>>();
+        assert_eq!(list.with_range(1..3, ids), vec![1, 2]);
+        assert_eq!(list.with_range(3.., ids), vec![3, 4]);
+        assert_eq!(list.with_range(3..100, ids), vec![3, 4]);
+        assert_eq!(list.with_range(10..20, ids), Vec::<i32>::new());
+        assert_eq!(Collection::with_range(&list, .., ids), vec![0, 1, 2, 3, 4]);
+
+        let any = AnyCollection::new(list.clone());
+        assert_eq!(any.with_range(..=1, ids), vec![0, 1]);
+        let boxed = alloc::boxed::Box::new(list.clone());
+        assert_eq!(Collection::with_range(&boxed, 4.., ids), vec![4]);
+
+        let signal = SignalCollection::new(crate::binding(vals([7, 8, 9])));
+        assert_eq!(signal.with_range(1.., ids), vec![8, 9]);
+
+        let array = [SelfId::new(5), SelfId::new(6)];
+        assert_eq!(Collection::with_range(&array, 1..9, ids), vec![6]);
+    }
+
+    #[test]
+    fn reentrant_mutation_in_with_range_copies_instead_of_panicking() {
+        let list = List::from(vals([1, 2, 3]));
+        let (changes, _guard) = record(&list);
+        let seen = list.with_range(.., |items| {
+            let mut handle = list.clone();
+            handle.push(SelfId::new(4));
+            let _ = handle.remove(0);
+            // The lent slice is unaffected by the mutation.
+            items.iter().map(|v| **v).collect::<Vec<_>>()
+        });
+        assert_eq!(seen, vec![1, 2, 3]);
+        assert_eq!(values(&list), vec![2, 3, 4]);
+        assert_eq!(changes.borrow().len(), 2);
+    }
+
+    #[test]
+    fn importing_collection_does_not_shadow_slice_len() {
+        // `Collection` is in scope here and implemented for `&'static [T]`;
+        // the slice's own `len`/`is_empty` must still be picked.
+        let list = List::from(vals([1, 2]));
+        let lens = Rc::new(RefCell::new(Vec::new()));
+        let mut handle = list.clone();
+        let _guard = list.watch(.., {
+            let lens = lens.clone();
+            move |items, _change| {
+                lens.borrow_mut()
+                    .push((items.value().len(), items.value().is_empty()));
+            }
+        });
+        handle.push(SelfId::new(3));
+        assert_eq!(*lens.borrow(), [(3, false)]);
     }
 
     #[test]

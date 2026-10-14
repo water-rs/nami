@@ -40,7 +40,7 @@ fn reentrant_mutation_warns_in_debug_builds_only() {
         let handle = list.clone();
         move |items: nami::watcher::Context<&[SelfId<i32>]>,
               _change: &nami::collection::CollectionChange| {
-            if <[_]>::len(items.value()) == 1 {
+            if items.value().len() == 1 {
                 handle.clone().push(SelfId::new(2));
             }
         }
@@ -54,4 +54,12 @@ fn reentrant_mutation_warns_in_debug_builds_only() {
     // An ordinary mutation outside any watcher does not warn.
     list.push(SelfId::new(3));
     assert_eq!(reentrant_warnings(), expected);
+
+    // Nor does merely reading through `with_range`; mutating inside it does.
+    let len = list.with_range(.., <[_]>::len);
+    assert_eq!(len, 3);
+    assert_eq!(reentrant_warnings(), expected);
+    list.with_range(.., |_| list.clone().push(SelfId::new(4)));
+    assert_eq!(list.len(), 4);
+    assert_eq!(reentrant_warnings(), 2 * expected);
 }
