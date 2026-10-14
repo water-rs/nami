@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core","derive"]
+members = ["core", "derive", "tests/renamed-dependency"]
 
 [workspace.package]
 edition = "2024"
@@ -37,8 +37,10 @@ maintenance = { status = "actively-developed" }
 license = { file = "LICENSE" }
 
 [dev-dependencies]
+log = "0.4.33"
 nami-derive = { workspace = true }
 trybuild = "1"
+divan = "0.1"
 # `async_signal`'s timer tests drive spawned runnables through the same
 # channel-drain executor shape the runners use.
 executor-core = { version = "0.7.1", features = ["std", "async-task"] }
@@ -46,7 +48,7 @@ executor-core = { version = "0.7.1", features = ["std", "async-task"] }
 [dependencies]
 log = { version = "0.4.33", default-features = true }
 nami-derive = { workspace = true, optional = true}
-futures-core = "0.3.33"
+futures-core = { version = "0.3.33", default-features = false }
 pin-project-lite = "0.2.17"
 executor-core = { version = "0.7.1", default-features = false }
 async-channel = { version = "2.5.0", default-features = false }
@@ -85,3 +87,7 @@ clippy.multiple_crate_versions =  { level = "allow", priority = 1 }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "notify"
+harness = false

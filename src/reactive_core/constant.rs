@@ -78,6 +78,11 @@ impl<T: Clone + 'static> Signal for Constant<T> {
         self.0.clone()
     }
 
+    /// Lends the constant value without cloning it.
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        f(&self.0)
+    }
+
     /// Adds a watcher to this constant.
     ///
     /// Since a constant never changes, this function returns a `WatcherGuard`

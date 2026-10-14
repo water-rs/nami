@@ -46,6 +46,10 @@ where
         self.signal.snapshot()
     }
 
+    fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+        self.signal.with_ref(f)
+    }
+
     fn identity(&self) -> Option<SignalIdentity> {
         self.signal.identity()
     }
