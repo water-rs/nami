@@ -54,7 +54,7 @@ pub trait Collection: 'static {
     type Guard: CollectionWatcherGuard;
 
     /// Gets an item from the collection at the specified index.
-    fn get(&self, index: usize) -> Option<Self::Item>;
+    fn get_item(&self, index: usize) -> Option<Self::Item>;
 
     /// Returns the number of items in the collection.
     ///
@@ -85,7 +85,7 @@ pub trait Collection: 'static {
     /// [`Identifiable::id`]). Diffing
     /// and keyed rendering call it for every index, so cloning whole items here
     /// would be costly.
-    fn id(&self, index: usize) -> Option<Self::Id>;
+    fn get_id(&self, index: usize) -> Option<Self::Id>;
 
     /// Registers a watcher for changes in the specified range of the collection.
     ///
@@ -97,7 +97,7 @@ pub trait Collection: 'static {
     /// The watcher is only called when the collection actually changes:
     /// registering does not deliver the current contents, and neither does
     /// moving the range ([`CollectionWatcherGuard::set_range`]). Read the
-    /// current contents with [`Self::get`] / [`Self::id`].
+    /// current contents with [`Self::get_item`] / [`Self::get_id`].
     ///
     /// Do not mutate the same collection from inside the watcher (for
     /// example through a cloned handle). Mutation APIs such as
@@ -128,7 +128,7 @@ pub trait CollectionWatcherGuard: WatcherGuard {
     ///
     /// Nothing is delivered: the watcher is only notified when the
     /// collection itself changes. Read the contents of the new range with
-    /// [`Collection::get`] / [`Collection::id`].
+    /// [`Collection::get_item`] / [`Collection::get_id`].
     fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>);
 
     /// [`Self::set_bounds`] taking any range, such as `10..30`.
@@ -168,7 +168,7 @@ macro_rules! static_collection {
             type Id = $id;
             type Guard = ();
 
-            fn get(&self, index: usize) -> Option<T> {
+            fn get_item(&self, index: usize) -> Option<T> {
                 let $this = self;
                 $slice.get(index).cloned()
             }
@@ -188,7 +188,7 @@ macro_rules! static_collection {
                 f(&slice[clamp_range(&range, slice.len())])
             }
 
-            fn id(&self, $index: usize) -> Option<$id> {
+            fn get_id(&self, $index: usize) -> Option<$id> {
                 let $this = self;
                 $slice.get($index).map(|$item| $make_id)
             }
@@ -226,8 +226,8 @@ macro_rules! forward_collection {
             type Id = C::Id;
             type Guard = C::Guard;
 
-            fn get(&self, index: usize) -> Option<Self::Item> {
-                (**self).get(index)
+            fn get_item(&self, index: usize) -> Option<Self::Item> {
+                (**self).get_item(index)
             }
 
             fn count(&self) -> usize {
@@ -242,8 +242,8 @@ macro_rules! forward_collection {
                 (**self).with_range(range, f)
             }
 
-            fn id(&self, index: usize) -> Option<Self::Id> {
-                (**self).id(index)
+            fn get_id(&self, index: usize) -> Option<Self::Id> {
+                (**self).get_id(index)
             }
 
             fn watch(
@@ -281,10 +281,10 @@ impl<T, Id> fmt::Debug for AnyCollection<T, Id> {
 trait AnyCollectionImpl {
     type Item;
     type Id;
-    fn get(&self, index: usize) -> Option<Self::Item>;
+    fn get_item(&self, index: usize) -> Option<Self::Item>;
     fn count(&self) -> usize;
     fn with_bounds(&self, range: (Bound<usize>, Bound<usize>), f: &mut dyn FnMut(&[Self::Item]));
-    fn id(&self, index: usize) -> Option<Self::Id>;
+    fn get_id(&self, index: usize) -> Option<Self::Id>;
     fn watch(
         &self,
         range: (Bound<usize>, Bound<usize>),
@@ -296,8 +296,8 @@ impl<C: Collection> AnyCollectionImpl for C {
     type Item = C::Item;
     type Id = C::Id;
 
-    fn get(&self, index: usize) -> Option<Self::Item> {
-        Collection::get(self, index)
+    fn get_item(&self, index: usize) -> Option<Self::Item> {
+        Collection::get_item(self, index)
     }
 
     fn count(&self) -> usize {
@@ -308,8 +308,8 @@ impl<C: Collection> AnyCollectionImpl for C {
         Collection::with_range(self, range, f);
     }
 
-    fn id(&self, index: usize) -> Option<C::Id> {
-        Collection::id(self, index)
+    fn get_id(&self, index: usize) -> Option<C::Id> {
+        Collection::get_id(self, index)
     }
 
     fn watch(
@@ -334,8 +334,8 @@ impl<T: 'static, Id: Ord + Clone> AnyCollection<T, Id> {
 
     /// Gets the item at `index`, or `None` if out of bounds.
     #[must_use]
-    pub fn get(&self, index: usize) -> Option<T> {
-        self.inner.get(index)
+    pub fn get_item(&self, index: usize) -> Option<T> {
+        self.inner.get_item(index)
     }
 
     /// Returns the number of items in the collection.
@@ -372,8 +372,8 @@ impl<T: 'static, Id: Ord + Clone> AnyCollection<T, Id> {
 
     /// The id of the item at `index`, or `None` if out of bounds.
     #[must_use]
-    pub fn id(&self, index: usize) -> Option<Id> {
-        self.inner.id(index)
+    pub fn get_id(&self, index: usize) -> Option<Id> {
+        self.inner.get_id(index)
     }
 
     /// Registers a watcher for changes in `range`; see [`Collection::watch`].
@@ -394,8 +394,8 @@ impl<T: 'static, Id: Ord + Clone + 'static> Collection for AnyCollection<T, Id> 
     type Id = Id;
     type Guard = BoxCollectionWatcherGuard;
 
-    fn get(&self, index: usize) -> Option<T> {
-        Self::get(self, index)
+    fn get_item(&self, index: usize) -> Option<T> {
+        Self::get_item(self, index)
     }
 
     fn count(&self) -> usize {
@@ -406,8 +406,8 @@ impl<T: 'static, Id: Ord + Clone + 'static> Collection for AnyCollection<T, Id> 
         Self::with_range(self, range, f)
     }
 
-    fn id(&self, index: usize) -> Option<Id> {
-        Self::id(self, index)
+    fn get_id(&self, index: usize) -> Option<Id> {
+        Self::get_id(self, index)
     }
 
     fn watch(

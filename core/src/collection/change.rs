@@ -127,7 +127,7 @@ impl CollectionChange {
     }
 
     /// `len` items appear from nothing starting at `start`, for example to
-    /// seed a view with contents read through [`Collection::get`](crate::collection::Collection::get).
+    /// seed a view with contents read through [`Collection::get_item`](crate::collection::Collection::get_item).
     #[must_use]
     pub fn populated(start: usize, len: usize) -> Self {
         Self::inserted(start..start + len)
