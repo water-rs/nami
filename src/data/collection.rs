@@ -6,7 +6,7 @@
 //!   from `nami-core`.
 //! - [`List<T>`]: an owned reactive list of [`Identifiable`] items.
 //! - [`SignalCollection`]: adapts a signal of `Vec<T>` snapshots.
-//! - [`AnyCollection<T>`]: a type-erased collection.
+//! - [`AnyCollection<T, Id>`](AnyCollection): a type-erased collection.
 //!
 //! # Identity
 //!
@@ -612,6 +612,7 @@ impl<T: 'static> CollectionWatcherGuard for ListGuard<T> {
 
 impl<T: Identifiable + Clone + 'static> Collection for List<T> {
     type Item = T;
+    type Id = T::Id;
     type Guard = ListGuard<T>;
 
     fn get(&self, index: usize) -> Option<T> {
@@ -813,6 +814,7 @@ where
     T: Identifiable + Clone + PartialEq + 'static,
 {
     type Item = T;
+    type Id = T::Id;
     type Guard = SignalCollectionGuard<S::Guard>;
 
     fn get(&self, index: usize) -> Option<T> {
@@ -1197,7 +1199,11 @@ mod tests {
         let _: () = Collection::watch(&vec, .., |_, _| panic!("a Vec never notifies"));
 
         let array = [SelfId::new(1), SelfId::new(2)];
-        assert_eq!(Collection::id(&array, 1), Some(2));
+        assert_eq!(
+            Collection::id(&array, 1),
+            Some(1),
+            "arrays are identified by index"
+        );
         let _: () = Collection::watch(&array, .., |_, _| panic!("an array never notifies"));
     }
 
@@ -1287,20 +1293,25 @@ mod tests {
             }
         }
 
-        fn check<C: Collection<Item = Counted>>(c: &C) {
+        fn check<C: Collection<Item = Counted>>(c: &C, expected: C::Id)
+        where
+            C::Id: fmt::Debug,
+        {
             let before = CLONES.load(Ordering::Relaxed);
-            assert_eq!(Collection::id(c, 1), Some(2));
+            assert_eq!(Collection::id(c, 1), Some(expected));
             assert_eq!(Collection::id(c, 9), None);
             assert_eq!(CLONES.load(Ordering::Relaxed), before);
         }
 
         let make = || vec![Counted(1), Counted(2)];
-        check(&List::from(make()));
-        check(&make());
-        check(&[Counted(1), Counted(2)]);
-        check(&Rc::<[Counted]>::from(make()));
-        check(&AnyCollection::new(List::from(make())));
-        check(&Box::new(make()));
+        // Item ids.
+        check(&List::from(make()), 2);
+        check(&make(), 2);
+        check(&AnyCollection::new(List::from(make())), 2);
+        check(&Box::new(make()), 2);
+        // Index ids.
+        check(&[Counted(1), Counted(2)], 1);
+        check(&Rc::<[Counted]>::from(make()), 1);
     }
 
     type Seen = Rc<RefCell<Vec<(Vec<i32>, CollectionChange)>>>;
