@@ -179,6 +179,22 @@ fn list_pushes_with_a_watcher_never_copy() {
 }
 
 #[test]
+fn cloning_a_container_binding_does_not_allocate() {
+    // A container-backed binding is a tagged `Rc` pointer: cloning bumps the
+    // refcount in place (water-rs/nami#49).
+    let value: Binding<i32> = binding(0_i32);
+    assert_eq!(allocations(|| drop(value.clone())), 0);
+}
+
+#[test]
+fn cloning_a_custom_binding_allocates_one_node() {
+    // `filter` builds a `Binding` over a custom `Mapping` implementation;
+    // cloning it allocates exactly the new erased node (water-rs/nami#49).
+    let filtered = binding::<i32>(0_i32).filter(|_| true);
+    assert_eq!(allocations(|| drop(filtered.clone())), 1);
+}
+
+#[test]
 fn empty_metadata_and_context_do_not_allocate() {
     use nami::watcher::Metadata;
     assert_eq!(allocations(|| drop(Metadata::new())), 0);
