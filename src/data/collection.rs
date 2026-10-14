@@ -232,7 +232,6 @@ impl<T: 'static, I: Identify<T>> List<T, I> {
     ///
     /// The items are cloned first, so modifications during iteration do not
     /// affect the iterator.
-    #[must_use]
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter
     where
         T: Clone,
