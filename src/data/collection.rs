@@ -1508,8 +1508,8 @@ mod tests {
                 lens.borrow_mut().push((
                     items.value().len(),
                     items.value().is_empty(),
-                    first,
-                    last,
+                    second,
+                    third_item,
                 ));
             }
         });
