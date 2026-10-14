@@ -156,7 +156,7 @@ impl<T: 'static> List<T> {
         }
         let snapshot: Rc<[T]> = Rc::from(self.vec.borrow().as_slice());
         self.watchers
-            .notify(&Context::new(snapshot, metadata.with(change)));
+            .notify_owned(Context::new(snapshot, metadata.with(change)));
     }
 
     /// Adds an element to the end of the list.

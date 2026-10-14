@@ -119,7 +119,7 @@ mod tests {
         fn set(&self, value: i32) {
             *self.value.borrow_mut() = value;
             let context = Context::from(value);
-            self.watchers.notify(&context);
+            self.watchers.notify_owned(context);
         }
 
         fn snapshot_call_count(&self) -> usize {

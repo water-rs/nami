@@ -22,7 +22,7 @@
 //!
 //! Also, you can use `nami::SignalExt::distinct` to create a distinct signal that only notifies when the value changes manually.
 
-use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use core::{
     any::{Any, TypeId, type_name},
     cell::RefCell,
@@ -36,35 +36,66 @@ use crate::observe::{self, Origin};
 ///
 /// `Metadata` allows attaching arbitrary typed information to computation results
 /// and passing it through the computation pipeline.
-#[derive(Debug, Default, Clone)]
-pub struct Metadata(Box<MetadataInner>);
-
-/// Internal implementation of the metadata storage system.
 ///
-/// Uses a `BTreeMap` with `TypeId` as keys to store type-erased values.
+/// Empty metadata (the overwhelmingly common case) is a null pointer: creating,
+/// cloning and dropping it never touches the allocator, and the type is one
+/// machine word wide.
 #[derive(Debug, Default, Clone)]
-struct MetadataInner(BTreeMap<TypeId, Rc<dyn Any>>);
+pub struct Metadata(Option<Box<MetadataInner>>);
+
+/// A type-erased metadata entry.
+type Entry = (TypeId, Rc<dyn Any>);
+
+/// Number of entries stored inline before spilling to `overflow`.
+///
+/// In practice metadata carries at most an `Animation` and a
+/// `CollectionChange`, so two inline slots cover every known use.
+const INLINE: usize = 2;
+
+/// Internal storage for populated metadata.
+///
+/// Lookup is a linear scan over a handful of entries, which is both faster and
+/// far smaller in code size than a map for this workload.
+#[derive(Debug, Default, Clone)]
+struct MetadataInner {
+    inline: [Option<Entry>; INLINE],
+    overflow: Vec<Entry>,
+}
 
 impl MetadataInner {
+    fn entries(&self) -> impl Iterator<Item = &Entry> {
+        self.inline.iter().flatten().chain(self.overflow.iter())
+    }
+
     /// Attempts to retrieve a value of type `T` from the metadata store.
-    ///
-    /// Returns `None` if no value of the requested type is present.
-    pub fn try_get<T: 'static + Clone>(&self) -> Option<T> {
-        // Once `downcast_ref_unchecked` stabilized, we will use it here.
-        self.0
-            .get(&TypeId::of::<T>())
-            .and_then(|value| value.downcast_ref::<T>())
+    fn try_get<T: 'static + Clone>(&self) -> Option<T> {
+        let id = TypeId::of::<T>();
+        self.entries()
+            .find(|(key, _)| *key == id)
+            .and_then(|(_, value)| value.downcast_ref::<T>())
             .cloned()
     }
 
-    /// Inserts a value of type `T` into the metadata store.
-    ///
-    /// If a value of the same type already exists, it will be replaced.
-    pub fn insert<T: 'static + Clone>(&mut self, value: T) {
-        // Value are always cheap to clone, for example, `Animation` may only within one machine word.
+    /// Inserts a value of type `T`, replacing any existing value of that type.
+    fn insert<T: 'static + Clone>(&mut self, value: T) {
+        // Values are always cheap to clone, for example, `Animation` may only within one machine word.
         // However, we must erase the type, so we must make a choice between `Rc` and `Box`.
         // Here we choose `Rc` to allow cheap cloning when retrieving the value.
-        self.0.insert(TypeId::of::<T>(), Rc::new(value));
+        let id = TypeId::of::<T>();
+        let value: Rc<dyn Any> = Rc::new(value);
+        if let Some(slot) = self
+            .inline
+            .iter_mut()
+            .flatten()
+            .chain(self.overflow.iter_mut())
+            .find(|(key, _)| *key == id)
+        {
+            slot.1 = value;
+        } else if let Some(slot) = self.inline.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some((id, value));
+        } else {
+            self.overflow.push((id, value));
+        }
     }
 }
 
@@ -242,7 +273,7 @@ impl Metadata {
     /// Returns `None` if no value of the requested type is present.
     #[must_use]
     pub fn try_get<T: 'static + Clone>(&self) -> Option<T> {
-        self.0.try_get()
+        self.0.as_deref().and_then(MetadataInner::try_get)
     }
 
     /// Adds a value to the metadata and returns the updated metadata.
@@ -250,14 +281,14 @@ impl Metadata {
     /// This method is chainable for fluent API usage.
     #[must_use]
     pub fn with<T: 'static + Clone>(mut self, value: T) -> Self {
-        self.0.insert(value);
+        self.0.get_or_insert_with(Box::default).insert(value);
         self
     }
 
     /// Checks if the metadata container is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.0.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        self.0.is_none()
     }
 }
 
@@ -337,24 +368,50 @@ impl<T: 'static> WatcherManager<T> {
     }
 
     /// Notifies all registered watchers with a preconstructed context.
+    ///
+    /// Each watcher receives a clone of `ctx`. Prefer [`Self::notify_owned`]
+    /// when you own the context, which saves one clone.
     pub fn notify(&self, ctx: &Context<T>)
     where
         T: Clone,
     {
-        let (watchers, origin) = {
-            let inner = self.inner.borrow();
-            (inner.watchers_snapshot(), inner.origin)
-        };
-
-        if watchers.is_empty() {
-            return;
+        if let Some((watchers, origin)) = self.snapshot() {
+            observe::on_notify(origin, watchers.len());
+            for (_, watcher) in watchers.iter() {
+                watcher(ctx.clone());
+            }
         }
+    }
 
-        observe::on_notify(origin, watchers.len());
-
-        for watcher in watchers {
-            watcher(ctx.clone());
+    /// Notifies all registered watchers, moving `ctx` into the last one.
+    ///
+    /// The first `N - 1` watchers receive clones; with a single watcher no
+    /// clone happens at all. With empty metadata and a `T` whose clone does
+    /// not allocate, this performs no heap allocation.
+    pub fn notify_owned(&self, ctx: Context<T>)
+    where
+        T: Clone,
+    {
+        if let Some((watchers, origin)) = self.snapshot() {
+            observe::on_notify(origin, watchers.len());
+            if let Some(((_, last), rest)) = watchers.split_last() {
+                for (_, watcher) in rest {
+                    watcher(ctx.clone());
+                }
+                last(ctx);
+            }
         }
+    }
+
+    /// Takes a copy-on-write snapshot of the watcher list.
+    ///
+    /// This is a refcount bump, not a copy. The `RefCell` borrow is released
+    /// before returning, so watchers may register or cancel watchers on this
+    /// manager while being notified; such changes take effect from the next
+    /// notification on.
+    fn snapshot(&self) -> Option<(Rc<WatcherList<T>>, Origin)> {
+        let inner = self.inner.borrow();
+        inner.watchers.clone().map(|w| (w, inner.origin))
     }
 
     /// Cancels a previously registered watcher by its identifier.
@@ -394,9 +451,16 @@ impl<T: 'static> Drop for WatcherManagerGuard<T> {
 /// Maintains the collection of watchers and handles identifier assignment.
 struct WatcherManagerInner<T> {
     id: WatcherId,
-    map: BTreeMap<WatcherId, Watcher<T>>,
+    /// Registered watchers in registration order, so ids are sorted.
+    ///
+    /// `None` while there are no watchers, so an unwatched manager owns no
+    /// list allocation. Shared copy-on-write with in-flight notifications.
+    watchers: Option<Rc<WatcherList<T>>>,
     origin: Origin,
 }
+
+/// Watcher storage, sorted by id.
+type WatcherList<T> = Vec<(WatcherId, Watcher<T>)>;
 
 impl<T> Debug for WatcherManagerInner<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -408,7 +472,7 @@ impl<T> Default for WatcherManagerInner<T> {
     fn default() -> Self {
         Self {
             id: WatcherId::MIN,
-            map: BTreeMap::new(),
+            watchers: None,
             origin: Origin::unattributed(),
         }
     }
@@ -425,19 +489,19 @@ impl<T: 'static> WatcherManagerInner<T> {
     fn with_origin(origin: Origin) -> Self {
         Self {
             id: WatcherId::MIN,
-            map: BTreeMap::new(),
+            watchers: None,
             origin,
         }
     }
 
     /// Checks if there are any registered watchers.
     pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+        self.watchers.is_none()
     }
 
     /// Number of currently registered watchers.
     fn len(&self) -> usize {
-        self.map.len()
+        self.watchers.as_ref().map_or(0, |w| w.len())
     }
 
     /// Assigns a new unique identifier for a watcher.
@@ -453,13 +517,13 @@ impl<T: 'static> WatcherManagerInner<T> {
     /// Registers a watcher and returns its unique identifier.
     pub fn register(&mut self, watcher: impl Fn(Context<T>) + 'static) -> WatcherId {
         let id = self.assign();
-        self.map.insert(id, Rc::new(watcher));
+        let watcher: Watcher<T> = Rc::new(watcher);
+        match &mut self.watchers {
+            // Copies the list only if a notification snapshot is alive.
+            Some(list) => Rc::make_mut(list).push((id, watcher)),
+            None => self.watchers = Some(Rc::new(alloc::vec![(id, watcher)])),
+        }
         id
-    }
-
-    /// Creates a snapshot of the current watchers for notification.
-    fn watchers_snapshot(&self) -> Vec<Watcher<T>> {
-        self.map.values().cloned().collect()
     }
 
     /// Cancels a watcher registration by its identifier.
@@ -467,7 +531,16 @@ impl<T: 'static> WatcherManagerInner<T> {
     /// The removed watcher is handed back to the caller, which drops it only
     /// after the `RefCell` borrow on the manager has been released.
     pub fn cancel(&mut self, id: WatcherId) -> Option<Watcher<T>> {
-        self.map.remove(&id)
+        let list = self.watchers.as_mut()?;
+        let index = list.binary_search_by_key(&id, |(key, _)| *key).ok()?;
+        if list.len() == 1 {
+            // Dropping our handle leaves any in-flight snapshot intact.
+            return self.watchers.take().map(|list| {
+                Rc::try_unwrap(list)
+                    .map_or_else(|shared| shared[0].1.clone(), |mut v| v.remove(0).1)
+            });
+        }
+        Some(Rc::make_mut(list).remove(index).1)
     }
 }
 

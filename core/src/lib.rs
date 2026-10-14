@@ -311,7 +311,7 @@ mod impl_kurbo_constant {
         fn plain_affine_is_a_constant_signal() {
             let affine = Affine::translate((1.0, 2.0));
             assert_eq!(affine.snapshot(), affine);
-            affine.watch(|_| unreachable!("a constant never notifies"));
+            let () = affine.watch(|_| unreachable!("a constant never notifies"));
         }
     }
 }

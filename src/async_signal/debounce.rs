@@ -132,7 +132,7 @@ where
                         return;
                     }
                     let context = delayed_context;
-                    watchers.notify(&context);
+                    watchers.notify_owned(context);
                 });
 
                 *timer.borrow_mut() = Some(Box::new(task));
