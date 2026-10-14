@@ -77,11 +77,14 @@
 use core::{
     cell::{Cell, RefCell},
     fmt,
-    ops::{Bound, RangeBounds},
+    ops::{Bound, Range, RangeBounds},
 };
 pub use nami_core::collection::*;
 
-use alloc::{rc::Rc, vec::Vec};
+use alloc::{
+    rc::{Rc, Weak},
+    vec::Vec,
+};
 use nami_core::{
     SignalIdentity,
     observe::Origin,
@@ -523,17 +526,88 @@ fn warn_on_duplicates(result: &Diff) {
     }
 }
 
-/// Guard of a [`List`] watcher; dropping it unregisters the watcher.
+/// The watched bounds of one registration, shared by its callback and its
+/// guard so [`CollectionWatcherGuard::set_bounds`] can move them in place.
+struct RangeCell(Cell<(Bound<usize>, Bound<usize>)>);
+
+impl RangeCell {
+    fn new(range: &impl RangeBounds<usize>) -> Self {
+        Self(Cell::new((
+            range.start_bound().cloned(),
+            range.end_bound().cloned(),
+        )))
+    }
+
+    fn resolve(&self, len: usize) -> Range<usize> {
+        let (start, end) = self.0.get();
+        resolve_range(start, end, len)
+    }
+
+    /// Stores the new bounds and returns the change they cause over a
+    /// snapshot of length `len`, or `None` if the resolved range is the same.
+    fn replace(
+        &self,
+        start: Bound<usize>,
+        end: Bound<usize>,
+        len: usize,
+    ) -> Option<(Range<usize>, CollectionChange)> {
+        let old = self.resolve(len);
+        self.0.set((start, end));
+        let new = self.resolve(len);
+        (old != new).then(|| {
+            let change = CollectionChange::range_changed(old, new.clone());
+            (new, change)
+        })
+    }
+}
+
+/// One [`List`] watch: its range and the user callback.
+struct ListWatch<W> {
+    range: RangeCell,
+    watcher: W,
+}
+
+/// Lets a [`ListGuard`] reach its watch without naming the callback type.
+trait ListRangeWatch<T> {
+    fn set_bounds(&self, snapshot: Rc<Vec<T>>, start: Bound<usize>, end: Bound<usize>);
+}
+
+impl<T, W: Fn(Context<Items<T>>, &CollectionChange)> ListRangeWatch<T> for ListWatch<W> {
+    fn set_bounds(&self, snapshot: Rc<Vec<T>>, start: Bound<usize>, end: Bound<usize>) {
+        if let Some((range, change)) = self.range.replace(start, end, snapshot.len()) {
+            (self.watcher)(Context::from(Items::new(snapshot, range)), &change);
+        }
+    }
+}
+
+/// Guard of a [`List`] watcher; dropping it unregisters the watcher, and
+/// [`CollectionWatcherGuard::set_range`] moves its range.
 #[must_use]
-pub struct ListGuard<T: 'static>(RegistryGuard<ListWatcher<T>>);
+pub struct ListGuard<T: 'static> {
+    registration: RegistryGuard<ListWatcher<T>>,
+    watch: Rc<dyn ListRangeWatch<T>>,
+    state: Weak<ListState<T>>,
+}
 
 impl<T> fmt::Debug for ListGuard<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ListGuard").field(&self.0).finish()
+        f.debug_tuple("ListGuard")
+            .field(&self.registration)
+            .finish()
     }
 }
 
 impl<T: 'static> WatcherGuard for ListGuard<T> {}
+
+impl<T: 'static> CollectionWatcherGuard for ListGuard<T> {
+    fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>) {
+        let snapshot = self.state.upgrade().map_or_else(
+            || Rc::new(Vec::new()),
+            |state| Rc::clone(&state.items.borrow()),
+        );
+        self.watch.set_bounds(snapshot, start, end);
+    }
+}
 
 impl<T: Identifiable + Clone + 'static> Collection for List<T> {
     type Item = T;
@@ -560,22 +634,29 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
         range: impl RangeBounds<usize>,
         watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
     ) -> ListGuard<T> {
-        let start = range.start_bound().cloned();
-        let end = range.end_bound().cloned();
+        let watch = Rc::new(ListWatch {
+            range: RangeCell::new(&range),
+            watcher,
+        });
 
         // The first emission reports the watched range as inserted.
         let snapshot = Rc::clone(&self.state.items.borrow());
-        let range = resolve_range(start, end, snapshot.len());
+        let range = watch.range.resolve(snapshot.len());
         let change = CollectionChange::populated(range.start, range.len());
-        watcher(Context::from(Items::new(snapshot, range)), &change);
+        (watch.watcher)(Context::from(Items::new(snapshot, range)), &change);
 
-        let watcher: Rc<ListWatcher<T>> = Rc::new(
+        let callback: Rc<ListWatcher<T>> = Rc::new({
+            let watch = Rc::clone(&watch);
             move |context: Context<Rc<Vec<T>>>, change: &CollectionChange| {
-                let range = resolve_range(start, end, context.value().len());
-                watcher(context.map(|items| Items::new(items, range)), change);
-            },
-        );
-        ListGuard(self.state.watchers.insert_as_guard(watcher))
+                let range = watch.range.resolve(context.value().len());
+                (watch.watcher)(context.map(|items| Items::new(items, range)), change);
+            }
+        });
+        ListGuard {
+            registration: self.state.watchers.insert_as_guard(callback),
+            watch,
+            state: Rc::downgrade(&self.state),
+        }
     }
 }
 
@@ -644,8 +725,7 @@ impl<S> SignalCollection<S> {
 
 /// Per-watcher state of a [`SignalCollection`] watch.
 struct SignalWatch<T, W> {
-    start: Bound<usize>,
-    end: Bound<usize>,
+    range: RangeCell,
     watcher: W,
     /// The snapshot the watcher last saw; `None` until the first emission.
     previous: RefCell<Option<Rc<Vec<T>>>>,
@@ -662,7 +742,7 @@ where
     fn deliver(&self, context: Context<Vec<T>>) {
         let context = context.map(Rc::new);
         let current = Rc::clone(context.value());
-        let range = resolve_range(self.start, self.end, current.len());
+        let range = self.range.resolve(current.len());
         let previous = self.previous.replace(Some(Rc::clone(&current)));
         // The first emission reports the watched contents as inserted.
         let change = previous.map_or_else(
@@ -677,13 +757,60 @@ where
     }
 }
 
+/// Lets a [`SignalCollectionGuard`] reach its watch without naming the
+/// callback type.
+trait SignalRangeWatch {
+    fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>);
+}
+
+impl<T, W> SignalRangeWatch for SignalWatch<T, W>
+where
+    W: Fn(Context<Items<T>>, &CollectionChange),
+{
+    /// Re-ranges over the snapshot the watcher last saw, so the change only
+    /// describes the range move.
+    fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>) {
+        let Some(snapshot) = self.previous.borrow().clone() else {
+            self.range.0.set((start, end));
+            return;
+        };
+        if let Some((range, change)) = self.range.replace(start, end, snapshot.len()) {
+            (self.watcher)(Context::from(Items::new(snapshot, range)), &change);
+        }
+    }
+}
+
+/// Guard of a [`SignalCollection`] watcher: holds the signal's guard `G` and
+/// can move the watched range.
+#[must_use]
+pub struct SignalCollectionGuard<G> {
+    guard: G,
+    watch: Rc<dyn SignalRangeWatch>,
+}
+
+impl<G: fmt::Debug> fmt::Debug for SignalCollectionGuard<G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("SignalCollectionGuard")
+            .field(&self.guard)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<G: WatcherGuard> WatcherGuard for SignalCollectionGuard<G> {}
+
+impl<G: WatcherGuard> CollectionWatcherGuard for SignalCollectionGuard<G> {
+    fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>) {
+        self.watch.set_bounds(start, end);
+    }
+}
+
 impl<S, T> Collection for SignalCollection<S>
 where
     S: Signal<Output = Vec<T>> + Clone,
     T: Identifiable + Clone + PartialEq + 'static,
 {
     type Item = T;
-    type Guard = S::Guard;
+    type Guard = SignalCollectionGuard<S::Guard>;
 
     fn get(&self, index: usize) -> Option<T> {
         self.signal.snapshot().as_slice().get(index).cloned()
@@ -703,8 +830,7 @@ where
         watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
     ) -> Self::Guard {
         let state = Rc::new(SignalWatch {
-            start: range.start_bound().cloned(),
-            end: range.end_bound().cloned(),
+            range: RangeCell::new(&range),
             watcher,
             previous: RefCell::new(None),
             pending: RefCell::new(None),
@@ -730,7 +856,10 @@ where
         state.subscribed.set(true);
         state.deliver(initial);
 
-        guard
+        SignalCollectionGuard {
+            guard,
+            watch: state,
+        }
     }
 }
 
@@ -1166,5 +1295,133 @@ mod tests {
         check(&Rc::<[Counted]>::from(make()));
         check(&AnyCollection::new(List::from(make())));
         check(&Box::new(make()));
+    }
+
+    type Seen = Rc<RefCell<Vec<(Vec<i32>, CollectionChange)>>>;
+
+    /// Watches `range` of `collection`, recording the visible values and the
+    /// change of every notification.
+    fn record_range<C: Collection<Item = SelfId<i32>>>(
+        collection: &C,
+        range: Range<usize>,
+    ) -> (Seen, C::Guard) {
+        let seen: Seen = Rc::new(RefCell::new(Vec::new()));
+        let guard = collection.watch(range, {
+            let seen = seen.clone();
+            move |items, change| {
+                let values = items.value().iter().map(|v| **v).collect();
+                seen.borrow_mut().push((values, change.clone()));
+            }
+        });
+        seen.borrow_mut().clear();
+        (seen, guard)
+    }
+
+    fn take(seen: &Seen) -> Vec<(Vec<i32>, CollectionChange)> {
+        core::mem::take(&mut *seen.borrow_mut())
+    }
+
+    /// Runs the range scenarios against any collection of `0..10`.
+    fn check_set_range<C: Collection<Item = SelfId<i32>>>(collection: &C) {
+        let (seen, guard) = record_range(collection, 2..6);
+
+        // Shrinking reports only the rows that left.
+        guard.set_range(3..5);
+        assert_eq!(
+            take(&seen),
+            [(
+                vec![3, 4],
+                CollectionChange::from_edits([Edit::Remove(2..3), Edit::Remove(5..6)])
+            )]
+        );
+
+        // Growing reports only the rows that entered.
+        guard.set_range(1..7);
+        assert_eq!(
+            take(&seen),
+            [(
+                vec![1, 2, 3, 4, 5, 6],
+                CollectionChange::from_edits([Edit::Insert(1..3), Edit::Insert(5..7)])
+            )]
+        );
+
+        // Scrolling by two: two rows leave at the top, two enter at the bottom.
+        guard.set_range(3..9);
+        assert_eq!(
+            take(&seen),
+            [(
+                vec![3, 4, 5, 6, 7, 8],
+                CollectionChange::from_edits([Edit::Remove(1..3), Edit::Insert(7..9)])
+            )]
+        );
+
+        // A disjoint jump replaces the whole window.
+        guard.set_range(0..2);
+        assert_eq!(
+            take(&seen),
+            [(
+                vec![0, 1],
+                CollectionChange::from_edits([Edit::Remove(3..9), Edit::Insert(0..2)])
+            )]
+        );
+
+        // An equivalent range (clamped past the end too) reports nothing.
+        guard.set_range(0..=1);
+        assert_eq!(take(&seen), Vec::new());
+        guard.set_range(8..100);
+        assert_eq!(
+            take(&seen),
+            [(
+                vec![8, 9],
+                CollectionChange::from_edits([Edit::Remove(0..2), Edit::Insert(8..10)])
+            )]
+        );
+        guard.set_range(8..);
+        assert_eq!(take(&seen), Vec::new());
+    }
+
+    #[test]
+    fn list_set_range() {
+        let list = List::from(vals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+        check_set_range(&list);
+
+        // Later mutations are sliced to the new range.
+        let (seen, guard) = record_range(&list, 0..3);
+        guard.set_range(5..8);
+        take(&seen);
+        list.set(6, SelfId::new(60));
+        let notified = take(&seen);
+        assert_eq!(notified.len(), 1);
+        assert_eq!(notified[0].0, [5, 60, 7]);
+    }
+
+    #[test]
+    fn signal_collection_set_range() {
+        let values = crate::binding(vals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+        check_set_range(&SignalCollection::new(values.clone()));
+
+        let collection = SignalCollection::new(values.clone());
+        let (seen, guard) = record_range(&collection, 0..2);
+        guard.set_range(4..6);
+        take(&seen);
+        values.set(vals([0, 1, 2, 3, 40, 5, 6, 7, 8, 9]));
+        let notified = take(&seen);
+        assert_eq!(notified.len(), 1);
+        assert_eq!(notified[0].0, [40, 5]);
+    }
+
+    #[test]
+    fn any_collection_set_range() {
+        let list = List::from(vals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+        check_set_range(&AnyCollection::new(list));
+    }
+
+    #[test]
+    fn static_set_range_is_noop() {
+        fn check<C: Collection>(collection: &C) {
+            let guard = collection.watch(.., |_, _| {});
+            guard.set_range(1..2);
+        }
+        check(&vals([0, 1, 2]));
     }
 }

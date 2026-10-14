@@ -22,7 +22,7 @@ use core::{
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
 
-use crate::watcher::{BoxWatcherGuard, Context, WatcherGuard};
+use crate::watcher::{Context, WatcherGuard};
 
 /// A shared, immutable snapshot of a collection, limited to the range a
 /// watcher asked for.
@@ -148,7 +148,9 @@ pub trait Collection: 'static {
     /// [`Identifiable::id`].
     type Item: Identifiable + 'static;
     /// The type of guard returned when registering a watcher.
-    type Guard: WatcherGuard;
+    /// The type of guard returned when registering a watcher. Besides
+    /// unregistering on drop, it can move the watched range in place.
+    type Guard: CollectionWatcherGuard;
 
     /// Gets an item from the collection at the specified index.
     fn get(&self, index: usize) -> Option<Self::Item>;
@@ -182,6 +184,53 @@ pub trait Collection: 'static {
         range: impl RangeBounds<usize>,
         watcher: impl Fn(Context<Items<Self::Item>>, &CollectionChange) + 'static,
     ) -> Self::Guard;
+}
+
+/// The guard of a [`Collection::watch`] registration.
+///
+/// Dropping it unregisters the watcher, as for any [`WatcherGuard`]. It can
+/// also move the watched range in place, for example while a list view
+/// scrolls, without re-reporting the rows that stay visible.
+///
+/// The required method takes explicit bounds so the trait stays object safe
+/// (see [`BoxCollectionWatcherGuard`]); call the generic [`Self::set_range`]
+/// on concrete guards.
+pub trait CollectionWatcherGuard: WatcherGuard {
+    /// Replaces the watched range by `start..end` and immediately notifies
+    /// the watcher with the current snapshot: positions that left the range
+    /// are reported as [`Edit::Remove`] and positions that entered it as
+    /// [`Edit::Insert`] (see [`CollectionChange::range_changed`]). Positions
+    /// that stay in range produce no edit. Nothing is delivered when the
+    /// resolved range did not change.
+    fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>);
+
+    /// [`Self::set_bounds`] taking any range, such as `10..30`.
+    fn set_range(&self, range: impl RangeBounds<usize>)
+    where
+        Self: Sized,
+    {
+        self.set_bounds(range.start_bound().cloned(), range.end_bound().cloned());
+    }
+}
+
+/// A type-erased [`CollectionWatcherGuard`].
+pub type BoxCollectionWatcherGuard = Box<dyn CollectionWatcherGuard>;
+
+/// Static collections never notify, so there is no range to move.
+impl CollectionWatcherGuard for () {
+    fn set_bounds(&self, _start: Bound<usize>, _end: Bound<usize>) {}
+}
+
+impl<G: CollectionWatcherGuard + ?Sized> CollectionWatcherGuard for Box<G> {
+    fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>) {
+        (**self).set_bounds(start, end);
+    }
+}
+
+impl<G: CollectionWatcherGuard + ?Sized> CollectionWatcherGuard for Rc<G> {
+    fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>) {
+        (**self).set_bounds(start, end);
+    }
 }
 
 /// Static collections: never notify.
@@ -285,7 +334,7 @@ trait AnyCollectionImpl {
         &self,
         range: (Bound<usize>, Bound<usize>),
         watcher: BoxCollectionWatcher<Self::Item>,
-    ) -> BoxWatcherGuard;
+    ) -> BoxCollectionWatcherGuard;
 }
 
 impl<C: Collection> AnyCollectionImpl for C {
@@ -311,7 +360,7 @@ impl<C: Collection> AnyCollectionImpl for C {
         &self,
         range: (Bound<usize>, Bound<usize>),
         watcher: BoxCollectionWatcher<Self::Item>,
-    ) -> BoxWatcherGuard {
+    ) -> BoxCollectionWatcherGuard {
         Box::new(Collection::watch(self, range, watcher))
     }
 }
@@ -356,7 +405,7 @@ impl<T: Identifiable + 'static> AnyCollection<T> {
         &self,
         range: impl RangeBounds<usize>,
         watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
-    ) -> BoxWatcherGuard {
+    ) -> BoxCollectionWatcherGuard {
         self.inner.watch(
             (range.start_bound().cloned(), range.end_bound().cloned()),
             Box::new(watcher),
@@ -366,7 +415,7 @@ impl<T: Identifiable + 'static> AnyCollection<T> {
 
 impl<T: Identifiable + 'static> Collection for AnyCollection<T> {
     type Item = T;
-    type Guard = BoxWatcherGuard;
+    type Guard = BoxCollectionWatcherGuard;
 
     fn get(&self, index: usize) -> Option<T> {
         Self::get(self, index)
@@ -388,7 +437,7 @@ impl<T: Identifiable + 'static> Collection for AnyCollection<T> {
         &self,
         range: impl RangeBounds<usize>,
         watcher: impl Fn(Context<Items<T>>, &CollectionChange) + 'static,
-    ) -> BoxWatcherGuard {
+    ) -> BoxCollectionWatcherGuard {
         Self::watch(self, range, watcher)
     }
 }
