@@ -11,7 +11,7 @@
 mod change;
 mod diff;
 
-pub use change::{CollectionChange, Edit};
+pub use change::{ChangeLog, CollectionChange, Edit};
 pub use diff::{diff, has_duplicate_ids};
 
 pub use crate::id::{Identifiable, IdentifiableExt, SelfId, UseId};
