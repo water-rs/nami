@@ -85,6 +85,13 @@ pub trait Collection: 'static {
     /// moving the range ([`CollectionWatcherGuard::set_range`]). Read the
     /// current contents with [`Self::get`] / [`Self::id`].
     ///
+    /// Do not mutate the same collection from inside the watcher (for
+    /// example through a cloned handle). Mutation APIs such as
+    /// `nami::collection::List`'s take `&mut self`, so an `Fn` watcher cannot
+    /// do it directly; through a clone it still works, via copy-on-write, but
+    /// costs a full copy of the items and nests a notification inside the
+    /// running one.
+    ///
     /// Returns a guard that will unregister the watcher when dropped.
     fn watch(
         &self,
