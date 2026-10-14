@@ -1128,4 +1128,43 @@ mod tests {
         holder.list.push(SelfId::new("a".into()));
         assert_eq!(holder.list.id(0).as_deref(), Some("a"));
     }
+
+    #[test]
+    fn id_does_not_clone_items() {
+        use alloc::boxed::Box;
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        use nami_core::collection::AnyCollection;
+
+        static CLONES: AtomicUsize = AtomicUsize::new(0);
+
+        #[derive(Debug, PartialEq)]
+        struct Counted(u32);
+        impl Clone for Counted {
+            fn clone(&self) -> Self {
+                CLONES.fetch_add(1, Ordering::Relaxed);
+                Self(self.0)
+            }
+        }
+        impl Identifiable for Counted {
+            type Id = u32;
+            fn id(&self) -> u32 {
+                self.0
+            }
+        }
+
+        fn check<C: Collection<Item = Counted>>(c: &C) {
+            let before = CLONES.load(Ordering::Relaxed);
+            assert_eq!(Collection::id(c, 1), Some(2));
+            assert_eq!(Collection::id(c, 9), None);
+            assert_eq!(CLONES.load(Ordering::Relaxed), before);
+        }
+
+        let make = || vec![Counted(1), Counted(2)];
+        check(&List::from(make()));
+        check(&make());
+        check(&[Counted(1), Counted(2)]);
+        check(&Rc::<[Counted]>::from(make()));
+        check(&AnyCollection::new(List::from(make())));
+        check(&Box::new(make()));
+    }
 }
