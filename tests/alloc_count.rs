@@ -231,6 +231,16 @@ fn notify_owned_moves_context_into_last_watcher() {
 }
 
 #[test]
+fn change_log_without_changes_does_not_allocate() {
+    use nami::collection::{ChangeLog, CollectionChange};
+    assert_eq!(allocations(|| drop(ChangeLog::new(4).finish())), 0);
+    let mut log = ChangeLog::new(4);
+    assert_eq!(allocations(|| log.push(&CollectionChange::unchanged())), 0);
+    assert!(log.is_empty());
+    assert_eq!(allocations(|| drop(log.finish())), 0);
+}
+
+#[test]
 fn registering_a_watcher_costs_its_rc_plus_list_growth() {
     use nami::watcher::WatcherManager;
     let manager = WatcherManager::<i32>::new();

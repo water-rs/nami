@@ -22,7 +22,7 @@
 //!
 //! Also, you can use `nami::SignalExt::distinct` to create a distinct signal that only notifies when the value changes manually.
 
-use alloc::{boxed::Box, rc::Rc, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, rc::Rc, vec::Vec};
 use core::{
     any::{Any, TypeId, type_name},
     cell::RefCell,
@@ -279,7 +279,10 @@ type Entries<W> = Rc<Vec<(WatcherId, Rc<W>)>>;
 ///
 /// Notifying takes a refcount on the current list instead of collecting it,
 /// so the notify path does not allocate. Watchers registered or cancelled
-/// during a notification do not affect that notification.
+/// during a notification do not affect that notification, and a notification
+/// raised by a watcher while one is in progress is queued and delivered
+/// afterwards (see [`Self::notify_with`]), so every watcher sees changes in
+/// the order they happened.
 pub struct WatcherRegistry<W: ?Sized> {
     inner: Rc<RefCell<RegistryInner<W>>>,
 }
@@ -381,12 +384,52 @@ impl<W: ?Sized + 'static> WatcherRegistry<W> {
     /// clone at all.
     ///
     /// The watcher list is the one registered when the call starts: watchers
-    /// added or cancelled by a callback take effect from the next call.
-    pub fn notify_with<A: Clone>(&self, value: A, mut call: impl FnMut(&W, A)) {
+    /// added or cancelled by a callback take effect from the next delivery.
+    ///
+    /// # Reentrancy
+    ///
+    /// A `notify_with` call that arrives while the same registry is already
+    /// delivering — a watcher notifying the signal it watches — does not
+    /// run a nested round. Its delivery is queued, and the outermost
+    /// `notify_with` drains the queue after its own round finishes: every
+    /// watcher sees the running round's value before the queued one.
+    /// Queued deliveries run in the order they arrived, each to the
+    /// watchers that were registered when it was raised and are still
+    /// registered when it runs: a watcher added meanwhile has already read
+    /// the state the queued notification describes, and one cancelled
+    /// meanwhile must not be called at all. A delivery queued while
+    /// draining joins the same loop, so reentrant notification never
+    /// recurses at any depth.
+    ///
+    /// The queue owns a deferred delivery until its turn, which is why
+    /// `value` and `call` must be `'static`; it allocates only when a
+    /// notification is actually deferred.
+    pub fn notify_with<A: Clone + 'static>(&self, value: A, mut call: impl FnMut(&W, A) + 'static) {
         let (entries, origin) = {
-            let inner = self.inner.borrow();
-            (Rc::clone(&inner.entries), inner.origin)
+            let mut inner = self.inner.borrow_mut();
+            // The snapshot comes first: a mutable borrow of `inner.queue`
+            // would keep all of `inner` borrowed through `DerefMut`.
+            let entries = Rc::clone(&inner.entries);
+            let origin = inner.origin;
+            if let Some(queue) = &mut inner.queue {
+                // A round is in progress: queue this delivery behind it
+                // instead of nesting a second round inside the first. The
+                // recipients are the watchers registered right now, so the
+                // current entries list rides along (a refcount, not a copy).
+                queue.push_back((
+                    entries,
+                    Box::new(move |watcher| call(watcher, value.clone())),
+                ));
+                return;
+            }
+            inner.queue = Some(VecDeque::new());
+            (entries, origin)
         };
+        // Takes `queue` back to `None` on any exit — a panicking watcher
+        // included — and drops what is still queued with it, so the registry
+        // is never stuck in "delivering".
+        let _scope = DeliveryScope(&self.inner);
+
         let Some(((_, last), rest)) = entries.split_last() else {
             return;
         };
@@ -395,6 +438,38 @@ impl<W: ?Sized + 'static> WatcherRegistry<W> {
             call(watcher, value.clone());
         }
         call(last, value);
+
+        // Deliver what watchers queued, oldest first; deliveries queued
+        // while draining join the same loop. A queued delivery goes to the
+        // watchers registered when it was raised that are still registered
+        // — both lists are sorted by id, so membership is a binary search.
+        loop {
+            let queued = {
+                let mut inner = self.inner.borrow_mut();
+                // `queue` stays `Some` until `_scope` drops.
+                let Some(queue) = inner.queue.as_mut() else {
+                    break;
+                };
+                queue.pop_front()
+            };
+            let Some((raised, mut delivery)) = queued else {
+                break;
+            };
+            let (current, origin) = {
+                let inner = self.inner.borrow();
+                (Rc::clone(&inner.entries), inner.origin)
+            };
+            let still_registered =
+                |id: &WatcherId| current.binary_search_by_key(id, |(id, _)| *id).is_ok();
+            let recipients = raised.iter().filter(|(id, _)| still_registered(id)).count();
+            if recipients == 0 {
+                continue;
+            }
+            observe::on_notify(origin, recipients);
+            for (_, watcher) in raised.iter().filter(|(id, _)| still_registered(id)) {
+                delivery(watcher);
+            }
+        }
     }
 }
 
@@ -406,6 +481,7 @@ impl<W: ?Sized> WatcherRegistry<W> {
                 next: WatcherId::MIN,
                 entries: Rc::new(Vec::new()),
                 origin,
+                queue: None,
             })),
         }
     }
@@ -479,11 +555,37 @@ impl<T: 'static> WatcherRegistry<dyn Fn(Context<T>)> {
     }
 }
 
+/// A notification that arrived while its registry was already delivering.
+/// Owns the value and the caller's `call`, cloning the value for each
+/// watcher it is invoked for.
+type QueuedDelivery<W> = Box<dyn FnMut(&W)>;
+
 /// Internal state of a [`WatcherRegistry`].
 struct RegistryInner<W: ?Sized> {
     next: WatcherId,
     entries: Entries<W>,
     origin: Origin,
+    /// `Some` while a `notify_*` call is delivering: notifications that
+    /// arrive then are appended here and drained once the round in progress
+    /// finishes, oldest first. Each entry keeps the watcher list that was
+    /// registered when the notification was raised (a refcount, not a
+    /// copy). The `VecDeque` allocates on its first push, so a registry
+    /// that is never notified re-entrantly allocates nothing.
+    queue: Option<VecDeque<(Entries<W>, QueuedDelivery<W>)>>,
+}
+
+/// Ends a registry's "delivering" state on drop. A watcher that panics
+/// unwinds through this guard, so the registry is never left stuck; the
+/// still-queued deliveries are dropped along with the state.
+struct DeliveryScope<'a, W: ?Sized>(&'a RefCell<RegistryInner<W>>);
+
+impl<W: ?Sized> Drop for DeliveryScope<'_, W> {
+    fn drop(&mut self) {
+        // A queued delivery can own a guard on this registry; drop them
+        // only after the borrow is released.
+        let queue = self.0.borrow_mut().queue.take();
+        drop(queue);
+    }
 }
 
 impl<W: ?Sized> Drop for RegistryInner<W> {
@@ -506,8 +608,8 @@ impl<W: ?Sized> RegistryInner<W> {
 
 #[cfg(test)]
 mod tests {
-    use alloc::rc::Rc;
-    use core::cell::Cell;
+    use alloc::{rc::Rc, vec, vec::Vec};
+    use core::cell::{Cell, RefCell};
 
     use super::{Context, OnDrop, WatcherGuard, WatcherManager};
 
@@ -545,5 +647,127 @@ mod tests {
         assert!(!dropped.get(), "attach dropped the guard early");
         drop(attached);
         assert!(dropped.get());
+    }
+
+    /// A notification raised while a round is delivering is queued and
+    /// drained after it, so every watcher sees the changes in the order
+    /// they were made (water-rs/nami#51).
+    #[test]
+    fn reentrant_notify_is_queued_until_the_round_finishes() {
+        let manager = WatcherManager::<i32>::new();
+        let seen_first = Rc::new(RefCell::new(Vec::new()));
+        let seen_second = Rc::new(RefCell::new(Vec::new()));
+        let fired = Rc::new(Cell::new(false));
+
+        manager.register({
+            let manager = manager.clone();
+            let seen = Rc::clone(&seen_first);
+            let fired = Rc::clone(&fired);
+            move |context: Context<i32>| {
+                let value = context.into_value();
+                seen.borrow_mut().push(value);
+                if value == 1 && !fired.replace(true) {
+                    manager.notify_owned(Context::from(2));
+                }
+            }
+        });
+        manager.register({
+            let seen = Rc::clone(&seen_second);
+            move |context: Context<i32>| seen.borrow_mut().push(context.into_value())
+        });
+
+        manager.notify_owned(Context::from(1));
+
+        assert_eq!(*seen_first.borrow(), vec![1, 2]);
+        assert_eq!(*seen_second.borrow(), vec![1, 2]);
+    }
+
+    /// A watcher registered while a round is delivering — but after a
+    /// notification was raised — misses the queued delivery too: by the
+    /// time it registered it could already read the state that notification
+    /// describes.
+    #[test]
+    fn a_watcher_registered_mid_round_misses_queued_deliveries() {
+        let manager = WatcherManager::<i32>::new();
+        let seen_late = Rc::new(RefCell::new(Vec::new()));
+        let done = Rc::new(Cell::new(false));
+
+        manager.register({
+            let manager = manager.clone();
+            let seen_late = Rc::clone(&seen_late);
+            let done = Rc::clone(&done);
+            move |_context: Context<i32>| {
+                if done.replace(true) {
+                    return;
+                }
+                // Raised before the late watcher registers: it must not see
+                // this delivery.
+                manager.notify_owned(Context::from(2));
+                manager.register({
+                    let seen_late = Rc::clone(&seen_late);
+                    move |context: Context<i32>| {
+                        seen_late.borrow_mut().push(context.into_value());
+                    }
+                });
+            }
+        });
+
+        manager.notify_owned(Context::from(1));
+        assert!(
+            seen_late.borrow().is_empty(),
+            "the late watcher must miss the delivery raised before it registered"
+        );
+
+        manager.notify_owned(Context::from(3));
+        assert_eq!(
+            *seen_late.borrow(),
+            vec![3],
+            "the late watcher takes effect from the next notification"
+        );
+    }
+
+    /// A watcher cancelled by an earlier watcher after a notification was
+    /// raised but before its queued delivery runs does not receive it.
+    #[test]
+    fn a_watcher_cancelled_mid_round_misses_queued_deliveries() {
+        let manager = WatcherManager::<i32>::new();
+        let done = Rc::new(Cell::new(false));
+        let cancelled_id = Rc::new(RefCell::new(None));
+        let seen_cancelled = Rc::new(RefCell::new(Vec::new()));
+        let seen_later = Rc::new(RefCell::new(Vec::new()));
+
+        manager.register({
+            let manager = manager.clone();
+            let done = Rc::clone(&done);
+            let cancelled_id = Rc::clone(&cancelled_id);
+            move |context: Context<i32>| {
+                if *context.value() == 1 && !done.replace(true) {
+                    // Raised while the cancelled watcher is still
+                    // registered; cancelled before the delivery runs.
+                    manager.notify_owned(Context::from(2));
+                    if let Some(id) = cancelled_id.borrow_mut().take() {
+                        manager.cancel(id);
+                    }
+                }
+            }
+        });
+        let second = manager.register({
+            let seen = Rc::clone(&seen_cancelled);
+            move |context: Context<i32>| seen.borrow_mut().push(context.into_value())
+        });
+        *cancelled_id.borrow_mut() = Some(second);
+        manager.register({
+            let seen = Rc::clone(&seen_later);
+            move |context: Context<i32>| seen.borrow_mut().push(context.into_value())
+        });
+
+        manager.notify_owned(Context::from(1));
+
+        assert_eq!(
+            *seen_cancelled.borrow(),
+            vec![1],
+            "round 1's snapshot still reached it; the queued delivery did not"
+        );
+        assert_eq!(*seen_later.borrow(), vec![1, 2]);
     }
 }

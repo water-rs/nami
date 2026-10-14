@@ -11,7 +11,7 @@
 mod change;
 mod diff;
 
-pub use change::{CollectionChange, Edit};
+pub use change::{ChangeLog, CollectionChange, Edit};
 pub use diff::{diff, has_duplicate_ids};
 
 pub use crate::id::{Identifiable, IdentifiableExt, SelfId, UseId};
@@ -109,8 +109,9 @@ pub trait Collection: 'static {
     /// example through a cloned handle). Mutation APIs such as
     /// `nami::collection::List`'s take `&mut self`, so an `Fn` watcher cannot
     /// do it directly; through a clone it still works, via copy-on-write, but
-    /// costs a full copy of the items and nests a notification inside the
-    /// running one.
+    /// costs a full copy of the items. The new notification is queued behind
+    /// the one in progress, so every watcher receives the changes in the
+    /// order they happened.
     ///
     /// Returns a guard that will unregister the watcher when dropped.
     fn watch(

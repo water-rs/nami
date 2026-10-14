@@ -108,9 +108,10 @@ type ListWatcher<T> = dyn Fn(Context<Rc<Vec<T>>>, &CollectionChange);
 /// # Reentrant mutation
 ///
 /// Mutating a list from inside one of its own watchers (through a clone) is
-/// an anti-pattern: it works, but costs a full copy of the items and nests a
-/// notification inside the running one. Debug builds log a warning when it
-/// happens.
+/// an anti-pattern: it works, but costs a full copy of the items, and the
+/// new notification is queued behind the one in progress — every watcher
+/// still sees the changes in the order they happened. Debug builds log a
+/// warning when it happens.
 pub struct List<T> {
     state: Rc<ListState<T>>,
 }
@@ -274,7 +275,7 @@ impl<T: Identifiable + 'static> List<T> {
             items.push(value);
             items.len() - 1
         });
-        self.notify(&CollectionChange::inserted(index..index + 1));
+        self.notify(CollectionChange::inserted(index..index + 1));
     }
 
     /// Appends every item of `values`.
@@ -290,7 +291,7 @@ impl<T: Identifiable + 'static> List<T> {
             items.extend(values);
             start..items.len()
         });
-        self.notify(&CollectionChange::inserted(range));
+        self.notify(CollectionChange::inserted(range));
     }
 
     /// Removes and returns the last element of the list.
@@ -304,7 +305,7 @@ impl<T: Identifiable + 'static> List<T> {
     {
         let (popped, index) = self.edit(|items| (items.pop(), items.len()));
         if popped.is_some() {
-            self.notify(&CollectionChange::removed(index..index + 1));
+            self.notify(CollectionChange::removed(index..index + 1));
         }
         popped
     }
@@ -322,7 +323,7 @@ impl<T: Identifiable + 'static> List<T> {
         T: Clone,
     {
         self.edit(|items| items.insert(index, value));
-        self.notify(&CollectionChange::inserted(index..index + 1));
+        self.notify(CollectionChange::inserted(index..index + 1));
     }
 
     /// Removes and returns the element at the specified index.
@@ -339,7 +340,7 @@ impl<T: Identifiable + 'static> List<T> {
         T: Clone,
     {
         let removed = self.edit(|items| items.remove(index));
-        self.notify(&CollectionChange::removed(index..index + 1));
+        self.notify(CollectionChange::removed(index..index + 1));
         removed
     }
 
@@ -368,7 +369,7 @@ impl<T: Identifiable + 'static> List<T> {
             (previous, change)
         });
         if let Some(change) = change {
-            self.notify(&change);
+            self.notify(change);
         }
         previous
     }
@@ -404,7 +405,7 @@ impl<T: Identifiable + 'static> List<T> {
             })
         });
         if let Some(change) = change {
-            self.notify(&change);
+            self.notify(change);
         }
     }
 
@@ -430,7 +431,7 @@ impl<T: Identifiable + 'static> List<T> {
             });
             removed
         });
-        self.notify(&CollectionChange::from_edits(removed));
+        self.notify(CollectionChange::from_edits(removed));
     }
 
     /// Clears all elements from the list.
@@ -446,7 +447,7 @@ impl<T: Identifiable + 'static> List<T> {
         self.warn_if_reentrant();
         // Drop the items outright instead of copying a shared snapshot first.
         *self.state.items.borrow_mut() = Rc::new(Vec::new());
-        self.notify(&CollectionChange::removed(0..len));
+        self.notify(CollectionChange::removed(0..len));
     }
 
     /// Sorts the list, reporting the items that changed relative order as
@@ -496,7 +497,7 @@ impl<T: Identifiable + 'static> List<T> {
             let before: Vec<usize> = (0..order.len()).collect();
             diff(&before, &order, |_, from| *from, |_, _| true)
         });
-        self.notify(&change);
+        self.notify(change);
     }
 
     /// Atomically replaces the complete list and returns the previous contents.
@@ -543,7 +544,7 @@ impl<T: Identifiable + 'static> List<T> {
                 warn_on_duplicates(&current);
                 diff(&previous, &current, |_, item| item.id(), PartialEq::eq)
             };
-            self.notify_with_metadata(&change, metadata);
+            self.notify_with_metadata(change, metadata);
         }
         previous
     }
@@ -585,30 +586,36 @@ impl<T: Identifiable + 'static> List<T> {
         if self.state.notifying.get() > 0 {
             log::warn!(
                 "nami: a List was mutated from inside one of its own watchers or a \
-                 `with_range` callback; this copies every item and nests notifications. \
-                 Mutate it outside the callback instead"
+                 `with_range` callback; this copies every item and queues its \
+                 notification behind the running one. Mutate it outside the \
+                 callback instead"
             );
         }
     }
 
-    fn notify(&self, change: &CollectionChange) {
+    fn notify(&self, change: CollectionChange) {
         self.notify_with_metadata(change, Metadata::new());
     }
 
     /// Hands watchers the current snapshot (a refcount, not a copy) and
     /// `change`. Nothing is sent for an empty change.
-    fn notify_with_metadata(&self, change: &CollectionChange, metadata: Metadata) {
+    ///
+    /// The delivery closure owns `change` so the registry can queue the
+    /// delivery if a watcher triggers this notify while a round is running
+    /// (see [`WatcherRegistry::notify_with`]).
+    fn notify_with_metadata(&self, change: CollectionChange, metadata: Metadata) {
         if change.is_empty() || self.state.watchers.is_empty() {
             return;
         }
         let snapshot = Rc::clone(&self.state.items.borrow());
         #[cfg(debug_assertions)]
         let _notifying = NotifyingScope::enter(&self.state.notifying);
-        self.state
-            .watchers
-            .notify_with(Context::new(snapshot, metadata), |watcher, context| {
-                watcher(context, change);
-            });
+        self.state.watchers.notify_with(
+            Context::new(snapshot, metadata),
+            move |watcher, context| {
+                watcher(context, &change);
+            },
+        );
     }
 }
 
