@@ -345,8 +345,11 @@ impl<T: Identifiable + 'static> List<T> {
 
     /// Replaces the element at `index`, returning the previous item.
     ///
-    /// Reports an update when the new item has the same id as the old one,
-    /// and a removal plus an insertion when the id changed.
+    /// Always reports the index as changed: an update when the new item has
+    /// the same id as the old one, a removal plus an insertion when the id
+    /// changed. `List` does not require `PartialEq`, so whether the new
+    /// value actually differs is never checked — unlike [`Self::replace`],
+    /// a no-op write still notifies.
     ///
     /// # Panics
     ///
@@ -372,8 +375,10 @@ impl<T: Identifiable + 'static> List<T> {
 
     /// Mutates the element at `index` in place.
     ///
-    /// Reported like [`Self::set`]: an update, or a removal plus an insertion
-    /// if `f` changed the item's id.
+    /// Always reports the index as changed, like [`Self::set`]: an update,
+    /// or a removal plus an insertion if `f` changed the item's id. Whether
+    /// `f` actually modified the item is never checked, so a no-op `f` still
+    /// notifies.
     ///
     /// # Panics
     ///
@@ -437,6 +442,7 @@ impl<T: Identifiable + 'static> List<T> {
         if len == 0 {
             return;
         }
+        #[cfg(debug_assertions)]
         self.warn_if_reentrant();
         // Drop the items outright instead of copying a shared snapshot first.
         *self.state.items.borrow_mut() = Rc::new(Vec::new());
@@ -488,7 +494,7 @@ impl<T: Identifiable + 'static> List<T> {
             // Identify each item by its old position; what moved is what
             // left its relative order.
             let before: Vec<usize> = (0..order.len()).collect();
-            diff(&before, &order, |_, from| *from, |_, _| true).change
+            diff(&before, &order, |_, from| *from, |_, _| true)
         });
         self.notify(&change);
     }
@@ -519,6 +525,7 @@ impl<T: Identifiable + 'static> List<T> {
     where
         T: Clone + PartialEq,
     {
+        #[cfg(debug_assertions)]
         self.warn_if_reentrant();
         let previous = {
             let mut current = self.state.items.borrow_mut();
@@ -530,12 +537,13 @@ impl<T: Identifiable + 'static> List<T> {
             }
         };
         if !self.state.watchers.is_empty() {
-            let result = {
+            let change = {
                 let current = self.state.items.borrow();
+                #[cfg(debug_assertions)]
+                warn_on_duplicates(&current);
                 diff(&previous, &current, |_, item| item.id(), PartialEq::eq)
             };
-            warn_on_duplicates(&result);
-            self.notify_with_metadata(&result.change, metadata);
+            self.notify_with_metadata(&change, metadata);
         }
         previous
     }
@@ -547,6 +555,7 @@ impl<T: Identifiable + 'static> List<T> {
     where
         T: Clone,
     {
+        #[cfg(debug_assertions)]
         self.warn_if_reentrant();
         let mut items = self.state.items.borrow_mut();
         f(Rc::make_mut(&mut items))
@@ -571,9 +580,8 @@ impl<T: Identifiable + 'static> List<T> {
 
     /// Warns, in debug builds, about a mutation made while this list is
     /// notifying its watchers.
-    #[inline]
+    #[cfg(debug_assertions)]
     fn warn_if_reentrant(&self) {
-        #[cfg(debug_assertions)]
         if self.state.notifying.get() > 0 {
             log::warn!(
                 "nami: a List was mutated from inside one of its own watchers or a \
@@ -624,9 +632,11 @@ impl Drop for NotifyingScope<'_> {
     }
 }
 
-/// Warns, in debug builds, about a diff that had to match repeated ids.
-fn warn_on_duplicates(result: &Diff) {
-    if cfg!(debug_assertions) && result.duplicate_ids {
+/// Warns about a new snapshot that holds several items with the same id.
+/// Debug builds only: the check materialises and sorts every id.
+#[cfg(debug_assertions)]
+fn warn_on_duplicates<T: Identifiable>(items: &[T]) {
+    if has_duplicate_ids(items, |_, item| item.id()) {
         log::warn!(
             "nami: a collection holds several items with the same id; they are matched by \
              occurrence, so identical rows may trade places"
@@ -813,9 +823,9 @@ where
         let current = Rc::clone(context.value());
         let range = self.range.resolve(current.len());
         let previous = self.previous.replace(Rc::clone(&current));
-        let result = diff(&previous, &current, |_, item| item.id(), PartialEq::eq);
-        warn_on_duplicates(&result);
-        let change = result.change;
+        #[cfg(debug_assertions)]
+        warn_on_duplicates(&current);
+        let change = diff(&previous, &current, |_, item| item.id(), PartialEq::eq);
         // Only an actual change is reported.
         if change.is_empty() {
             return;

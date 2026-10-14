@@ -5,21 +5,6 @@ use core::cmp::Ordering;
 
 use super::{CollectionChange, Edit};
 
-/// The result of [`diff`].
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Diff {
-    /// The edits that turn the previous snapshot into the new one.
-    pub change: CollectionChange,
-    /// Whether either snapshot holds two items with the same id.
-    ///
-    /// Duplicates are resolved, never rejected: the `n`-th item with a given
-    /// id in the previous snapshot is matched with the `n`-th item with that
-    /// id in the new one. Identical rows may therefore trade places, which is
-    /// usually harmless, but a collection keyed by a field that is meant to be
-    /// unique has a bug worth reporting.
-    pub duplicate_ids: bool,
-}
-
 /// Aligns `old` and `new` by id and returns the change between them.
 ///
 /// `id(index, item)` gives an item's id; `same(old, new)` decides whether an
@@ -29,6 +14,11 @@ pub struct Diff {
 /// outside a longest increasing subsequence), and those whose content differs
 /// as updates. The remaining items are removals and insertions.
 ///
+/// Ids need not be unique: the `n`-th occurrence of an id on one side is
+/// matched with the `n`-th occurrence on the other, so identical rows may
+/// trade places. [`has_duplicate_ids`] detects duplicates for callers that
+/// want to warn about them.
+///
 /// Runs in `O(n log n)` and needs only `Ord` on ids, so it works without a
 /// hasher in `no_std` builds.
 pub fn diff<T, Id: Ord>(
@@ -36,7 +26,7 @@ pub fn diff<T, Id: Ord>(
     new: &[T],
     id: impl Fn(usize, &T) -> Id,
     same: impl Fn(&T, &T) -> bool,
-) -> Diff {
+) -> CollectionChange {
     let mut edits = Vec::new();
 
     // Survivors in a common prefix or suffix keep their place; only their
@@ -70,11 +60,7 @@ pub fn diff<T, Id: Ord>(
     let old_middle = prefix..old.len() - suffix;
     let new_middle = prefix..new.len() - suffix;
     if old_middle.is_empty() && new_middle.is_empty() {
-        return Diff {
-            change: CollectionChange::from_edits(edits),
-            duplicate_ids: snapshot_has_duplicate_ids(old, &id)
-                || snapshot_has_duplicate_ids(new, &id),
-        };
+        return CollectionChange::from_edits(edits);
     }
 
     // Ids of the middle segments only, indexed from each segment's start.
@@ -86,15 +72,11 @@ pub fn diff<T, Id: Ord>(
     // one side is matched with the n-th occurrence on the other.
     let mut source: Vec<Option<usize>> = vec![None; new_ids.len()];
     let mut survived = vec![false; old_ids.len()];
-    // Matching only sees the middle; the flag must cover the whole snapshot
-    // (duplicates can sit entirely inside the shared prefix or suffix).
     if old_ids.len() * new_ids.len() <= SMALL_MIDDLE {
         match_linear(&old_ids, &new_ids, &mut source, &mut survived);
     } else {
         match_sorted(&old_ids, &new_ids, &mut source, &mut survived);
     }
-    let duplicate_ids =
-        snapshot_has_duplicate_ids(old, &id) || snapshot_has_duplicate_ids(new, &id);
 
     for (offset, survived) in survived.iter().enumerate() {
         if !survived {
@@ -126,10 +108,7 @@ pub fn diff<T, Id: Ord>(
         }
     }
 
-    Diff {
-        change: CollectionChange::from_edits(edits),
-        duplicate_ids,
-    }
+    CollectionChange::from_edits(edits)
 }
 
 /// Middle segments up to this many old × new pairs are matched by linear
@@ -180,8 +159,15 @@ fn match_sorted<Id: Ord>(
     }
 }
 
-/// Whether `items` holds two positions with the same id.
-fn snapshot_has_duplicate_ids<T, Id: Ord>(items: &[T], id: &impl Fn(usize, &T) -> Id) -> bool {
+/// Whether `items` holds two positions with the same id; `id(index, item)`
+/// gives an item's id, as in [`diff`].
+///
+/// This is a diagnostic, not part of [`diff`]: duplicates there are
+/// resolved, never rejected, and the matcher only needs the ids of the
+/// changed middle segment. The check materialises and sorts every id, so
+/// call it only where the cost is acceptable — a debug-build warning, for
+/// example.
+pub fn has_duplicate_ids<T, Id: Ord>(items: &[T], id: impl Fn(usize, &T) -> Id) -> bool {
     if items.len() < 2 {
         return false;
     }
@@ -227,7 +213,7 @@ mod tests {
 
     use core::cmp::Ordering;
 
-    use super::{CollectionChange, Diff, Edit, diff, longest_increasing};
+    use super::{CollectionChange, Edit, diff, has_duplicate_ids, longest_increasing};
 
     /// The diff before the prefix/suffix and linear-match optimisations,
     /// kept to check that they change nothing.
@@ -237,7 +223,7 @@ mod tests {
         new: &[T],
         id: impl Fn(usize, &T) -> Id,
         same: impl Fn(&T, &T) -> bool,
-    ) -> Diff {
+    ) -> CollectionChange {
         let old_ids: Vec<Id> = old
             .iter()
             .enumerate()
@@ -288,13 +274,6 @@ mod tests {
         let mut new_order: Vec<usize> = new_middle.clone().collect();
         new_order.sort_by(|a, b| by_id(&new_ids, a, b));
 
-        let duplicates_in = |ids: &[Id]| {
-            let mut order: Vec<usize> = (0..ids.len()).collect();
-            order.sort_unstable_by(|&a, &b| ids[a].cmp(&ids[b]));
-            order.windows(2).any(|pair| ids[pair[0]] == ids[pair[1]])
-        };
-        let duplicate_ids = duplicates_in(&old_ids) || duplicates_in(&new_ids);
-
         // `source[j]` is the old position of the item at new position
         // `new_middle.start + j`, if it survived.
         let mut source: Vec<Option<usize>> = vec![None; new_middle.len()];
@@ -342,10 +321,7 @@ mod tests {
             }
         }
 
-        Diff {
-            change: CollectionChange::from_edits(edits),
-            duplicate_ids,
-        }
+        CollectionChange::from_edits(edits)
     }
 
     /// Deterministic pseudo-random numbers.
@@ -419,11 +395,11 @@ mod tests {
                 assert_eq!(result, expected, "old {old:?} new {new:?}");
                 // `apply` leaves updates to the caller, so refresh them.
                 let mut applied = old.clone();
-                result.change.apply(&mut applied, |index| new[index]);
-                for range in result.change.updates() {
+                result.apply(&mut applied, |index| new[index]);
+                for range in result.updates() {
                     applied[range.clone()].copy_from_slice(&new[range]);
                 }
-                assert_eq!(applied, new, "{:?}", result.change);
+                assert_eq!(applied, new, "{result:?}");
             }
         }
     }
@@ -433,9 +409,9 @@ mod tests {
     fn check(old: &[char], new: &[char]) -> CollectionChange {
         let result = diff(old, new, |_, item| *item, |a, b| a == b);
         let mut applied = old.to_vec();
-        result.change.apply(&mut applied, |index| new[index]);
-        assert_eq!(applied, new, "{:?}", result.change);
-        result.change
+        result.apply(&mut applied, |index| new[index]);
+        assert_eq!(applied, new, "{result:?}");
+        result
     }
 
     #[test]
@@ -508,10 +484,10 @@ mod tests {
         let new = [row(3, 'c'), row(1, 'A'), row(2, 'b')];
         let result = diff(&old, &new, |_, row| row.id, |a, b| a == b);
         assert_eq!(
-            result.change,
+            result,
             CollectionChange::from_edits([Edit::Move { from: 2, to: 0 }, Edit::Update(1..2)])
         );
-        assert!(!result.duplicate_ids);
+        assert!(!has_duplicate_ids(&new, |_, row| row.id));
     }
 
     #[test]
@@ -519,25 +495,20 @@ mod tests {
         let old = ['a', 'a', 'b'];
         let new = ['b', 'a', 'a', 'a'];
         let result = diff(&old, &new, |_, item| *item, |a, b| a == b);
-        assert!(result.duplicate_ids);
+        assert!(has_duplicate_ids(&new, |_, item| *item));
         let mut applied = old.to_vec();
-        result.change.apply(&mut applied, |index| new[index]);
+        result.apply(&mut applied, |index| new[index]);
         assert_eq!(applied, new);
-        assert_eq!(result.change.insertions().collect::<Vec<_>>(), vec![3..4]);
+        assert_eq!(result.insertions().collect::<Vec<_>>(), vec![3..4]);
     }
 
     #[test]
-    fn duplicate_ids_flag_covers_shared_prefix_and_suffix() {
-        // Both sides identical with duplicates only in the shared region, so
-        // the middle is empty and the old middle-only scan would miss them.
-        let same = ['a', 'a'];
-        assert!(diff(&same, &same, |_, item| *item, |a, b| a == b).duplicate_ids);
-
-        let with_suffix = ['a', 'b', 'a'];
-        assert!(diff(&with_suffix, &with_suffix, |_, item| *item, |a, b| a == b).duplicate_ids);
-
-        let unique = ['a', 'b', 'c'];
-        assert!(!diff(&unique, &unique, |_, item| *item, |a, b| a == b).duplicate_ids);
+    fn has_duplicate_ids_scans_the_whole_snapshot() {
+        // Duplicates may sit entirely in what a diff would skip as shared
+        // prefix or suffix; the diagnostic sees the whole slice.
+        assert!(has_duplicate_ids(&['a', 'a'], |_, item| *item));
+        assert!(has_duplicate_ids(&['a', 'b', 'a'], |_, item| *item));
+        assert!(!has_duplicate_ids(&['a', 'b', 'c'], |_, item| *item));
     }
 
     #[test]
@@ -546,7 +517,7 @@ mod tests {
         let new = [10, 21];
         let result = diff(&old, &new, |index, _| index, |a, b| a == b);
         assert_eq!(
-            result.change,
+            result,
             CollectionChange::from_edits([Edit::Remove(2..3), Edit::Update(1..2)])
         );
     }

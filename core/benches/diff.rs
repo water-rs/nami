@@ -2,8 +2,6 @@
 //!
 //! Run with `cargo bench -p nami-core --bench diff`.
 
-#![allow(missing_docs)]
-
 use std::hint::black_box;
 use std::time::Duration;
 

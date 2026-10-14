@@ -1,5 +1,4 @@
 //! Notify-path benchmarks (water-rs/nami#39).
-#![allow(missing_docs)]
 
 use nami::watcher::{Context, WatcherManager};
 use nami::{Binding, Signal};

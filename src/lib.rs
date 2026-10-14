@@ -36,7 +36,7 @@ pub use nami_derive::Project;
 
 #[cfg(feature = "derive")]
 #[doc(hidden)]
-pub use nami_derive::s as __s;
+pub use nami_derive::__s;
 
 /// Creates a formatted string signal that captures the signals it names.
 ///

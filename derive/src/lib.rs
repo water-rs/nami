@@ -1,5 +1,6 @@
 //! This crate provides the derive macro for the `nami` crate.
-//! It includes the `Project` derive macro and the `s!` procedural macro.
+//! It includes the `Project` derive macro and `__s!`, the internal
+//! procedural macro behind `nami::s!`.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -249,18 +250,19 @@ impl Parse for SInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         // `nami::s!` forwards here as `__s!($crate; ...)`, so the expansion
         // resolves through whatever path reached nami (for example
-        // `waterui::reactive`). A direct call starts with the format string
-        // and falls back to `::nami`.
-        let krate = if input.peek(LitStr) {
-            quote! { ::nami }
-        } else {
-            let mut krate = TokenStream2::new();
-            while !input.peek(Token![;]) {
-                krate.extend(core::iter::once(input.parse::<proc_macro2::TokenTree>()?));
-            }
-            input.parse::<Token![;]>()?;
-            krate
-        };
+        // `waterui::reactive`). The prefix is required: calling this proc
+        // macro directly is not supported.
+        if input.peek(LitStr) {
+            return Err(input.error(
+                "expected `<crate path>;` before the format string: `__s!` is internal, \
+                 call `nami::s!` instead",
+            ));
+        }
+        let mut krate = TokenStream2::new();
+        while !input.peek(Token![;]) {
+            krate.extend(core::iter::once(input.parse::<proc_macro2::TokenTree>()?));
+        }
+        input.parse::<Token![;]>()?;
         let format_str: LitStr = input.parse()?;
         let args = if input.peek(Token![,]) {
             input.parse::<Token![,]>()?;
@@ -292,29 +294,12 @@ struct ZipEntry {
     name: syn::Ident,
 }
 
-/// Function-like procedural macro for creating formatted string signals with automatic variable capture.
-///
-/// This macro automatically detects named variables in format strings and captures them from scope.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// use nami::*;
-///
-/// let name = constant("Alice");
-/// let age = constant(25);
-///
-/// // Automatic variable capture from format string
-/// let msg = s!("Hello {name}, you are {age} years old");
-///
-/// // Positional arguments still work
-/// let msg2 = s!("Hello {}, you are {}", name, age);
-///
-/// // Named arguments with automatic cloning (like println!)
-/// let msg3 = s!("Hello {n}, you are {a} years old", n = name, a = age);
-/// ```
+/// Internal implementation of `nami::s!`; `nami::s!` forwards to it as
+/// `__s!($crate; ...)` with the path the caller reached nami through.
+/// Calling this proc macro directly is not supported.
+#[doc(hidden)]
 #[proc_macro]
-pub fn s(input: TokenStream) -> TokenStream {
+pub fn __s(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as SInput);
     match expand_s(input) {
         Ok(tokens) => tokens.into(),

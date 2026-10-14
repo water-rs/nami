@@ -12,7 +12,7 @@ mod change;
 mod diff;
 
 pub use change::{CollectionChange, Edit};
-pub use diff::{Diff, diff};
+pub use diff::{diff, has_duplicate_ids};
 
 pub use crate::id::{Identifiable, IdentifiableExt, SelfId, UseId};
 
@@ -94,10 +94,16 @@ pub trait Collection: 'static {
     /// [`CollectionChange`] since its previous notification, in
     /// collection-wide indices.
     ///
-    /// The watcher is only called when the collection actually changes:
+    /// The watcher is only called when the collection reports a change:
     /// registering does not deliver the current contents, and neither does
     /// moving the range ([`CollectionWatcherGuard::set_range`]). Read the
     /// current contents with [`Self::get_item`] / [`Self::get_id`].
+    ///
+    /// What counts as a change is up to the implementation. `nami`'s
+    /// `List::replace` and `SignalCollection` align the old and new
+    /// snapshots by id, so a change that comes out empty is not notified;
+    /// `List::set` and `List::update` instead always report their index
+    /// because `List` does not require `PartialEq` on its items.
     ///
     /// Do not mutate the same collection from inside the watcher (for
     /// example through a cloned handle). Mutation APIs such as
