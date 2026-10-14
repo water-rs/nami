@@ -72,7 +72,8 @@ pub fn diff<T, Id: Ord>(
     if old_middle.is_empty() && new_middle.is_empty() {
         return Diff {
             change: CollectionChange::from_edits(edits),
-            duplicate_ids: false,
+            duplicate_ids: snapshot_has_duplicate_ids(old, &id)
+                || snapshot_has_duplicate_ids(new, &id),
         };
     }
 
@@ -85,11 +86,15 @@ pub fn diff<T, Id: Ord>(
     // one side is matched with the n-th occurrence on the other.
     let mut source: Vec<Option<usize>> = vec![None; new_ids.len()];
     let mut survived = vec![false; old_ids.len()];
-    let duplicate_ids = if old_ids.len() * new_ids.len() <= SMALL_MIDDLE {
-        match_linear(&old_ids, &new_ids, &mut source, &mut survived)
+    // Matching only sees the middle; the flag must cover the whole snapshot
+    // (duplicates can sit entirely inside the shared prefix or suffix).
+    if old_ids.len() * new_ids.len() <= SMALL_MIDDLE {
+        match_linear(&old_ids, &new_ids, &mut source, &mut survived);
     } else {
-        match_sorted(&old_ids, &new_ids, &mut source, &mut survived)
-    };
+        match_sorted(&old_ids, &new_ids, &mut source, &mut survived);
+    }
+    let duplicate_ids =
+        snapshot_has_duplicate_ids(old, &id) || snapshot_has_duplicate_ids(new, &id);
 
     for (offset, survived) in survived.iter().enumerate() {
         if !survived {
@@ -131,41 +136,33 @@ pub fn diff<T, Id: Ord>(
 /// scans instead of sorting.
 const SMALL_MIDDLE: usize = 256;
 
-/// Matches by scanning: each new id takes the first unused old one. Returns
-/// whether either side repeats an id.
+/// Matches by scanning: each new id takes the first unused old one.
 fn match_linear<Id: Ord>(
     old_ids: &[Id],
     new_ids: &[Id],
     source: &mut [Option<usize>],
     survived: &mut [bool],
-) -> bool {
+) {
     for (j, new_id) in new_ids.iter().enumerate() {
         if let Some(i) = (0..old_ids.len()).find(|&i| !survived[i] && old_ids[i] == *new_id) {
             source[j] = Some(i);
             survived[i] = true;
         }
     }
-    let repeats = |ids: &[Id]| (1..ids.len()).any(|k| ids[..k].contains(&ids[k]));
-    repeats(old_ids) || repeats(new_ids)
 }
 
-/// Matches by sorting each side by (id, position). Returns whether either
-/// side repeats an id.
+/// Matches by sorting each side by (id, position).
 fn match_sorted<Id: Ord>(
     old_ids: &[Id],
     new_ids: &[Id],
     source: &mut [Option<usize>],
     survived: &mut [bool],
-) -> bool {
+) {
     let by_id = |ids: &[Id], a: &usize, b: &usize| ids[*a].cmp(&ids[*b]).then(a.cmp(b));
     let mut old_order: Vec<usize> = (0..old_ids.len()).collect();
     old_order.sort_unstable_by(|a, b| by_id(old_ids, a, b));
     let mut new_order: Vec<usize> = (0..new_ids.len()).collect();
     new_order.sort_unstable_by(|a, b| by_id(new_ids, a, b));
-
-    let has_duplicates =
-        |ids: &[Id], order: &[usize]| order.windows(2).any(|pair| ids[pair[0]] == ids[pair[1]]);
-    let duplicate_ids = has_duplicates(old_ids, &old_order) || has_duplicates(new_ids, &new_order);
 
     let (mut i, mut j) = (0, 0);
     while i < old_order.len() && j < new_order.len() {
@@ -181,7 +178,20 @@ fn match_sorted<Id: Ord>(
             }
         }
     }
-    duplicate_ids
+}
+
+/// Whether `items` holds two positions with the same id.
+fn snapshot_has_duplicate_ids<T, Id: Ord>(items: &[T], id: &impl Fn(usize, &T) -> Id) -> bool {
+    if items.len() < 2 {
+        return false;
+    }
+    let mut ids: Vec<Id> = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| id(index, item))
+        .collect();
+    ids.sort_unstable();
+    ids.windows(2).any(|pair| pair[0] == pair[1])
 }
 
 /// Marks a longest subsequence of `pairs` whose first components increase.
@@ -278,10 +288,12 @@ mod tests {
         let mut new_order: Vec<usize> = new_middle.clone().collect();
         new_order.sort_by(|a, b| by_id(&new_ids, a, b));
 
-        let has_duplicates =
-            |ids: &[Id], order: &[usize]| order.windows(2).any(|pair| ids[pair[0]] == ids[pair[1]]);
-        let duplicate_ids =
-            has_duplicates(&old_ids, &old_order) || has_duplicates(&new_ids, &new_order);
+        let duplicates_in = |ids: &[Id]| {
+            let mut order: Vec<usize> = (0..ids.len()).collect();
+            order.sort_unstable_by(|&a, &b| ids[a].cmp(&ids[b]));
+            order.windows(2).any(|pair| ids[pair[0]] == ids[pair[1]])
+        };
+        let duplicate_ids = duplicates_in(&old_ids) || duplicates_in(&new_ids);
 
         // `source[j]` is the old position of the item at new position
         // `new_middle.start + j`, if it survived.
@@ -512,6 +524,20 @@ mod tests {
         result.change.apply(&mut applied, |index| new[index]);
         assert_eq!(applied, new);
         assert_eq!(result.change.insertions().collect::<Vec<_>>(), vec![3..4]);
+    }
+
+    #[test]
+    fn duplicate_ids_flag_covers_shared_prefix_and_suffix() {
+        // Both sides identical with duplicates only in the shared region, so
+        // the middle is empty and the old middle-only scan would miss them.
+        let same = ['a', 'a'];
+        assert!(diff(&same, &same, |_, item| *item, |a, b| a == b).duplicate_ids);
+
+        let with_suffix = ['a', 'b', 'a'];
+        assert!(diff(&with_suffix, &with_suffix, |_, item| *item, |a, b| a == b).duplicate_ids);
+
+        let unique = ['a', 'b', 'c'];
+        assert!(!diff(&unique, &unique, |_, item| *item, |a, b| a == b).duplicate_ids);
     }
 
     #[test]
