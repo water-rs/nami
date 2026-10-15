@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["core", "derive", "tests/renamed-dependency"]
+# The `no_std` batch-hook link check is a `#![no_main]` bare-metal binary
+# built for thumbv7em only; it cannot join host `cargo test` runs.
+exclude = ["tests/batch-nostd"]
 
 [workspace.package]
 edition = "2024"
@@ -61,6 +64,10 @@ std = ["executor-core/std","nami-core/std"]
 default = ["derive", "timer"]
 timer = ["std","dep:async-io","dep:gloo-timers"]
 derive = ["dep:nami-derive"]
+# Deferred watcher notifications: `nami::batch(|| { ... })` coalesces the
+# writes made inside it into one notification per signal. Without the
+# feature there is no `batch` API and no batch check on the write path.
+batch = []
 # Reactive-graph introspection for development tooling. See `nami_core::observe`.
 observability = ["std", "nami-core/observability"]
 # Constant `Signal` implementations for kurbo's geometry types.

@@ -23,6 +23,8 @@
 //! produced, so no `&mut` can alias one.
 
 use alloc::{boxed::Box, rc::Rc};
+#[cfg(feature = "batch")]
+use core::cell::Cell;
 use core::{
     any::Any, cell::RefCell, fmt::Debug, marker::PhantomData, mem::MaybeUninit, ptr::NonNull,
 };
@@ -434,6 +436,10 @@ pub struct ContainerNode<T> {
     value: RefCell<Rc<T>>,
     /// Manager for watchers that are interested in changes to the value.
     watchers: WatcherManager<T>,
+    /// Set while the node sits in a batch's pending list; the batch's
+    /// flush — or its discard on unwind — clears it.
+    #[cfg(feature = "batch")]
+    dirty: Cell<bool>,
 }
 
 impl<T> Debug for ContainerNode<T> {
@@ -459,6 +465,8 @@ impl<T: 'static + Clone> ContainerNode<T> {
             watchers: WatcherManager::with_origin(Origin::capture::<Container<T>>(
                 SignalIdentity::from_ptr(address),
             )),
+            #[cfg(feature = "batch")]
+            dirty: Cell::new(false),
         };
         // SAFETY: `slot` was just allocated and has no other strong or weak
         // handle, so nothing else can observe the write; `as_ptr` carries
@@ -525,11 +533,19 @@ impl<T: 'static + Clone> ContainerNode<T> {
         f(&value)
     }
 
-    /// Sets a new value and notifies watchers.
+    /// Sets a new value and notifies watchers — or, inside a batch, marks
+    /// the node dirty so the flush notifies once with the final value.
     fn set(&self, value: T) {
         if self.watchers.is_empty() {
             // Nobody to tell: move the value in without cloning it.
             self.store(value);
+            return;
+        }
+        #[cfg(feature = "batch")]
+        if crate::batch::is_open() {
+            // The write lands at once; only the notification is deferred.
+            self.store(value);
+            self.mark_dirty();
             return;
         }
         self.store(value.clone());
@@ -540,12 +556,38 @@ impl<T: 'static + Clone> ContainerNode<T> {
     /// the updated value when any are registered.
     pub fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
         let result = self.edit(f);
-        // Clone only for watchers, after releasing the borrow.
-        let updated = (!self.watchers.is_empty()).then(|| self.value.borrow().as_ref().clone());
-        if let Some(updated) = updated {
-            self.watchers.notify_owned(Context::from(updated));
+        if self.watchers.is_empty() {
+            return result;
         }
+        #[cfg(feature = "batch")]
+        if crate::batch::is_open() {
+            self.mark_dirty();
+            return result;
+        }
+        // Clone only for watchers, after releasing the borrow.
+        let updated = self.value.borrow().as_ref().clone();
+        self.watchers.notify_owned(Context::from(updated));
         result
+    }
+
+    /// Registers the node in the open batch's pending list, once: writes
+    /// after the first find the mark already set and only update the
+    /// stored value.
+    #[cfg(feature = "batch")]
+    fn mark_dirty(&self) {
+        if self.dirty.replace(true) {
+            return;
+        }
+        // SAFETY: a `&ContainerNode` only ever comes from dereferencing a
+        // live `Rc<ContainerNode>` — `new` returns `Rc`, and the vtable's
+        // `this` casts the same `Rc` value pointer — so `self` is the
+        // value pointer of a live `Rc`; the increment takes the strong
+        // count the `from_raw` adopts into the pending list.
+        let node = unsafe {
+            Rc::increment_strong_count(core::ptr::from_ref(self));
+            Rc::from_raw(core::ptr::from_ref(self))
+        };
+        crate::batch::pending_push(node);
     }
 
     /// Registers `watcher` on the registry.
@@ -639,6 +681,26 @@ impl<T: 'static + Clone> ContainerNode<T> {
     unsafe fn erased_drop(ptr: Block) {
         // SAFETY: `from_raw` reclaims the strong count the caller hands over.
         unsafe { drop(Rc::from_raw(ptr.cast::<Self>())) }
+    }
+}
+
+#[cfg(feature = "batch")]
+impl<T: 'static + Clone> crate::batch::Flush for ContainerNode<T> {
+    fn unmark(&self) {
+        self.dirty.set(false);
+    }
+
+    /// Delivers the one notification the batch coalesced this node's
+    /// writes into, carrying the value at flush time. The mark clears
+    /// first, so a watcher that opens a fresh batch can register the node
+    /// again.
+    fn flush(&self) {
+        self.unmark();
+        if self.watchers.is_empty() {
+            return;
+        }
+        let value = self.value.borrow().as_ref().clone();
+        self.watchers.notify_owned(Context::from(value));
     }
 }
 

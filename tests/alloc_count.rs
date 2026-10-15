@@ -240,6 +240,38 @@ fn change_log_without_changes_does_not_allocate() {
     assert_eq!(allocations(|| drop(log.finish())), 0);
 }
 
+/// The second batch on a thread reuses the pending list's capacity, so
+/// batching two `set`s costs exactly what the same two `set`s cost
+/// unbatched — nothing, for watched `i32` containers (water-rs/nami#47).
+#[cfg(feature = "batch")]
+#[test]
+fn second_batch_reuses_the_pending_list() {
+    let (a, _guard_a) = watched_i32(1);
+    let (b, _guard_b) = watched_i32(1);
+    let first = allocations(|| {
+        nami::batch(|| {
+            a.set(1);
+            b.set(1);
+        });
+    });
+    assert!(
+        first > 0,
+        "the first batch on a thread grows the pending list"
+    );
+    let unbatched = allocations(|| {
+        a.set(2);
+        b.set(2);
+    });
+    let batched = allocations(|| {
+        nami::batch(|| {
+            a.set(3);
+            b.set(3);
+        });
+    });
+    assert_eq!(unbatched, 0);
+    assert_eq!(batched, unbatched, "the second batch allocated");
+}
+
 #[test]
 fn registering_a_watcher_costs_its_rc_plus_list_growth() {
     use nami::watcher::WatcherManager;

@@ -112,6 +112,21 @@ type ListWatcher<T> = dyn Fn(Context<Rc<Vec<T>>>, &CollectionChange);
 /// new notification is queued behind the one in progress — every watcher
 /// still sees the changes in the order they happened. Debug builds log a
 /// warning when it happens.
+///
+/// # Batching
+///
+/// Inside [`batch`](crate::batch) (feature `batch`) a list holds back its
+/// notifications and composes its changes into one, delivered when the
+/// outermost batch ends — or nothing, when the changes cancel out.
+///
+/// A watcher registered while the list holds back changes cannot share
+/// that composed change: it was computed from the pre-batch snapshot,
+/// and the new watcher starts from the current one. Registering therefore
+/// first delivers the held-back change to the watchers already registered,
+/// immediately and as a normal notification with the current snapshot.
+/// Changes made after the registration are composed again and delivered
+/// to every watcher at the end of the batch; if there are none, the end of
+/// the batch sends nothing for this list.
 pub struct List<T> {
     state: Rc<ListState<T>>,
 }
@@ -119,10 +134,25 @@ pub struct List<T> {
 struct ListState<T> {
     items: RefCell<Rc<Vec<T>>>,
     watchers: WatcherRegistry<ListWatcher<T>>,
+    /// `Some` while a batch holds back this list's notifications — also
+    /// the mark that the list already sits in the batch's pending list.
+    #[cfg(feature = "batch")]
+    batched: RefCell<Option<Batched>>,
     /// How many notifications or [`List::with_range`] loans are running;
     /// debug builds only, to warn about mutations made from inside them.
     #[cfg(debug_assertions)]
     notifying: Cell<usize>,
+}
+
+/// What a [`List`] holds back while a batch is open: the composition of
+/// every change it made inside the batch and the union of the metadata
+/// they carried.
+#[cfg(feature = "batch")]
+struct Batched {
+    /// Composes the batched changes into the single change from the
+    /// pre-batch snapshot to the final one (water-rs/nami#54).
+    log: ChangeLog,
+    metadata: Metadata,
 }
 
 impl<T: fmt::Debug> fmt::Debug for List<T> {
@@ -187,6 +217,8 @@ impl<T: Identifiable + 'static> List<T> {
                 ListState {
                     items: RefCell::new(Rc::new(items)),
                     watchers: WatcherRegistry::with_origin(origin),
+                    #[cfg(feature = "batch")]
+                    batched: RefCell::new(None),
                     #[cfg(debug_assertions)]
                     notifying: Cell::new(0),
                 }
@@ -597,25 +629,112 @@ impl<T: Identifiable + 'static> List<T> {
         self.notify_with_metadata(change, Metadata::new());
     }
 
-    /// Hands watchers the current snapshot (a refcount, not a copy) and
-    /// `change`. Nothing is sent for an empty change.
-    ///
-    /// The delivery closure owns `change` so the registry can queue the
-    /// delivery if a watcher triggers this notify while a round is running
-    /// (see [`WatcherRegistry::notify_with`]).
+    /// Notifies watchers of `change` — or, inside a batch, composes it
+    /// into the pending change the flush delivers once.
     fn notify_with_metadata(&self, change: CollectionChange, metadata: Metadata) {
         if change.is_empty() || self.state.watchers.is_empty() {
             return;
         }
-        let snapshot = Rc::clone(&self.state.items.borrow());
+        #[cfg(feature = "batch")]
+        if crate::batch::is_open() {
+            self.record(&change, metadata);
+            return;
+        }
+        self.state.deliver(change, metadata);
+    }
+
+    /// Inside a batch: pushes `change` onto the pending composition and
+    /// registers the list in the batch's pending list at the first one.
+    ///
+    /// `change` is indexed against the already-mutated items, so the log
+    /// must start from the length before it — which the change's own
+    /// edits reconstruct: `len + removed - inserted`.
+    #[cfg(feature = "batch")]
+    fn record(&self, change: &CollectionChange, metadata: Metadata) {
+        let mut slot = self.state.batched.borrow_mut();
+        let first = slot.is_none();
+        let batched = slot.get_or_insert_with(|| {
+            let inserted: usize = change.insertions().map(|range| range.len()).sum();
+            let removed: usize = change.removals().map(|range| range.len()).sum();
+            Batched {
+                log: ChangeLog::new(self.state.items.borrow().len() + removed - inserted),
+                metadata: Metadata::new(),
+            }
+        });
+        batched.log.push(change);
+        batched.metadata = core::mem::take(&mut batched.metadata).merge(metadata);
+        drop(slot);
+        if first {
+            crate::batch::pending_push(self.state.clone());
+        }
+    }
+}
+
+impl<T: 'static> ListState<T> {
+    /// Hands watchers the current snapshot (a refcount, not a copy) and
+    /// `change`; the caller has already checked the change is not empty
+    /// and watchers are registered.
+    ///
+    /// The delivery closure owns `change` so the registry can queue the
+    /// delivery if a watcher triggers this notify while a round is running
+    /// (see [`WatcherRegistry::notify_with`]).
+    fn deliver(&self, change: CollectionChange, metadata: Metadata) {
+        let snapshot = Rc::clone(&self.items.borrow());
         #[cfg(debug_assertions)]
-        let _notifying = NotifyingScope::enter(&self.state.notifying);
-        self.state.watchers.notify_with(
-            Context::new(snapshot, metadata),
-            move |watcher, context| {
+        let _notifying = NotifyingScope::enter(&self.notifying);
+        self.watchers
+            .notify_with(Context::new(snapshot, metadata), move |watcher, context| {
                 watcher(context, &change);
-            },
-        );
+            });
+    }
+}
+
+#[cfg(feature = "batch")]
+impl<T: 'static> ListState<T> {
+    /// Before a watcher registers mid-batch: delivers the change held back
+    /// so far to the watchers already registered and restarts the log at
+    /// the current length. The list keeps its mark, and with it its entry
+    /// in the batch's pending list, so changes made after the registration
+    /// are still composed and flushed at the end of the batch.
+    fn deliver_held_back(&self) {
+        let held_back = {
+            let mut slot = self.batched.borrow_mut();
+            let Some(batched) = slot.as_mut() else {
+                return;
+            };
+            let restarted = Batched {
+                log: ChangeLog::new(self.items.borrow().len()),
+                metadata: Metadata::new(),
+            };
+            core::mem::replace(batched, restarted)
+        };
+        let change = held_back.log.finish();
+        if change.is_empty() || self.watchers.is_empty() {
+            return;
+        }
+        self.deliver(change, held_back.metadata);
+    }
+}
+
+#[cfg(feature = "batch")]
+impl<T: 'static> crate::batch::Flush for ListState<T> {
+    /// Drops the composed change — a discarded batch never notifies.
+    fn unmark(&self) {
+        self.batched.borrow_mut().take();
+    }
+
+    /// The batch's coalesced list notification: the composition of every
+    /// change it recorded, against the final snapshot — or nothing when
+    /// the changes cancelled out.
+    fn flush(&self) {
+        let Some(batched) = self.batched.borrow_mut().take() else {
+            return;
+        };
+        let change = batched.log.finish();
+        if change.is_empty() || self.watchers.is_empty() {
+            return;
+        }
+        self.deliver(change, batched.metadata);
     }
 }
 
@@ -742,6 +861,8 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
                 (watch.watcher)(Context::new(&items[range], metadata), change);
             }
         });
+        #[cfg(feature = "batch")]
+        self.state.deliver_held_back();
         ListGuard {
             registration: self.state.watchers.insert_as_guard(callback),
             range,
