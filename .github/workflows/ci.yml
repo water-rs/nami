@@ -63,6 +63,10 @@ jobs:
       # framework without its `std`-only features.
       - run: cargo build -p nami-core --no-default-features --target thumbv7em-none-eabihf
       - run: cargo build -p nami --no-default-features --target thumbv7em-none-eabihf
+      # The `batch` feature without `std`: a bare-metal image that registers
+      # the batch-state hook with `nami::batch_state!` must link.
+      - run: cargo clippy --manifest-path tests/batch-nostd/Cargo.toml --target thumbv7em-none-eabihf --target-dir target -- -D warnings
+      - run: cargo build --manifest-path tests/batch-nostd/Cargo.toml --target thumbv7em-none-eabihf --target-dir target
 
   coverage:
     name: Coverage

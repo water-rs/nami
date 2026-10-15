@@ -238,11 +238,32 @@ impl Metadata {
     /// A value of the same type that is already present is replaced.
     /// This method is chainable for fluent API usage.
     #[must_use]
-    pub fn with<T: 'static + Clone>(mut self, value: T) -> Self {
+    pub fn with<T: 'static + Clone>(self, value: T) -> Self {
         // Values are cheap to clone (an `Animation` is a few words), but the
         // type must be erased; `Rc` keeps retrieval a refcount bump.
-        let id = TypeId::of::<T>();
-        let value: Rc<dyn Any> = Rc::new(value);
+        self.with_erased(TypeId::of::<T>(), Rc::new(value))
+    }
+
+    /// Merges `other` into `self`, returning the union: a value already
+    /// present under the same type is replaced by `other`'s.
+    ///
+    /// Deferred notifications (such as a batched `List` change) compose
+    /// their metadata this way, so the single notification they finally
+    /// send carries what the individual ones would have.
+    #[must_use]
+    pub fn merge(self, other: Self) -> Self {
+        if self.is_empty() {
+            return other;
+        }
+        other
+            .0
+            .into_iter()
+            .fold(self, |merged, (id, value)| merged.with_erased(id, value))
+    }
+
+    /// Stores the erased `value` under `id`, replacing a value already
+    /// present under it.
+    fn with_erased(mut self, id: TypeId, value: Rc<dyn Any>) -> Self {
         if let Some(slot) = self.0.iter_mut().find(|(key, _)| *key == id) {
             slot.1 = value;
             return self;

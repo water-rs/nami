@@ -9,6 +9,8 @@ extern crate alloc;
 #[macro_use]
 mod reactive_core;
 mod async_signal;
+#[cfg(feature = "batch")]
+mod batch;
 mod data;
 mod support;
 
@@ -29,6 +31,10 @@ pub use project::Project;
 pub use reactive_core::SignalExt;
 #[doc(inline)]
 pub use signal::{Computed, Signal, SignalIdentity};
+
+#[cfg(feature = "batch")]
+#[doc(inline)]
+pub use batch::{BatchState, batch};
 
 #[cfg(feature = "derive")]
 #[doc(inline)]
