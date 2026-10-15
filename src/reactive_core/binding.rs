@@ -4,8 +4,7 @@
 //! Unlike read-only signals, bindings can be modified and will notify watchers of changes.
 
 use core::{
-    any::{Any, type_name},
-    cell::RefCell,
+    any::type_name,
     fmt::Debug,
     marker::PhantomData,
     mem::ManuallyDrop,
@@ -21,40 +20,20 @@ use async_channel::{Sender, unbounded};
 use executor_core::{LocalExecutor, Task};
 use num_traits::Signed;
 
+use super::erased::{ContainerNode, ErasedBinding};
 use crate::{
     Computed, Signal, SignalIdentity,
-    watcher::{BoxWatcherGuard, Context, WatcherManager},
+    watcher::{BoxWatcherGuard, Context},
 };
-use nami_core::observe::Origin;
 
+pub use super::erased::Container;
 pub use nami_core::CustomBinding;
 
 /// A `Binding<T>` represents a mutable value of type `T` that can be observed.
 ///
 /// Bindings provide a reactive way to work with values. When a binding's value
 /// changes, it can notify watchers that have registered interest in the value.
-pub struct Binding<T: 'static>(Box<dyn BindingImpl<Output = T>>);
-
-/// Internal trait that defines the operations required to implement a binding.
-///
-/// This trait is used to erase the specific type of binding while still preserving
-/// the operations that can be performed on it.
-trait BindingImpl: crate::signal::ComputedImpl {
-    /// Sets a new value
-    fn set(&self, value: Self::Output);
-
-    fn cloned_binding(&self) -> Binding<Self::Output>;
-}
-
-impl<T: CustomBinding + Clone + 'static> BindingImpl for T {
-    fn set(&self, value: Self::Output) {
-        <T as CustomBinding>::set(self, value);
-    }
-
-    fn cloned_binding(&self) -> Binding<Self::Output> {
-        Binding::custom(self.clone())
-    }
-}
+pub struct Binding<T: 'static>(ErasedBinding<T>);
 
 impl<T> Debug for Binding<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -68,7 +47,7 @@ impl<T: 'static + Clone> Binding<T> {
     /// The container provides the reactive capabilities for the value.
     #[track_caller]
     pub fn container(value: T) -> Self {
-        Self::custom(Container::new(value))
+        Self(ErasedBinding::container(ContainerNode::new(value)))
     }
 }
 
@@ -172,7 +151,7 @@ impl<T: 'static> Drop for BindingMutGuard<'_, T> {
 impl<T: 'static> Binding<T> {
     /// Creates a binding that uses a custom implementation of the `CustomBinding` trait.
     pub fn custom(custom: impl CustomBinding<Output = T> + Clone + 'static) -> Self {
-        Self(Box::new(custom))
+        Self(ErasedBinding::binding(custom))
     }
 
     /// Gets mutable access to the binding's value through a guard.
@@ -242,10 +221,6 @@ impl<T: 'static> Binding<T> {
         self.0.set(value.into());
     }
 
-    fn as_container(&self) -> Option<&Container<T>> {
-        let any = (self.0.as_ref()) as &dyn BindingImpl<Output = T> as &dyn Any;
-        any.downcast_ref::<Container<T>>()
-    }
     /// Applies a function to mutably borrow the binding's value.
     ///
     /// This is more efficient than `get_mut()` for container bindings as it avoids
@@ -255,18 +230,10 @@ impl<T: 'static> Binding<T> {
     where
         T: Clone,
     {
-        if let Some(container) = self.as_container() {
-            // optimize for container bindings
-            let mut value = container.value.borrow_mut();
-            let result = f(&mut *value);
-            let updated = value.clone();
-            drop(value);
-            // notify watchers manually after releasing the RefCell borrow
-            if !container.watchers.is_empty() {
-                let context = Context::from(updated);
-                container.watchers.notify(&context);
-            }
-            result
+        if let Some(container) = self.0.as_container() {
+            // Container storage edits in place; a `with_ref` borrow still
+            // live on the value makes the edit copy-on-write.
+            container.with_mut(f)
         } else {
             // fallback for non-container bindings
             let mut guard = self.get_mut();
@@ -1002,80 +969,7 @@ where
 impl<T> Clone for Binding<T> {
     /// Creates a clone of this binding.
     fn clone(&self) -> Self {
-        self.0.cloned_binding()
-    }
-}
-
-/// A container for a value that can be observed.
-///
-/// The container is the basic implementation of a binding that holds a value
-/// and notifies watchers when the value changes.
-#[derive(Debug, Clone)]
-pub struct Container<T: 'static> {
-    /// The contained value, wrapped in Reference-counted [`RefCell`] for interior mutability
-    value: Rc<RefCell<T>>,
-    /// Manager for watchers that are interested in changes to the value
-    watchers: WatcherManager<T>,
-}
-
-impl<T> From<T> for Container<T>
-where
-    T: 'static + Clone,
-{
-    #[track_caller]
-    fn from(value: T) -> Self {
-        Self::new(value)
-    }
-}
-
-impl<T: 'static + Clone + Default> Default for Container<T> {
-    #[track_caller]
-    fn default() -> Self {
-        Self::new(T::default())
-    }
-}
-
-impl<T: 'static + Clone> Container<T> {
-    /// Creates a new container with the given value.
-    #[track_caller]
-    pub fn new(value: T) -> Self {
-        let value = Rc::new(RefCell::new(value));
-        let origin = Origin::capture::<Self>(SignalIdentity::from_rc(&value));
-        Self {
-            value,
-            watchers: WatcherManager::with_origin(origin),
-        }
-    }
-}
-
-impl<T: 'static + Clone> Signal for Container<T> {
-    type Output = T;
-    type Guard = BoxWatcherGuard;
-
-    /// Retrieves the current value.
-    fn snapshot(&self) -> Self::Output {
-        self.value.borrow().deref().clone()
-    }
-
-    fn identity(&self) -> Option<SignalIdentity> {
-        Some(SignalIdentity::from_rc(&self.value))
-    }
-
-    /// Registers a watcher to be notified when the value changes.
-    fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
-        Box::new(self.watchers.register_as_guard(watcher))
-    }
-}
-
-impl<T: 'static + Clone> CustomBinding for Container<T> {
-    /// Sets a new value and notifies watchers.
-    fn set(&self, value: T) {
-        self.value.replace(value.clone());
-        if self.watchers.is_empty() {
-            return;
-        }
-        let context = Context::from(value);
-        self.watchers.notify(&context);
+        Self(self.0.clone())
     }
 }
 
@@ -1085,7 +979,15 @@ impl<T: 'static> Signal for Binding<T> {
 
     /// Computes the current value of the binding.
     fn snapshot(&self) -> Self::Output {
-        self.0.compute()
+        self.0.snapshot()
+    }
+
+    /// Forwards to the erased binding. A [`Container`]-backed binding lends
+    /// its value through a refcount bump on the shared `Rc`: mutating it
+    /// inside `f` copies the value for the write and leaves `f` reading the
+    /// old one, so it never panics.
+    fn with_ref<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        self.0.with_ref(f)
     }
 
     fn identity(&self) -> Option<SignalIdentity> {
@@ -1094,7 +996,7 @@ impl<T: 'static> Signal for Binding<T> {
 
     /// Registers a watcher to be notified when the binding's value changes.
     fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
-        Box::new(self.0.add_watcher(Rc::new(watcher)))
+        self.0.watch(Rc::new(watcher))
     }
 }
 
@@ -1173,11 +1075,11 @@ where
     }
 }
 
-// Reduce once heap allocate
+// Reads the binding's vtable header as its signal prefix: no allocation, and
+// a container binding keeps its tagged storage.
 impl<T> From<Binding<T>> for Computed<T> {
     fn from(val: Binding<T>) -> Self {
-        let boxed = val.0 as Box<_>;
-        Self(boxed)
+        Self(val.0.into_signal())
     }
 }
 
@@ -1352,5 +1254,266 @@ mod tests {
             notifications.borrow().is_empty(),
             "Dropping guard without mutation should not notify watchers"
         );
+    }
+
+    // Thin erased storage (water-rs/nami#49): `Binding` is one tagged pointer.
+
+    #[test]
+    fn binding_is_one_pointer_wide() {
+        use core::mem::size_of;
+        assert_eq!(size_of::<Binding<u64>>(), size_of::<usize>());
+        assert_eq!(size_of::<Option<Binding<u64>>>(), size_of::<usize>());
+    }
+
+    #[test]
+    fn a_binding_converted_to_computed_keeps_its_storage() {
+        let (probe, drops) = Probe::new(1_i32);
+        let clones = probe.clones.clone();
+        let custom = Binding::custom(probe);
+        let computed: Computed<i32> = custom.clone().into();
+        assert_eq!(
+            clones.get(),
+            1,
+            "only the explicit binding clone copied the value"
+        );
+        custom.set(3);
+        assert_eq!(
+            computed.snapshot(),
+            1,
+            "the computed owns the cloned instance"
+        );
+        let computed_clone = computed.clone();
+        assert_eq!(
+            clones.get(),
+            2,
+            "cloning the computed runs the custom `Clone`"
+        );
+        assert_eq!(computed_clone.with_ref(|value| *value), 1);
+        drop((custom, computed, computed_clone));
+        assert_eq!(drops.get(), 3, "each node ran drop exactly once");
+
+        let container = binding(5_i32);
+        let computed: Computed<i32> = container.clone().into();
+        assert_eq!(computed.identity(), container.identity());
+        let computed_clone = computed.clone();
+        container.set(6);
+        assert_eq!(
+            computed.snapshot(),
+            6,
+            "a converted container shares its state"
+        );
+        assert_eq!(computed_clone.snapshot(), 6);
+    }
+
+    // `Binding` and `Computed` must keep the auto traits of the boxed trait
+    // objects they replaced: never `Send`, `Sync`, `UnwindSafe` or
+    // `RefUnwindSafe`, always `Unpin`.
+    static_assertions::assert_not_impl_any!(
+        Binding<u64>: Send, Sync, core::panic::UnwindSafe, core::panic::RefUnwindSafe
+    );
+    static_assertions::assert_not_impl_any!(
+        Computed<u64>: Send, Sync, core::panic::UnwindSafe, core::panic::RefUnwindSafe
+    );
+    static_assertions::assert_impl_all!(Binding<u64>: Unpin);
+    static_assertions::assert_impl_all!(Computed<u64>: Unpin);
+
+    /// A `CustomBinding` with its own state that reports every clone and
+    /// drop, so the erased node's `clone`/`drop` operations can be observed.
+    struct Probe<T> {
+        value: alloc::rc::Rc<core::cell::RefCell<T>>,
+        watchers: crate::watcher::WatcherManager<T>,
+        clones: alloc::rc::Rc<core::cell::Cell<usize>>,
+        drops: alloc::rc::Rc<core::cell::Cell<usize>>,
+    }
+
+    impl<T: 'static> Probe<T> {
+        fn new(value: T) -> (Self, alloc::rc::Rc<core::cell::Cell<usize>>) {
+            let drops = alloc::rc::Rc::new(core::cell::Cell::new(0));
+            let probe = Self {
+                value: alloc::rc::Rc::new(core::cell::RefCell::new(value)),
+                watchers: crate::watcher::WatcherManager::new(),
+                clones: alloc::rc::Rc::new(core::cell::Cell::new(0)),
+                drops: drops.clone(),
+            };
+            (probe, drops)
+        }
+    }
+
+    impl<T: Clone + 'static> Clone for Probe<T> {
+        fn clone(&self) -> Self {
+            self.clones.set(self.clones.get() + 1);
+            Self {
+                // The clone owns an independent copy of the state.
+                value: alloc::rc::Rc::new(core::cell::RefCell::new(self.value.borrow().clone())),
+                watchers: crate::watcher::WatcherManager::new(),
+                clones: self.clones.clone(),
+                drops: self.drops.clone(),
+            }
+        }
+    }
+
+    impl<T> Drop for Probe<T> {
+        fn drop(&mut self) {
+            self.drops.set(self.drops.get() + 1);
+        }
+    }
+
+    impl<T: Clone + 'static> Signal for Probe<T> {
+        type Output = T;
+        type Guard = BoxWatcherGuard;
+
+        fn snapshot(&self) -> Self::Output {
+            self.value.borrow().clone()
+        }
+
+        fn watch(&self, watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+            Box::new(self.watchers.register_as_guard(watcher))
+        }
+    }
+
+    impl<T: Clone + 'static> CustomBinding for Probe<T> {
+        fn set(&self, value: T) {
+            self.watchers.notify_owned(Context::from(value.clone()));
+            *self.value.borrow_mut() = value;
+        }
+    }
+
+    #[test]
+    fn erased_custom_binding_dispatches_every_operation() {
+        use alloc::rc::Rc;
+        use core::cell::RefCell;
+
+        let (probe, drops) = Probe::new(1_i32);
+        let clones = probe.clones.clone();
+        let binding: Binding<i32> = Binding::custom(probe);
+
+        assert_eq!(binding.snapshot(), 1);
+        assert_eq!(binding.with_ref(|value| *value), 1);
+        assert!(binding.identity().is_none());
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let guard = binding.watch({
+            let seen = seen.clone();
+            move |ctx| seen.borrow_mut().push(ctx.into_value())
+        });
+        binding.set(9);
+        assert_eq!(*seen.borrow(), vec![9]);
+        assert_eq!(binding.snapshot(), 9);
+        drop(guard);
+        binding.set(4);
+        assert_eq!(*seen.borrow(), vec![9], "a dropped guard unsubscribes");
+
+        drop(binding);
+        assert_eq!(drops.get(), 1, "the node was dropped exactly once");
+        assert_eq!(clones.get(), 0, "nothing cloned the value");
+    }
+
+    #[test]
+    fn cloning_a_custom_binding_gives_an_independent_instance() {
+        let (probe, drops) = Probe::new(1_i32);
+        let clones = probe.clones.clone();
+        let binding: Binding<i32> = Binding::custom(probe);
+        let clone = binding.clone();
+
+        assert_eq!(clones.get(), 1, "clone ran the custom `Clone` once");
+        clone.set(5);
+        assert_eq!(binding.snapshot(), 1, "the clone owns independent state");
+        assert_eq!(clone.snapshot(), 5);
+
+        drop(binding);
+        drop(clone);
+        assert_eq!(drops.get(), 2, "each node ran drop exactly once");
+    }
+
+    #[test]
+    fn container_binding_dispatches_every_operation() {
+        use alloc::rc::Rc;
+        use core::cell::RefCell;
+
+        let binding: Binding<i32> = binding(1);
+        assert_eq!(binding.snapshot(), 1);
+        assert_eq!(binding.with_ref(|value| *value), 1);
+        assert!(
+            binding.identity().is_some(),
+            "a container owns observable state"
+        );
+
+        // Clone is a refcount bump: both handles share the value.
+        let clone = binding.clone();
+        clone.set(7);
+        assert_eq!(binding.snapshot(), 7, "container clones share state");
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let guard = binding.watch({
+            let seen = seen.clone();
+            move |ctx| seen.borrow_mut().push(ctx.into_value())
+        });
+        clone.set(8);
+        assert_eq!(*seen.borrow(), vec![8]);
+        drop(guard);
+        clone.set(9);
+        assert_eq!(*seen.borrow(), vec![8]);
+
+        // `with_mut` edits the container storage in place.
+        binding.with_mut(|value| *value += 10);
+        assert_eq!(clone.snapshot(), 19);
+    }
+
+    /// A `CustomBinding` whose `set` panics.
+    struct PanicSet {
+        drops: alloc::rc::Rc<core::cell::Cell<usize>>,
+    }
+
+    impl Clone for PanicSet {
+        fn clone(&self) -> Self {
+            Self {
+                drops: self.drops.clone(),
+            }
+        }
+    }
+
+    impl Drop for PanicSet {
+        fn drop(&mut self) {
+            self.drops.set(self.drops.get() + 1);
+        }
+    }
+
+    impl Signal for PanicSet {
+        type Output = i32;
+        type Guard = BoxWatcherGuard;
+
+        fn snapshot(&self) -> Self::Output {
+            0
+        }
+
+        fn watch(&self, _watcher: impl Fn(Context<Self::Output>) + 'static) -> Self::Guard {
+            Box::new(())
+        }
+    }
+
+    impl CustomBinding for PanicSet {
+        fn set(&self, _value: i32) {
+            panic!("PanicSet::set");
+        }
+    }
+
+    #[test]
+    fn a_panic_inside_a_custom_binding_method_does_not_leak_or_double_drop() {
+        use alloc::rc::Rc;
+        use core::cell::Cell;
+
+        let drops = Rc::new(Cell::new(0));
+        let binding: Binding<i32> = Binding::custom(PanicSet {
+            drops: drops.clone(),
+        });
+
+        let result = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+            binding.set(1);
+        }));
+        assert!(result.is_err(), "the panic must propagate");
+        assert_eq!(drops.get(), 0, "the node survived the unwind");
+
+        drop(binding);
+        assert_eq!(drops.get(), 1, "drop ran exactly once, after the panic");
     }
 }

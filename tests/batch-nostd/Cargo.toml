@@ -1,0 +1,22 @@
+[package]
+name = "nami-batch-nostd"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Link check for nami's `batch` feature on `no_std` (water-rs/nami#47)."
+
+# A bare-metal binary is a final artifact: building it links nami's batch
+# code path and proves `__nami_batch_state_1_0` resolves — or fails to
+# link when `register-hook` is off and nothing defines the symbol.
+[[bin]]
+name = "nami-batch-nostd"
+path = "src/main.rs"
+
+[dependencies]
+nami = { path = "../..", default-features = false, features = ["batch"] }
+
+[features]
+default = ["register-hook"]
+# Building with `--no-default-features` leaves the hook unregistered, so
+# the link fails — that failure is the point, do not add it to CI.
+register-hook = []

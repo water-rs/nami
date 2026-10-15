@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["core","derive"]
+members = ["core", "derive", "tests/renamed-dependency"]
+# The `no_std` batch-hook link check is a `#![no_main]` bare-metal binary
+# built for thumbv7em only; it cannot join host `cargo test` runs.
+exclude = ["tests/batch-nostd"]
 
 [workspace.package]
 edition = "2024"
@@ -14,13 +17,13 @@ license = "MIT"
 readme = "README.md"
 
 [workspace.dependencies]
-nami = { path = ".", version = "0.12.0" }
-nami-derive = { path = "derive", version = "0.4.0" }
-nami-core = { path = "core", version = "0.4.0", default-features = false }
+nami = { path = ".", version = "0.13.0" }
+nami-derive = { path = "derive", version = "0.5.0" }
+nami-core = { path = "core", version = "0.5.0", default-features = false }
 
 [package]
 name = "nami"
-version = "0.12.0"
+version = "0.13.0"
 edition.workspace = true
 authors.workspace = true
 description = "A powerful, lightweight reactive framework."
@@ -37,16 +40,19 @@ maintenance = { status = "actively-developed" }
 license = { file = "LICENSE" }
 
 [dev-dependencies]
+log = "0.4.33"
 nami-derive = { workspace = true }
 trybuild = "1"
+divan = "0.1"
 # `async_signal`'s timer tests drive spawned runnables through the same
 # channel-drain executor shape the runners use.
 executor-core = { version = "0.7.1", features = ["std", "async-task"] }
+static_assertions = "1.1.0"
 
 [dependencies]
 log = { version = "0.4.33", default-features = true }
 nami-derive = { workspace = true, optional = true}
-futures-core = "0.3.33"
+futures-core = { version = "0.3.33", default-features = false }
 pin-project-lite = "0.2.17"
 executor-core = { version = "0.7.1", default-features = false }
 async-channel = { version = "2.5.0", default-features = false }
@@ -58,6 +64,10 @@ std = ["executor-core/std","nami-core/std"]
 default = ["derive", "timer"]
 timer = ["std","dep:async-io","dep:gloo-timers"]
 derive = ["dep:nami-derive"]
+# Deferred watcher notifications: `nami::batch(|| { ... })` coalesces the
+# writes made inside it into one notification per signal. Without the
+# feature there is no `batch` API and no batch check on the write path.
+batch = []
 # Reactive-graph introspection for development tooling. See `nami_core::observe`.
 observability = ["std", "nami-core/observability"]
 # Constant `Signal` implementations for kurbo's geometry types.
@@ -85,3 +95,7 @@ clippy.multiple_crate_versions =  { level = "allow", priority = 1 }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "notify"
+harness = false

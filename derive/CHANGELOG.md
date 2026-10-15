@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/water-rs/nami/compare/derive-v0.4.0...derive-v0.5.0) - 2026-10-15
+
+### Fixed
+
+- *(project)* name the nami path with `#[project(crate = path)]`, so the derive compiles through a re-export
+- *(project)* document the generated projection struct and its fields
+- *(collection)* [**breaking**] keep diagnostics out of release builds
+- *(s)* resolve the s! expansion through $crate
+
 ## [0.4.0](https://github.com/water-rs/nami/compare/derive-v0.3.1...derive-v0.4.0) - 2026-10-05
 
 ### Added

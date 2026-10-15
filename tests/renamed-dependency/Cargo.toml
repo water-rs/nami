@@ -1,0 +1,14 @@
+[package]
+name = "nami-renamed-dependency"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+description = "Checks that nami's macros work in a crate that cannot name `nami`."
+
+# nami is reachable only as `reactive`, the way an app that depends on a
+# facade crate (`waterui::reactive`) sees it: `::nami` does not resolve here.
+[dependencies]
+reactive = { package = "nami", path = "../.." }
+
+[lints]
+workspace = true

@@ -1,5 +1,6 @@
 //! This crate provides the derive macro for the `nami` crate.
-//! It includes the `Project` derive macro and the `s!` procedural macro.
+//! It includes the `Project` derive macro and `__s!`, the internal
+//! procedural macro behind `nami::s!`.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -39,15 +40,35 @@ use syn::{
 /// assert_eq!(person.name, "Bob");
 /// assert_eq!(person.age, 25);
 /// ```
-#[proc_macro_derive(Project)]
+///
+/// # Crate path
+///
+/// The expansion names nami as `::nami`. A crate that reaches nami through
+/// another path, such as a facade re-export or a renamed dependency, names
+/// that path with `#[project(crate = path)]`:
+///
+/// ```rust,ignore
+/// #[derive(Clone, waterui::reactive::Project)]
+/// #[project(crate = waterui::reactive)]
+/// struct Person {
+///     name: String,
+/// }
+/// ```
+#[proc_macro_derive(Project, attributes(project))]
 pub fn derive_project(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    let krate = match project_crate_path(&input.attrs) {
+        Ok(krate) => krate,
+        Err(error) => return error.to_compile_error().into(),
+    };
 
     match &input.data {
         Data::Struct(data_struct) => match &data_struct.fields {
-            Fields::Named(fields_named) => derive_project_struct(&input, fields_named),
-            Fields::Unnamed(fields_unnamed) => derive_project_tuple_struct(&input, fields_unnamed),
-            Fields::Unit => derive_project_unit_struct(&input),
+            Fields::Named(fields_named) => derive_project_struct(&input, &krate, fields_named),
+            Fields::Unnamed(fields_unnamed) => {
+                derive_project_tuple_struct(&input, &krate, fields_unnamed)
+            }
+            Fields::Unit => derive_project_unit_struct(&input, &krate),
         },
         Data::Enum(_) => {
             syn::Error::new_spanned(input, "Project derive macro does not support enums")
@@ -62,7 +83,30 @@ pub fn derive_project(input: TokenStream) -> TokenStream {
     }
 }
 
-fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> TokenStream {
+/// The path the expansion names nami through: `#[project(crate = path)]`,
+/// or `::nami` when the attribute is absent.
+fn project_crate_path(attrs: &[syn::Attribute]) -> syn::Result<syn::Path> {
+    let mut krate = None;
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("project")) {
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("crate") {
+                return Err(meta.error("expected `crate = path`"));
+            }
+            if krate.is_some() {
+                return Err(meta.error("duplicate `crate` argument"));
+            }
+            krate = Some(meta.value()?.parse::<syn::Path>()?);
+            Ok(())
+        })?;
+    }
+    Ok(krate.unwrap_or_else(|| syn::parse_quote!(::nami)))
+}
+
+fn derive_project_struct(
+    input: &DeriveInput,
+    krate: &syn::Path,
+    fields: &syn::FieldsNamed,
+) -> TokenStream {
     let struct_name = &input.ident;
     let (_impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -74,8 +118,13 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
     let projected_fields = fields.named.iter().map(|field| {
         let field_name = &field.ident;
         let field_type = &field.ty;
+        let doc = format!(
+            "Binding to `{struct_name}::{}`.",
+            field_name.as_ref().expect("named field")
+        );
         quote! {
-            pub #field_name: ::nami::Binding<#field_type>
+            #[doc = #doc]
+            pub #field_name: #krate::Binding<#field_type>
         }
     });
 
@@ -85,7 +134,7 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
         quote! {
             #field_name: {
                 let source = source.clone();
-                ::nami::Binding::mapping(
+                #krate::Binding::mapping(
                     &source,
                     |value| value.#field_name.clone(),
                     move |binding, value| {
@@ -107,17 +156,18 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
     }
     let (impl_generics_with_static, _, _) = generics_with_static.split_for_impl();
 
+    let projected_doc = format!("Projection of `{struct_name}`: one `Binding` per field.");
     let expanded = quote! {
-        /// Projected version of #struct_name with each field wrapped in a Binding.
+        #[doc = #projected_doc]
         #[derive(Debug)]
         pub struct #projected_struct_name #ty_generics #where_clause {
             #(#projected_fields,)*
         }
 
-        impl #impl_generics_with_static ::nami::project::Project for #struct_name #ty_generics #where_clause {
+        impl #impl_generics_with_static #krate::project::Project for #struct_name #ty_generics #where_clause {
             type Projected = #projected_struct_name #ty_generics;
 
-            fn project(source: &::nami::Binding<Self>) -> Self::Projected {
+            fn project(source: &#krate::Binding<Self>) -> Self::Projected {
                 #projected_struct_name {
                     #(#field_projections,)*
                 }
@@ -128,16 +178,20 @@ fn derive_project_struct(input: &DeriveInput, fields: &syn::FieldsNamed) -> Toke
     TokenStream::from(expanded)
 }
 
-fn derive_project_tuple_struct(input: &DeriveInput, fields: &syn::FieldsUnnamed) -> TokenStream {
+fn derive_project_tuple_struct(
+    input: &DeriveInput,
+    krate: &syn::Path,
+    fields: &syn::FieldsUnnamed,
+) -> TokenStream {
     let struct_name = &input.ident;
     let (_impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     // Generate tuple type for projection
     let field_types: Vec<&Type> = fields.unnamed.iter().map(|field| &field.ty).collect();
     let projected_tuple = if field_types.len() == 1 {
-        quote! { (::nami::Binding<#(#field_types)*>,) }
+        quote! { (#krate::Binding<#(#field_types)*>,) }
     } else {
-        quote! { (#(::nami::Binding<#field_types>),*) }
+        quote! { (#(#krate::Binding<#field_types>),*) }
     };
 
     // Generate field projections using index access
@@ -146,7 +200,7 @@ fn derive_project_tuple_struct(input: &DeriveInput, fields: &syn::FieldsUnnamed)
         quote! {
             {
                 let source = source.clone();
-                ::nami::Binding::mapping(
+                #krate::Binding::mapping(
                     &source,
                     |value| value.#idx.clone(),
                     move |binding, value| {
@@ -175,10 +229,10 @@ fn derive_project_tuple_struct(input: &DeriveInput, fields: &syn::FieldsUnnamed)
     };
 
     let expanded = quote! {
-        impl #impl_generics_with_static ::nami::project::Project for #struct_name #ty_generics #where_clause {
+        impl #impl_generics_with_static #krate::project::Project for #struct_name #ty_generics #where_clause {
             type Projected = #projected_tuple;
 
-            fn project(source: &::nami::Binding<Self>) -> Self::Projected {
+            fn project(source: &#krate::Binding<Self>) -> Self::Projected {
                 #projection_tuple
             }
         }
@@ -187,7 +241,7 @@ fn derive_project_tuple_struct(input: &DeriveInput, fields: &syn::FieldsUnnamed)
     TokenStream::from(expanded)
 }
 
-fn derive_project_unit_struct(input: &DeriveInput) -> TokenStream {
+fn derive_project_unit_struct(input: &DeriveInput, krate: &syn::Path) -> TokenStream {
     let struct_name = &input.ident;
     let (_impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -201,12 +255,10 @@ fn derive_project_unit_struct(input: &DeriveInput) -> TokenStream {
     let (impl_generics_with_static, _, _) = generics_with_static.split_for_impl();
 
     let expanded = quote! {
-        impl #impl_generics_with_static ::nami::project::Project for #struct_name #ty_generics #where_clause {
+        impl #impl_generics_with_static #krate::project::Project for #struct_name #ty_generics #where_clause {
             type Projected = ();
 
-            fn project(_source: &::nami::Binding<Self>) -> Self::Projected {
-                ()
-            }
+            fn project(_source: &#krate::Binding<Self>) -> Self::Projected {}
         }
     };
 
@@ -239,12 +291,29 @@ impl Parse for SArg {
 
 /// Input structure for the `s!` macro
 struct SInput {
+    /// Path to the `nami` crate the expansion names.
+    krate: TokenStream2,
     format_str: LitStr,
     args: Punctuated<SArg, Token![,]>,
 }
 
 impl Parse for SInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        // `nami::s!` forwards here as `__s!($crate; ...)`, so the expansion
+        // resolves through whatever path reached nami (for example
+        // `waterui::reactive`). The prefix is required: calling this proc
+        // macro directly is not supported.
+        if input.peek(LitStr) {
+            return Err(input.error(
+                "expected `<crate path>;` before the format string: `__s!` is internal, \
+                 call `nami::s!` instead",
+            ));
+        }
+        let mut krate = TokenStream2::new();
+        while !input.peek(Token![;]) {
+            krate.extend(core::iter::once(input.parse::<proc_macro2::TokenTree>()?));
+        }
+        input.parse::<Token![;]>()?;
         let format_str: LitStr = input.parse()?;
         let args = if input.peek(Token![,]) {
             input.parse::<Token![,]>()?;
@@ -252,7 +321,11 @@ impl Parse for SInput {
         } else {
             Punctuated::new()
         };
-        Ok(Self { format_str, args })
+        Ok(Self {
+            krate,
+            format_str,
+            args,
+        })
     }
 }
 
@@ -272,29 +345,12 @@ struct ZipEntry {
     name: syn::Ident,
 }
 
-/// Function-like procedural macro for creating formatted string signals with automatic variable capture.
-///
-/// This macro automatically detects named variables in format strings and captures them from scope.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// use nami::*;
-///
-/// let name = constant("Alice");
-/// let age = constant(25);
-///
-/// // Automatic variable capture from format string
-/// let msg = s!("Hello {name}, you are {age} years old");
-///
-/// // Positional arguments still work
-/// let msg2 = s!("Hello {}, you are {}", name, age);
-///
-/// // Named arguments with automatic cloning (like println!)
-/// let msg3 = s!("Hello {n}, you are {a} years old", n = name, a = age);
-/// ```
+/// Internal implementation of `nami::s!`; `nami::s!` forwards to it as
+/// `__s!($crate; ...)` with the path the caller reached nami through.
+/// Calling this proc macro directly is not supported.
+#[doc(hidden)]
 #[proc_macro]
-pub fn s(input: TokenStream) -> TokenStream {
+pub fn __s(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as SInput);
     match expand_s(input) {
         Ok(tokens) => tokens.into(),
@@ -304,6 +360,7 @@ pub fn s(input: TokenStream) -> TokenStream {
 
 /// Main expansion logic for the `s!` macro, returning a `syn::Result` for clean error handling.
 fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
+    let krate = &input.krate;
     let format_str = input.format_str;
     let analysis = analyze_format_string(&format_str.value());
 
@@ -326,11 +383,11 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
         let entries: Vec<ZipEntry> = named_args
             .iter()
             .map(|(name, expr)| ZipEntry {
-                zip_expr: quote! { ::nami::__alloc::borrow::ToOwned::to_owned(#expr) },
+                zip_expr: quote! { #krate::__alloc::borrow::ToOwned::to_owned(#expr) },
                 name: (*name).clone(),
             })
             .collect();
-        Ok(generate_s_code(&format_str, &entries, &[]))
+        Ok(generate_s_code(krate, &format_str, &entries, &[]))
     } else if !positional_args.is_empty() {
         // Positional argument mode: `s!("{} {}", a, b)`
         let entries: Vec<ZipEntry> = positional_args
@@ -345,13 +402,12 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
             })
             .collect();
         let format_extra: Vec<syn::Ident> = entries.iter().map(|e| e.name.clone()).collect();
-        Ok(generate_s_code(&format_str, &entries, &format_extra))
+        Ok(generate_s_code(krate, &format_str, &entries, &format_extra))
     } else if analysis.named_vars.is_empty() {
         // Constant string, no placeholders
         Ok(quote! {
             {
-                use ::nami::constant;
-                constant(::nami::__alloc::format!(#format_str))
+                #krate::constant(#krate::__alloc::format!(#format_str))
             }
         })
     } else {
@@ -368,7 +424,7 @@ fn expand_s(input: SInput) -> syn::Result<TokenStream2> {
                 name: ident.clone(),
             })
             .collect();
-        Ok(generate_s_code(&format_str, &entries, &[]))
+        Ok(generate_s_code(krate, &format_str, &entries, &[]))
     }
 }
 
@@ -475,7 +531,7 @@ fn validate_s_input(
 ///
 /// Splits left-heavy (left gets `ceil(n/2)` elements) to match the existing
 /// shape for 3 args: `zip(zip(a, b), c)`.
-fn build_zip_tree(exprs: &[&TokenStream2]) -> TokenStream2 {
+fn build_zip_tree(krate: &TokenStream2, exprs: &[&TokenStream2]) -> TokenStream2 {
     match exprs.len() {
         0 => unreachable!("build_zip_tree called with 0 expressions"),
         1 => {
@@ -484,9 +540,9 @@ fn build_zip_tree(exprs: &[&TokenStream2]) -> TokenStream2 {
         }
         _ => {
             let mid = exprs.len().div_ceil(2);
-            let left = build_zip_tree(&exprs[..mid]);
-            let right = build_zip_tree(&exprs[mid..]);
-            quote! { ::nami::zip::zip(#left, #right) }
+            let left = build_zip_tree(krate, &exprs[..mid]);
+            let right = build_zip_tree(krate, &exprs[mid..]);
+            quote! { #krate::zip::zip(#left, #right) }
         }
     }
 }
@@ -517,6 +573,7 @@ fn build_destructure_pattern(names: &[&syn::Ident]) -> TokenStream2 {
 /// `format_extra_args` are passed as extra arguments to `format!()` after the
 /// format string (used only for positional mode where format placeholders are `{}`).
 fn generate_s_code(
+    krate: &TokenStream2,
     format_str: &LitStr,
     entries: &[ZipEntry],
     format_extra_args: &[syn::Ident],
@@ -527,9 +584,9 @@ fn generate_s_code(
 
     // Build the format!() call — with or without extra positional args
     let format_call = if format_extra_args.is_empty() {
-        quote! { ::nami::__alloc::format!(#format_str) }
+        quote! { #krate::__alloc::format!(#format_str) }
     } else {
-        quote! { ::nami::__alloc::format!(#format_str, #(#format_extra_args),*) }
+        quote! { #krate::__alloc::format!(#format_str, #(#format_extra_args),*) }
     };
 
     if entries.len() == 1 {
@@ -538,7 +595,7 @@ fn generate_s_code(
         let name = &entries[0].name;
         quote! {
             {
-                use ::nami::SignalExt;
+                use #krate::SignalExt as _;
                 (#zip_expr).map(|#name| #format_call)
             }
         }
@@ -547,12 +604,12 @@ fn generate_s_code(
         let zip_exprs: Vec<&TokenStream2> = entries.iter().map(|e| &e.zip_expr).collect();
         let name_refs: Vec<&syn::Ident> = names.clone();
 
-        let zip_tree = build_zip_tree(&zip_exprs);
+        let zip_tree = build_zip_tree(krate, &zip_exprs);
         let pattern = build_destructure_pattern(&name_refs);
 
         quote! {
             {
-                use ::nami::{SignalExt, zip::zip};
+                use #krate::SignalExt as _;
                 #zip_tree.map(|#pattern| #format_call)
             }
         }

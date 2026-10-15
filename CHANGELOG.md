@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0](https://github.com/water-rs/nami/compare/v0.12.0...v0.13.0) - 2026-10-15
+
+### Added
+
+- *(batch)* coalesce watcher notifications with nami::batch
+- *(signal)* add Signal::with_ref, a borrowing read
+- *(collection)* [**breaking**] rename Collection::len to count, drop is_empty, add with_range
+- *(collection)* [**breaking**] List mutators take &mut self; warn on reentrant mutation
+- *(collection)* [**breaking**] notify collection watchers only on actual changes
+- *(collection)* [**breaking**] give Collection its own Id type; index ids for immutable sequences
+- *(collection)* [**breaking**] pass collection watchers a borrowed slice
+- *(collection)* [**breaking**] let collection watcher guards move their range in place
+- *(collection)* [**breaking**] identify items through Identifiable instead of an identity parameter
+- *(list)* [**breaking**] accept any identity in List::new and default to ByIndex
+- *(collection)* [**breaking**] identify items by id and report changes by id
+
+### Fixed
+
+- *(project)* name the nami path with `#[project(crate = path)]`, so the derive compiles through a re-export
+- *(project)* document the generated projection struct and its fields
+- *(collection)* [**breaking**] keep diagnostics out of release builds
+- *(collection)* flag duplicate ids across the whole snapshot
+- *(list)* drop the redundant must_use on iter
+- *(s)* resolve the s! expansion through $crate
+
+### Other
+
+- *(binding)* [**breaking**] make Binding and Computed one pointer wide
+- *(binding)* lend Container values without cloning
+- *(watcher)* divan notify benches and extra zero-alloc tests (part of #39)
+- *(collection)* compute ids lazily and match small middles linearly
+- *(collection)* criterion benchmarks for the id diff
+- *(collection)* fix shadowing test bindings
+- *(collection)* [**breaking**] rename Collection::get/id to get_item/get_id
+- *(collection)* drop redundant clone in with_range test
+- *(collection)* update copy-on-write note for borrowed watchers
+- *(collection)* [**breaking**] make Collection::id a required method
+- build nami and nami-core for a bare-metal target in CI
+- *(watcher)* allocation-free notify path
+- pass the release pull request's gate without CI
+
 ## [0.12.0](https://github.com/water-rs/nami/compare/v0.11.2...v0.12.0) - 2026-10-05
 
 ### Added

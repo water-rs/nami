@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/water-rs/nami/compare/core-v0.4.0...core-v0.5.0) - 2026-10-15
+
+### Added
+
+- *(batch)* coalesce watcher notifications with nami::batch
+- *(collection)* compose a sequence of changes with ChangeLog
+- *(signal)* add Signal::with_ref, a borrowing read
+- *(collection)* [**breaking**] rename Collection::len to count, drop is_empty, add with_range
+- *(collection)* [**breaking**] List mutators take &mut self; warn on reentrant mutation
+- *(collection)* [**breaking**] notify collection watchers only on actual changes
+- *(collection)* [**breaking**] give Collection its own Id type; index ids for immutable sequences
+- *(collection)* [**breaking**] pass collection watchers a borrowed slice
+- *(collection)* [**breaking**] let collection watcher guards move their range in place
+- *(collection)* [**breaking**] identify items through Identifiable instead of an identity parameter
+- *(collection)* [**breaking**] identify items by id and report changes by id
+
+### Fixed
+
+- *(watcher)* [**breaking**] deliver reentrant notifications in order
+- *(collection)* [**breaking**] keep diagnostics out of release builds
+- *(collection)* flag duplicate ids across the whole snapshot
+- *(s)* resolve the s! expansion through $crate
+
+### Other
+
+- *(collection)* compute ids lazily and match small middles linearly
+- *(collection)* criterion benchmarks for the id diff
+- *(collection)* [**breaking**] rename Collection::get/id to get_item/get_id
+- *(collection)* [**breaking**] make Collection::id a required method
+- *(watcher)* allocation-free notify path
+
 ## [0.4.0](https://github.com/water-rs/nami/compare/core-v0.3.3...core-v0.4.0) - 2026-10-05
 
 ### Added

@@ -67,7 +67,7 @@ where
 }
 
 /// Blanket implementation of `IntoComputed` for any type that implements `IntoSignal`.
-impl<C, Output> IntoComputed<Output> for C
+impl<C, Output: 'static> IntoComputed<Output> for C
 where
     C: IntoSignal<Output> + 'static,
     C::Signal: Clone + 'static,
@@ -114,6 +114,10 @@ impl<C: Signal, T: Clone + 'static> Signal for WithMetadata<C, T> {
     /// Execute the underlying computation.
     fn snapshot(&self) -> Self::Output {
         self.signal.snapshot()
+    }
+
+    fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+        self.signal.with_ref(f)
     }
 
     fn identity(&self) -> Option<SignalIdentity> {

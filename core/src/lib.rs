@@ -109,8 +109,12 @@ impl Hasher for IdentityDiscriminatorHasher {
 /// Collection types for Nami.
 pub mod collection;
 pub mod dictionary;
+pub mod id;
 pub mod observe;
 pub mod watcher;
+
+pub use id::{Identifiable, IdentifiableExt, SelfId, UseId};
+
 /// The core trait for reactive system.
 ///
 /// Types implementing `Signal` represent a computation that can produce a value
@@ -134,6 +138,20 @@ pub trait Signal: Clone + 'static {
     /// read-modify-write goes through `set`, `get_mut`, `with_mut` and
     /// friends on `Binding`.
     fn snapshot(&self) -> Self::Output;
+
+    /// Lends the current value to `f`, untracked like [`Self::snapshot`].
+    ///
+    /// The default takes a [`snapshot`](Self::snapshot). Signals that store
+    /// their value immutably (constants), share it copy-on-write (`Binding`),
+    /// or forward to one of those (`Computed`) lend it without copying, and a
+    /// mutation made inside `f` still never panics: copy-on-write storage
+    /// leaves `f` reading the value it was lent. Signals that recompute
+    /// (maps, zips) keep the snapshot.
+    ///
+    /// Named `with_ref` because `SignalExt::with` already attaches metadata.
+    fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+        f(&self.snapshot())
+    }
 
     /// Returns the stable semantic identity of this signal, when one exists.
     ///
@@ -177,6 +195,10 @@ macro_rules! impl_constant {
                     self.clone()
                 }
 
+                fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+                    f(self)
+                }
+
                 fn watch(
                     &self,
                     _watcher: impl Fn($crate::watcher::Context<Self::Output>)+'static,
@@ -199,6 +221,10 @@ macro_rules! impl_generic_constant {
 
                 fn snapshot(&self) -> Self::Output {
                     self.clone()
+                }
+
+                fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+                    f(self)
                 }
 
                 fn watch(
@@ -253,6 +279,9 @@ mod impl_constant {
         fn snapshot(&self) -> Self::Output {
             self
         }
+        fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+            f(self)
+        }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
     }
 
@@ -264,6 +293,9 @@ mod impl_constant {
         type Guard = ();
         fn snapshot(&self) -> Self::Output {
             self.clone()
+        }
+        fn with_ref<R>(&self, f: impl FnOnce(&Self::Output) -> R) -> R {
+            f(self)
         }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
     }
@@ -311,7 +343,7 @@ mod impl_kurbo_constant {
         fn plain_affine_is_a_constant_signal() {
             let affine = Affine::translate((1.0, 2.0));
             assert_eq!(affine.snapshot(), affine);
-            affine.watch(|_| unreachable!("a constant never notifies"));
+            let () = affine.watch(|_| unreachable!("a constant never notifies"));
         }
     }
 }
