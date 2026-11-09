@@ -18,7 +18,7 @@ mod support;
 pub use async_signal::{debounce, throttle};
 pub use async_signal::{future, stream};
 pub use data::{collection, project};
-pub use reactive_core::{binding, cache, constant, distinct, map, signal, zip};
+pub use reactive_core::{binding, cache, constant, distinct, map, scan, signal, zip};
 pub use support::{debug, utils};
 
 #[doc(inline)]
