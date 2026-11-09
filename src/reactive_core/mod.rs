@@ -7,6 +7,7 @@ pub mod distinct;
 pub mod erased;
 mod ext;
 pub mod map;
+pub mod scan;
 pub mod signal;
 pub mod zip;
 
