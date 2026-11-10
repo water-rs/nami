@@ -29,7 +29,7 @@ use alloc::rc::Rc;
 
 use crate::{
     Signal, SignalIdentity,
-    watcher::{Context, WatcherManager, WatcherManagerGuard},
+    watcher::{Context, WatcherGuard, WatcherManager, WatcherManagerGuard},
 };
 
 /// The result cache and watcher list shared by every clone of a [`Scan`].
@@ -43,7 +43,8 @@ struct Shared<Output> {
 ///
 /// Created by [`SignalExt::scan`](crate::SignalExt::scan). Clones share the
 /// state, the cached result and the single upstream watch, which lives as long
-/// as any clone does; dropping the last clone stops the step.
+/// as any clone or any watch guard does; dropping the last of them stops the
+/// step.
 pub struct Scan<Output> {
     shared: Rc<Shared<Output>>,
     upstream: Rc<dyn Any>,
@@ -103,9 +104,28 @@ impl<Output: Clone + 'static> Scan<Output> {
     }
 }
 
+/// The guard of a [`Scan`] watch. It holds the scan's upstream watch as well
+/// as the watcher registration, so a caller that keeps only the guard still
+/// receives every step's result.
+///
+/// The watcher registration drops first, then the upstream handle.
+#[must_use]
+pub struct ScanGuard<Output: 'static> {
+    _watcher: WatcherManagerGuard<Output>,
+    _upstream: Rc<dyn Any>,
+}
+
+impl<Output: 'static> WatcherGuard for ScanGuard<Output> {}
+
+impl<Output: 'static> core::fmt::Debug for ScanGuard<Output> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ScanGuard").finish_non_exhaustive()
+    }
+}
+
 impl<Output: Clone + 'static> Signal for Scan<Output> {
     type Output = Output;
-    type Guard = WatcherManagerGuard<Output>;
+    type Guard = ScanGuard<Output>;
 
     /// Returns the cached result of the latest step without running it.
     fn snapshot(&self) -> Output {
@@ -121,7 +141,10 @@ impl<Output: Clone + 'static> Signal for Scan<Output> {
     }
 
     fn watch(&self, watcher: impl Fn(Context<Output>) + 'static) -> Self::Guard {
-        self.shared.watchers.register_as_guard(watcher)
+        ScanGuard {
+            _watcher: self.shared.watchers.register_as_guard(watcher),
+            _upstream: self.upstream.clone(),
+        }
     }
 }
 
@@ -231,6 +254,28 @@ mod tests {
 
         source.set(2);
         assert_eq!(*received.borrow(), Some(Some(Tag(7))));
+    }
+
+    #[test]
+    fn a_watch_keeps_the_upstream_alive_after_every_scan_drops() {
+        let source = binding(1);
+        let (scan, runs) = counting_scan(&source);
+        let received = Rc::new(RefCell::new(Vec::new()));
+        let sink = received.clone();
+        // `map` borrows nothing from `scan` once watched: only the guard is
+        // retained, as a consumer that keeps just `watch`'s return does.
+        let guard = scan
+            .map(|total| total * 10)
+            .watch(move |context| sink.borrow_mut().push(context.into_value()));
+        drop(scan);
+
+        source.set(2);
+        assert_eq!(runs.get(), 2, "the watch keeps the upstream watch alive");
+        assert_eq!(&*received.borrow(), &[30]);
+
+        drop(guard);
+        source.set(3);
+        assert_eq!(runs.get(), 2, "no watch or clone left, so the step stops");
     }
 
     #[test]
