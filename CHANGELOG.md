@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1](https://github.com/water-rs/nami/compare/v0.13.0...v0.13.1) - 2026-11-13
+
+### Added
+
+- add the scan combinator for stateful once-per-change steps
+
+### Fixed
+
+- *(signal)* keep a Scan's upstream watch alive for as long as any watch
+
+### Other
+
+- release from main and retire dev
+- drop the typos check
+
 ## [0.13.0](https://github.com/water-rs/nami/compare/v0.12.0...v0.13.0) - 2026-10-15
 
 ### Added
