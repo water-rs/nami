@@ -1,5 +1,6 @@
 use crate::{
-    Computed, Signal, cache::Cached, distinct::Distinct, map::Map, signal::WithMetadata, zip::Zip,
+    Computed, Signal, cache::Cached, distinct::Distinct, map::Map, scan::Scan,
+    signal::WithMetadata, zip::Zip,
 };
 use alloc::string::String;
 use num_traits::{Signed, Zero};
@@ -26,6 +27,21 @@ pub trait SignalExt: Signal {
         Self: 'static,
     {
         Map::new(self.clone(), f)
+    }
+
+    /// Folds this signal's changes through a stateful step.
+    ///
+    /// `f` runs once on the current value, then exactly once per change, in
+    /// order, with `state` threaded through; its result is cached and shared
+    /// by every reader and clone of the returned signal. `snapshot` returns
+    /// the cached result and never runs `f`.
+    fn scan<S, F, Output>(&self, state: S, f: F) -> Scan<Output>
+    where
+        S: 'static,
+        F: FnMut(&mut S, Self::Output) -> Output + 'static,
+        Output: Clone + 'static,
+    {
+        Scan::new(self, state, f)
     }
 
     /// Combines this signal with another signal into a tuple.

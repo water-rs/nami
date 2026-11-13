@@ -6,7 +6,7 @@ permissions:
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: ["**"]
 
@@ -21,8 +21,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  bump:
+    # release-plz bump pull requests (`release-plz-*` heads) change only
+    # versions and the changelog, so this job skips itself and every other
+    # job skips through `needs: bump`.
+    name: Not a release bump
+    if: ${{ !startsWith(github.head_ref, 'release-plz-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} is not a release bump"
+
   lint:
     name: Lint
+    needs: bump
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +48,7 @@ jobs:
 
   wasm:
     name: WASM
+    needs: bump
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +62,7 @@ jobs:
 
   embedded:
     name: Embedded
+    needs: bump
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +83,7 @@ jobs:
 
   coverage:
     name: Coverage
+    needs: bump
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,18 +101,9 @@ jobs:
           use_oidc: true
           fail_ci_if_error: true
 
-  typos:
-    name: Typos
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-ubuntu
-      - uses: crate-ci/typos@master
-
   audit:
       name: Security Audit
+      needs: bump
       runs-on: ubuntu-latest
       steps:
         - uses: actions/checkout@v4
@@ -113,6 +118,7 @@ jobs:
 
   unused-deps:
     name: Unused Dependencies
+    needs: bump
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -125,6 +131,7 @@ jobs:
 
   feature-checks:
     name: Features
+    needs: bump
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,4 +145,24 @@ jobs:
 
   test:
     name: Test
+    needs: bump
     uses: ./.github/workflows/test.yml
+
+  result:
+    # The single check the `main` ruleset requires: it passes when every
+    # job passed or was skipped (release-plz bump pull requests skip all).
+    name: CI result
+    if: always()
+    needs: [bump, lint, wasm, embedded, coverage, audit, unused-deps, feature-checks, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        env:
+          RESULTS: ${{ join(needs.*.result, ', ') }}
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "job results: $RESULTS"
+          if [ "$FAILED" = "true" ]; then
+            echo "::error::one or more jobs failed or were cancelled"
+            exit 1
+          fi
