@@ -69,7 +69,10 @@ pub trait FlattenMap<F, T, Output>: Signal {
     /// # Returns
     /// A new computation that produces the result of applying `f` to the flattened elements.
     #[track_caller]
-    fn flatten_map(&self, f: F) -> Map<Self, impl Clone + Fn(Self::Output) -> Output, Output>;
+    fn flatten_map(
+        &self,
+        f: F,
+    ) -> Map<Self, impl use<Self, F, T, Output> + Clone + Fn(Self::Output) -> Output, Output>;
 }
 
 /// Implementation for flattening and mapping a tuple of two elements.
@@ -82,7 +85,10 @@ where
     Output: 'static,
 {
     #[track_caller]
-    fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn((T1, T2)) -> Output, Output> {
+    fn flatten_map(
+        &self,
+        f: F,
+    ) -> Map<C, impl use<C, F, T1, T2, Output> + Clone + Fn((T1, T2)) -> Output, Output> {
         Map::new(self.clone(), move |(t1, t2)| f(t1, t2))
     }
 }
@@ -95,7 +101,11 @@ where
     Output: 'static,
 {
     #[track_caller]
-    fn flatten_map(&self, f: F) -> Map<C, impl Clone + Fn(((T1, T2), T3)) -> Output, Output> {
+    fn flatten_map(
+        &self,
+        f: F,
+    ) -> Map<C, impl use<C, F, T1, T2, T3, Output> + Clone + Fn(((T1, T2), T3)) -> Output, Output>
+    {
         Map::new(self.clone(), move |((t1, t2), t3)| f(t1, t2, t3))
     }
 }

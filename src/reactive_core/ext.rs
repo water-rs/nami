@@ -96,7 +96,11 @@ pub trait SignalExt: Signal {
     fn inspect<F>(
         &self,
         f: F,
-    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> Self::Output, Self::Output>
+    ) -> Map<
+        Self,
+        impl use<Self, F> + 'static + Clone + Fn(Self::Output) -> Self::Output,
+        Self::Output,
+    >
     where
         Self: 'static,
         Self::Output: Clone + 'static,
@@ -125,7 +129,7 @@ pub trait SignalExt: Signal {
     fn equal_to(
         &self,
         other: Self::Output,
-    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    ) -> Map<Self, impl use<Self> + 'static + Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         Self::Output: Clone + PartialEq + 'static,
@@ -138,7 +142,7 @@ pub trait SignalExt: Signal {
     fn condition<F>(
         &self,
         predicate: F,
-    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    ) -> Map<Self, impl use<Self, F> + 'static + Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         F: 'static + Clone + Fn(&Self::Output) -> bool,
@@ -151,7 +155,7 @@ pub trait SignalExt: Signal {
     fn gt(
         &self,
         other: Self::Output,
-    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    ) -> Map<Self, impl use<Self> + 'static + Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         Self::Output: Clone + PartialOrd + 'static,
@@ -164,7 +168,7 @@ pub trait SignalExt: Signal {
     fn lt(
         &self,
         other: Self::Output,
-    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    ) -> Map<Self, impl use<Self> + 'static + Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         Self::Output: Clone + PartialOrd + 'static,
@@ -177,7 +181,7 @@ pub trait SignalExt: Signal {
     fn ge(
         &self,
         other: Self::Output,
-    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    ) -> Map<Self, impl use<Self> + 'static + Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         Self::Output: Clone + PartialOrd + 'static,
@@ -190,7 +194,7 @@ pub trait SignalExt: Signal {
     fn le(
         &self,
         other: Self::Output,
-    ) -> Map<Self, impl 'static + Clone + Fn(Self::Output) -> bool, bool>
+    ) -> Map<Self, impl use<Self> + 'static + Clone + Fn(Self::Output) -> bool, bool>
     where
         Self: 'static,
         Self::Output: Clone + PartialOrd + 'static,
@@ -224,7 +228,10 @@ pub trait SignalExt: Signal {
 
     /// Returns the contained value or a default.
     #[track_caller]
-    fn unwrap_or<T>(&self, default: T) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> T, T>
+    fn unwrap_or<T>(
+        &self,
+        default: T,
+    ) -> Map<Self, impl use<Self, T> + 'static + Clone + Fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: Clone + 'static,
@@ -239,7 +246,7 @@ pub trait SignalExt: Signal {
     fn unwrap_or_else<T, F>(
         &self,
         default: F,
-    ) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> T, T>
+    ) -> Map<Self, impl use<Self, T, F> + 'static + Clone + Fn(Option<T>) -> T, T>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
@@ -263,7 +270,7 @@ pub trait SignalExt: Signal {
     fn some_equal_to<T>(
         &self,
         value: T,
-    ) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> bool, bool>
+    ) -> Map<Self, impl use<Self, T> + 'static + Clone + Fn(Option<T>) -> bool, bool>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: Clone + PartialEq + 'static,
@@ -289,7 +296,7 @@ pub trait SignalExt: Signal {
     fn map_some<T, U, F>(
         &self,
         f: F,
-    ) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> Option<U>, Option<U>>
+    ) -> Map<Self, impl use<Self, T, U, F> + 'static + Clone + Fn(Option<T>) -> Option<U>, Option<U>>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
@@ -304,7 +311,7 @@ pub trait SignalExt: Signal {
     fn and_then_some<T, U, F>(
         &self,
         f: F,
-    ) -> Map<Self, impl 'static + Clone + Fn(Option<T>) -> Option<U>, Option<U>>
+    ) -> Map<Self, impl use<Self, T, U, F> + 'static + Clone + Fn(Option<T>) -> Option<U>, Option<U>>
     where
         Self: Signal<Output = Option<T>> + 'static,
         T: 'static,
@@ -350,7 +357,7 @@ pub trait SignalExt: Signal {
     fn then_some<T>(
         &self,
         value: T,
-    ) -> Map<Self, impl 'static + Clone + Fn(bool) -> Option<T>, Option<T>>
+    ) -> Map<Self, impl use<Self, T> + 'static + Clone + Fn(bool) -> Option<T>, Option<T>>
     where
         Self: Signal<Output = bool> + 'static,
         T: Clone + 'static,
@@ -364,7 +371,7 @@ pub trait SignalExt: Signal {
         &self,
         if_true: T,
         if_false: T,
-    ) -> Map<Self, impl 'static + Clone + Fn(bool) -> T, T>
+    ) -> Map<Self, impl use<Self, T> + 'static + Clone + Fn(bool) -> T, T>
     where
         Self: Signal<Output = bool> + 'static,
         T: Clone + 'static,
@@ -494,7 +501,7 @@ pub trait SignalExt: Signal {
     fn unwrap_or_result<T, E>(
         &self,
         default: T,
-    ) -> Map<Self, impl 'static + Clone + Fn(Result<T, E>) -> T, T>
+    ) -> Map<Self, impl use<Self, T, E> + 'static + Clone + Fn(Result<T, E>) -> T, T>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: Clone + 'static,
@@ -508,7 +515,7 @@ pub trait SignalExt: Signal {
     fn unwrap_or_else_result<T, E, F>(
         &self,
         f: F,
-    ) -> Map<Self, impl 'static + Clone + Fn(Result<T, E>) -> T, T>
+    ) -> Map<Self, impl use<Self, T, E, F> + 'static + Clone + Fn(Result<T, E>) -> T, T>
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -524,7 +531,11 @@ pub trait SignalExt: Signal {
     fn map_ok<T, E, U, F>(
         &self,
         f: F,
-    ) -> Map<Self, impl 'static + Clone + Fn(Result<T, E>) -> Result<U, E>, Result<U, E>>
+    ) -> Map<
+        Self,
+        impl use<Self, T, E, U, F> + 'static + Clone + Fn(Result<T, E>) -> Result<U, E>,
+        Result<U, E>,
+    >
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -541,7 +552,11 @@ pub trait SignalExt: Signal {
     fn map_err<T, E, F, U>(
         &self,
         f: F,
-    ) -> Map<Self, impl 'static + Clone + Fn(Result<T, E>) -> Result<T, U>, Result<T, U>>
+    ) -> Map<
+        Self,
+        impl use<Self, T, E, F, U> + 'static + Clone + Fn(Result<T, E>) -> Result<T, U>,
+        Result<T, U>,
+    >
     where
         Self: Signal<Output = Result<T, E>> + 'static,
         T: 'static,
@@ -612,13 +627,14 @@ pub trait SignalExt: Signal {
     /// Named `str_` for the reason given on [`SignalExt::str_is_empty`]: a bare
     /// `contains` here shadows `<[T]>::contains` on any `Vec<T>` in scope.
     #[track_caller]
-    fn str_contains<T>(
+    fn str_contains<T, P>(
         &self,
-        pattern: impl Into<String>,
-    ) -> Map<Self, impl 'static + Clone + Fn(T) -> bool, bool>
+        pattern: P,
+    ) -> Map<Self, impl use<Self, T, P> + 'static + Clone + Fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
         T: AsRef<str> + 'static,
+        P: Into<String>,
     {
         let pattern = pattern.into();
         Map::new(self.clone(), move |s| s.as_ref().contains(&pattern))
