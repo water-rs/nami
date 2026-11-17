@@ -627,16 +627,15 @@ pub trait SignalExt: Signal {
     /// Named `str_` for the reason given on [`SignalExt::str_is_empty`]: a bare
     /// `contains` here shadows `<[T]>::contains` on any `Vec<T>` in scope.
     #[track_caller]
-    fn str_contains<T, P>(
+    fn str_contains<T>(
         &self,
-        pattern: P,
-    ) -> Map<Self, impl use<Self, T, P> + 'static + Clone + Fn(T) -> bool, bool>
+        pattern: &str,
+    ) -> Map<Self, impl use<Self, T> + 'static + Clone + Fn(T) -> bool, bool>
     where
         Self: Signal<Output = T> + 'static,
         T: AsRef<str> + 'static,
-        P: Into<String>,
     {
-        let pattern = pattern.into();
+        let pattern = String::from(pattern);
         Map::new(self.clone(), move |s| s.as_ref().contains(&pattern))
     }
 }
