@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0](https://github.com/water-rs/nami/compare/v0.13.0...v0.14.0) - 2026-11-21
+
+### Added
+
+- add the scan combinator for stateful once-per-change steps
+
+### Fixed
+
+- [**breaking**] str_contains borrows its pattern instead of capturing its type
+- [**breaking**] derived signals no longer capture the receiver's lifetime
+- *(signal)* keep a Scan's upstream watch alive for as long as any watch
+
+### Other
+
+- Merge branch 'main' into drop-machete-unused-deps
+- replace the cargo-machete job with cargo::unused_dependencies
+- require rustc 1.100 for core::mem::DropGuard
+- [**breaking**] remove OnDrop in favor of core::mem::DropGuard
+- release from main and retire dev
+- drop the typos check
+
 ## [0.13.0](https://github.com/water-rs/nami/compare/v0.12.0...v0.13.0) - 2026-10-15
 
 ### Added
