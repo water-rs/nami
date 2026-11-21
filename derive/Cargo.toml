@@ -2,6 +2,7 @@
 name = "nami-derive"
 version = "0.5.0"
 edition = "2021"
+rust-version.workspace = true
 authors = ["Lexo Liu <me@lexo.cool>"]
 description = "Derive macros for the nami reactive framework"
 repository = "https://github.com/water-rs/nami"
