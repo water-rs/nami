@@ -151,56 +151,17 @@ impl WatcherGuard for () {}
 
 impl<T1: WatcherGuard, T2: WatcherGuard> WatcherGuard for (T1, T2) {}
 
-/// A utility struct that runs a cleanup function when dropped.
-#[derive(Debug)]
-pub struct OnDrop<F>(Option<F>)
-where
-    F: FnOnce();
-
-impl<F> OnDrop<F>
-where
-    F: FnOnce() + 'static,
-{
-    /// Creates a new `OnDrop` that will call the function when dropped.
-    pub const fn new(f: F) -> Self {
-        Self(Some(f))
-    }
-
-    /// Attaches a cleanup function to a guard.
-    ///
-    /// `drop` (not `let _ =`) moves `guard` into the closure: a `move`
-    /// closure whose body only does `let _ = guard` captures nothing,
-    /// because disjoint closure captures (edition 2021) see no use of
-    /// `guard` — it would stay owned by the caller and die when `attach`
-    /// returns.
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn attach(guard: impl WatcherGuard, f: F) -> impl WatcherGuard {
-        OnDrop::new(move || {
-            drop(guard);
-            f();
-        })
-    }
-}
-
-impl<F> Drop for OnDrop<F>
-where
-    F: FnOnce(),
-{
-    fn drop(&mut self) {
-        let Some(callback) = self.0.take() else {
-            panic!("OnDrop::drop called with missing callback");
-        };
-        callback();
-    }
-}
-
 /// Type alias for a boxed watcher guard.
 pub type BoxWatcherGuard = Box<dyn WatcherGuard>;
 
 impl<T: WatcherGuard + ?Sized> WatcherGuard for Box<T> {}
 impl<T: WatcherGuard + ?Sized> WatcherGuard for Rc<T> {}
 
-impl<F: FnOnce() + 'static> WatcherGuard for OnDrop<F> {}
+/// Attaching a cleanup to a watcher guard is the standard
+/// [`core::mem::DropGuard`]'s job:
+/// `DropGuard::new(guard, |guard| { drop(guard); cleanup(); })` drops the
+/// guard it holds, then runs `cleanup`.
+impl<T: WatcherGuard, F: FnOnce(T) + 'static> WatcherGuard for core::mem::DropGuard<T, F> {}
 
 impl Metadata {
     /// Creates a new, empty metadata container.
@@ -632,7 +593,7 @@ mod tests {
     use alloc::{rc::Rc, vec, vec::Vec};
     use core::cell::{Cell, RefCell};
 
-    use super::{Context, OnDrop, WatcherGuard, WatcherManager};
+    use super::{Context, WatcherManager};
 
     /// A watcher whose closure owns a `WatcherManagerGuard` on the same
     /// manager re-enters `cancel` from the guard's `Drop` when the watcher is
@@ -647,27 +608,6 @@ mod tests {
         });
         manager.cancel(owner);
         assert!(manager.is_empty());
-    }
-
-    /// A `move` closure that only did `let _ = guard` would capture nothing
-    /// under edition 2021's disjoint captures, so `attach` returned a guard
-    /// whose payload had already died. `attach` must hold `guard` until the
-    /// returned `OnDrop` itself drops (water-rs/hydrolysis#228).
-    #[test]
-    fn attach_holds_the_guard_until_the_result_drops() {
-        struct Probe(Rc<Cell<bool>>);
-        impl WatcherGuard for Probe {}
-        impl Drop for Probe {
-            fn drop(&mut self) {
-                self.0.set(true);
-            }
-        }
-
-        let dropped = Rc::new(Cell::new(false));
-        let attached = OnDrop::attach(Probe(Rc::clone(&dropped)), || ());
-        assert!(!dropped.get(), "attach dropped the guard early");
-        drop(attached);
-        assert!(dropped.get());
     }
 
     /// A notification raised while a round is delivering is queued and

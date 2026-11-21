@@ -24,11 +24,11 @@
 //! ```
 
 use alloc::{boxed::Box, rc::Rc};
-use core::any::type_name;
+use core::{any::type_name, mem::DropGuard};
 
 use crate::{
     Signal,
-    watcher::{BoxWatcherGuard, Context, OnDrop},
+    watcher::{BoxWatcherGuard, Context},
 };
 
 /// A debug wrapper for Signal that logs computation events.
@@ -213,7 +213,8 @@ where
             log::debug!("Added watcher");
         }
         let guard: BoxWatcherGuard = if self.inner.config.should_log_remove_watcher() {
-            Box::new(OnDrop::attach(guard, || {
+            Box::new(DropGuard::new(guard, |guard| {
+                drop(guard);
                 log::debug!("Removed watcher");
             }))
         } else {
