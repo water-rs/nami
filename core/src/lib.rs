@@ -245,6 +245,10 @@ macro_rules! impl_generic_constant {
 mod impl_constant {
     use alloc::borrow::Cow;
     use alloc::collections::{BTreeMap, BTreeSet};
+    use core::num::{
+        NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8,
+        NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize,
+    };
     use core::time::Duration;
 
     use crate::Signal;
@@ -256,12 +260,26 @@ mod impl_constant {
         u16,
         u32,
         u64,
+        u128,
         usize,
         i8,
         i16,
         i32,
         i64,
+        i128,
         isize,
+        NonZeroU8,
+        NonZeroU16,
+        NonZeroU32,
+        NonZeroU64,
+        NonZeroU128,
+        NonZeroUsize,
+        NonZeroI8,
+        NonZeroI16,
+        NonZeroI32,
+        NonZeroI64,
+        NonZeroI128,
+        NonZeroIsize,
         f32,
         f64,
         bool,
@@ -298,6 +316,21 @@ mod impl_constant {
             f(self)
         }
         fn watch(&self, _watcher: impl Fn(crate::watcher::Context<Self::Output>) + 'static) {}
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use core::num::NonZeroUsize;
+
+        use crate::Signal;
+
+        #[test]
+        fn nonzero_and_option_nonzero_are_constant_signals() {
+            let three = NonZeroUsize::new(3).expect("3 is non-zero");
+            assert_eq!(three.snapshot(), three);
+            assert_eq!(Some(three).snapshot(), Some(three));
+            assert_eq!(None::<NonZeroUsize>.snapshot(), None);
+        }
     }
 }
 
