@@ -5,6 +5,7 @@
 extern crate std;
 
 extern crate alloc;
+extern crate self as nami;
 
 #[macro_use]
 mod reactive_core;

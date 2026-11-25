@@ -14,6 +14,30 @@ pub struct Person {
     pub age: u32,
 }
 
+/// A projectable struct whose crate path is resolved automatically from the
+/// renamed dependency without `#[project(crate = ...)]`.
+#[derive(Clone, Debug, Project)]
+pub struct AutoResolved {
+    /// A public field.
+    pub label: String,
+    /// A private field that stays inaccessible outside this module.
+    secret: u32,
+}
+
+impl AutoResolved {
+    /// Builds a value with a private field.
+    #[must_use]
+    pub const fn new(label: String, secret: u32) -> Self {
+        Self { label, secret }
+    }
+
+    /// Reads the private field.
+    #[must_use]
+    pub const fn secret(&self) -> u32 {
+        self.secret
+    }
+}
+
 /// A projectable tuple struct through the renamed crate.
 #[derive(Clone, Debug, Project)]
 #[project(crate = reactive)]
@@ -68,5 +92,11 @@ mod tests {
 
         let unit: Binding<Unit> = binding(Unit);
         let () = unit.project();
+
+        let auto: Binding<AutoResolved> = binding(AutoResolved::new("ok".to_owned(), 7));
+        let auto_projected = auto.project();
+        auto_projected.label.set("updated".to_owned());
+        assert_eq!(auto.snapshot().label, "updated");
+        assert_eq!(auto.snapshot().secret(), 7);
     }
 }

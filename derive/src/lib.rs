@@ -3,11 +3,12 @@
 //! procedural macro behind `nami::s!`.
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
+use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{format_ident, quote};
 use syn::{
     parse::Parse, parse_macro_input, punctuated::Punctuated, Data, DeriveInput, Expr, Fields,
-    LitStr, Token, Type,
+    LitStr, Token, Type, Visibility,
 };
 
 /// Derive macro for implementing the `Project` trait on structs.
@@ -43,13 +44,14 @@ use syn::{
 ///
 /// # Crate path
 ///
-/// The expansion names nami as `::nami`. A crate that reaches nami through
-/// another path, such as a facade re-export or a renamed dependency, names
-/// that path with `#[project(crate = path)]`:
+/// By default, the expansion resolves `nami` from the calling crate's
+/// `Cargo.toml` (handling renamed dependencies and `waterui` / `waterui-core`
+/// facade re-exports). A crate that reaches `nami` through any other path can
+/// specify it explicitly with `#[project(crate = path)]`:
 ///
 /// ```rust,ignore
-/// #[derive(Clone, waterui::reactive::Project)]
-/// #[project(crate = waterui::reactive)]
+/// #[derive(Clone, my_facade::reactive::Project)]
+/// #[project(crate = my_facade::reactive)]
 /// struct Person {
 ///     name: String,
 /// }
@@ -84,7 +86,8 @@ pub fn derive_project(input: TokenStream) -> TokenStream {
 }
 
 /// The path the expansion names nami through: `#[project(crate = path)]`,
-/// or `::nami` when the attribute is absent.
+/// else resolved from the calling crate's dependencies (`nami`, `waterui-core`,
+/// or `waterui`), falling back to `::nami`.
 fn project_crate_path(attrs: &[syn::Attribute]) -> syn::Result<syn::Path> {
     let mut krate = None;
     for attr in attrs.iter().filter(|attr| attr.path().is_ident("project")) {
@@ -99,7 +102,53 @@ fn project_crate_path(attrs: &[syn::Attribute]) -> syn::Result<syn::Path> {
             Ok(())
         })?;
     }
-    Ok(krate.unwrap_or_else(|| syn::parse_quote!(::nami)))
+    Ok(krate.unwrap_or_else(resolve_default_crate_path))
+}
+
+fn resolve_default_crate_path() -> syn::Path {
+    match crate_name("nami") {
+        Ok(FoundCrate::Itself) => return syn::parse_quote!(::nami),
+        Ok(FoundCrate::Name(name)) => {
+            let ident = syn::Ident::new(&name, Span::call_site());
+            return syn::parse_quote!(::#ident);
+        }
+        Err(_) => {}
+    }
+
+    match crate_name("waterui-core") {
+        Ok(FoundCrate::Itself) => return syn::parse_quote!(::waterui_core::reactive),
+        Ok(FoundCrate::Name(name)) => {
+            let ident = syn::Ident::new(&name, Span::call_site());
+            return syn::parse_quote!(::#ident::reactive);
+        }
+        Err(_) => {}
+    }
+
+    if std::env::var("CARGO_PKG_NAME").as_deref() == Ok("waterui-internal") {
+        return syn::parse_quote!(::waterui::reactive);
+    }
+
+    match crate_name("waterui") {
+        Ok(FoundCrate::Itself) => return syn::parse_quote!(::waterui::reactive),
+        Ok(FoundCrate::Name(name)) => {
+            let ident = syn::Ident::new(&name, Span::call_site());
+            return syn::parse_quote!(::#ident::reactive);
+        }
+        Err(_) => {}
+    }
+
+    syn::parse_quote!(::nami)
+}
+
+fn non_exhaustive_attr(attrs: &[syn::Attribute]) -> TokenStream2 {
+    if attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("non_exhaustive"))
+    {
+        quote! { #[non_exhaustive] }
+    } else {
+        quote! {}
+    }
 }
 
 fn derive_project_struct(
@@ -108,14 +157,17 @@ fn derive_project_struct(
     fields: &syn::FieldsNamed,
 ) -> TokenStream {
     let struct_name = &input.ident;
+    let visibility = &input.vis;
+    let exhaustiveness = non_exhaustive_attr(&input.attrs);
     let (_impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     // Create the projected struct type
     let projected_struct_name =
         syn::Ident::new(&format!("{struct_name}Projected"), struct_name.span());
 
-    // Generate fields for the projected struct
+    // Generate fields for the projected struct, preserving source field visibility.
     let projected_fields = fields.named.iter().map(|field| {
+        let field_vis = &field.vis;
         let field_name = &field.ident;
         let field_type = &field.ty;
         let doc = format!(
@@ -124,7 +176,7 @@ fn derive_project_struct(
         );
         quote! {
             #[doc = #doc]
-            pub #field_name: #krate::Binding<#field_type>
+            #field_vis #field_name: #krate::Binding<#field_type>
         }
     });
 
@@ -160,7 +212,8 @@ fn derive_project_struct(
     let expanded = quote! {
         #[doc = #projected_doc]
         #[derive(Debug)]
-        pub struct #projected_struct_name #ty_generics #where_clause {
+        #exhaustiveness
+        #visibility struct #projected_struct_name #ty_generics #where_clause {
             #(#projected_fields,)*
         }
 
@@ -186,32 +239,29 @@ fn derive_project_tuple_struct(
     let struct_name = &input.ident;
     let (_impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    // Generate tuple type for projection
-    let field_types: Vec<&Type> = fields.unnamed.iter().map(|field| &field.ty).collect();
-    let projected_tuple = if field_types.len() == 1 {
-        quote! { (#krate::Binding<#(#field_types)*>,) }
-    } else {
-        quote! { (#(#krate::Binding<#field_types>),*) }
-    };
-
     // Generate field projections using index access
-    let field_projections = fields.unnamed.iter().enumerate().map(|(index, _)| {
-        let idx = syn::Index::from(index);
-        quote! {
-            {
-                let source = source.clone();
-                #krate::Binding::mapping(
-                    &source,
-                    |value| value.#idx.clone(),
-                    move |binding, value| {
-                        binding.with_mut(|b| {
-                            b.#idx = value;
-                        });
-                    },
-                )
+    let field_projections: Vec<TokenStream2> = fields
+        .unnamed
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            let idx = syn::Index::from(index);
+            quote! {
+                {
+                    let source = source.clone();
+                    #krate::Binding::mapping(
+                        &source,
+                        |value| value.#idx.clone(),
+                        move |binding, value| {
+                            binding.with_mut(|b| {
+                                b.#idx = value;
+                            });
+                        },
+                    )
+                }
             }
-        }
-    });
+        })
+        .collect();
 
     // Add lifetime bounds to generic parameters
     let mut generics_with_static = input.generics.clone();
@@ -221,6 +271,56 @@ fn derive_project_tuple_struct(
         }
     }
     let (impl_generics_with_static, _, _) = generics_with_static.split_for_impl();
+
+    // A visible tuple struct with any non-public field cannot project to a
+    // plain tuple without exposing those fields; emit a tuple struct instead.
+    let has_restricted_field = !matches!(input.vis, Visibility::Inherited)
+        && fields
+            .unnamed
+            .iter()
+            .any(|field| !matches!(field.vis, Visibility::Public(_)));
+
+    if has_restricted_field {
+        let visibility = &input.vis;
+        let exhaustiveness = non_exhaustive_attr(&input.attrs);
+        let projected_struct_name =
+            syn::Ident::new(&format!("{struct_name}Projected"), struct_name.span());
+        let projected_fields = fields.unnamed.iter().enumerate().map(|(index, field)| {
+            let field_vis = &field.vis;
+            let field_type = &field.ty;
+            let doc = format!("Binding to `{struct_name}::{index}`.");
+            quote! {
+                #[doc = #doc]
+                #field_vis #krate::Binding<#field_type>
+            }
+        });
+        let projected_doc = format!("Projection of `{struct_name}`: one `Binding` per field.");
+        let expanded = quote! {
+            #[doc = #projected_doc]
+            #[derive(Debug)]
+            #exhaustiveness
+            #visibility struct #projected_struct_name #ty_generics(
+                #(#projected_fields,)*
+            ) #where_clause;
+
+            impl #impl_generics_with_static #krate::project::Project for #struct_name #ty_generics #where_clause {
+                type Projected = #projected_struct_name #ty_generics;
+
+                fn project(source: &#krate::Binding<Self>) -> Self::Projected {
+                    #projected_struct_name(#(#field_projections,)*)
+                }
+            }
+        };
+        return TokenStream::from(expanded);
+    }
+
+    // Generate tuple type for projection
+    let field_types: Vec<&Type> = fields.unnamed.iter().map(|field| &field.ty).collect();
+    let projected_tuple = if field_types.len() == 1 {
+        quote! { (#krate::Binding<#(#field_types)*>,) }
+    } else {
+        quote! { (#(#krate::Binding<#field_types>),*) }
+    };
 
     let projection_tuple = if field_projections.len() == 1 {
         quote! { (#(#field_projections)*,) }

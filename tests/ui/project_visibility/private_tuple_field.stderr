@@ -1,0 +1,5 @@
+error[E0616]: field `1` of struct `SecretProjected` is private
+  --> tests/ui/project_visibility/private_tuple_field.rs:19:22
+   |
+19 |     secret.project().1.set("forged".to_owned());
+   |                      ^ private field
