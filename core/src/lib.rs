@@ -249,6 +249,7 @@ mod impl_constant {
         NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8,
         NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize,
     };
+    use core::ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
     use core::time::Duration;
 
     use crate::Signal;
@@ -285,11 +286,21 @@ mod impl_constant {
         bool,
         char,
         Duration,
+        RangeFull,
         String,
         Cow<'static, str>
     );
 
-    impl_generic_constant!(Vec<T>,BTreeMap<K,V>,BTreeSet<T>);
+    impl_generic_constant!(
+        Vec<T>,
+        BTreeMap<K, V>,
+        BTreeSet<T>,
+        Range<T>,
+        RangeInclusive<T>,
+        RangeFrom<T>,
+        RangeTo<T>,
+        RangeToInclusive<T>
+    );
 
     impl<T: 'static> Signal for &'static [T] {
         type Output = &'static [T];
@@ -330,6 +341,17 @@ mod impl_constant {
             assert_eq!(three.snapshot(), three);
             assert_eq!(Some(three).snapshot(), Some(three));
             assert_eq!(None::<NonZeroUsize>.snapshot(), None);
+        }
+
+        #[test]
+        fn ranges_are_constant_signals() {
+            assert_eq!((0..10).snapshot(), 0..10);
+            assert_eq!((0..=10).snapshot(), 0..=10);
+            assert_eq!((0.0..=1.0).snapshot(), 0.0..=1.0);
+            assert_eq!((1..).snapshot(), 1..);
+            assert_eq!((..10).snapshot(), ..10);
+            assert_eq!((..=10).snapshot(), ..=10);
+            assert_eq!((..).snapshot(), ..);
         }
     }
 }
