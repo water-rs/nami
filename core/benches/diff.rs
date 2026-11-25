@@ -1,4 +1,4 @@
-//! Benchmarks for the id diff behind `SignalCollection` and `List::replace`.
+//! Benchmarks for the id diff behind `SignalCollection` and `StateList::replace`.
 //!
 //! Run with `cargo bench -p nami-core --bench diff`.
 

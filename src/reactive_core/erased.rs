@@ -423,7 +423,7 @@ where
 /// the `Rc` while its callback runs, so a `set` or
 /// [`Binding::with_mut`](crate::Binding::with_mut) made from inside the
 /// callback does not panic — the borrower keeps the old value and the write
-/// copies or re-boxes it. Like [`List`](crate::collection::List)'s reentrant
+/// copies or re-boxes it. Like [`StateList`](crate::collection::StateList)'s reentrant
 /// mutation, this is an anti-pattern, and debug builds warn about it.
 #[repr(C)]
 pub struct ContainerNode<T> {
@@ -715,7 +715,7 @@ impl<T: 'static + Clone> crate::batch::Flush for ContainerNode<T> {
 /// `Rc` while its callback runs, so a `set` or
 /// [`Binding::with_mut`](crate::Binding::with_mut) made from inside the
 /// callback does not panic — the borrower keeps the old value and the write
-/// copies or re-boxes it. Like [`List`](crate::collection::List)'s reentrant
+/// copies or re-boxes it. Like [`StateList`](crate::collection::StateList)'s reentrant
 /// mutation, this is an anti-pattern, and debug builds warn about it.
 #[derive(Debug)]
 pub struct Container<T: 'static> {

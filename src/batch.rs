@@ -167,7 +167,7 @@ pub fn pending_push(entry: Rc<dyn Flush>) {
 /// watcher that writes during it notifies normally, and a watcher that
 /// opens a new `batch` gets its own flush.
 ///
-/// [`List`](crate::collection::List) mutations inside a batch compose
+/// [`StateList`](crate::collection::StateList) mutations inside a batch compose
 /// into a single [`CollectionChange`](crate::collection::CollectionChange)
 /// — its watchers are notified once with the change from the pre-batch
 /// snapshot to the final one, or not at all when the changes cancel out.

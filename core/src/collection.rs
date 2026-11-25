@@ -40,7 +40,7 @@ pub type BoxCollectionWatcher<T> = Box<dyn Fn(Context<&[T]>, &CollectionChange) 
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a reactive collection",
     label = "expected a `Collection` implementation",
-    note = "use `nami::collection::List<T>` for an owned reactive sequence; for a sequence derived from a signal such as a `Binding<Vec<T>>`, wrap it in `nami::collection::SignalCollection`"
+    note = "use `nami::collection::StateList<T>` for an owned reactive sequence; for a sequence derived from a signal such as a `Binding<Vec<T>>`, wrap it in `nami::collection::SignalCollection`"
 )]
 pub trait Collection: 'static {
     /// The type of items stored in the collection.
@@ -100,14 +100,14 @@ pub trait Collection: 'static {
     /// current contents with [`Self::get_item`] / [`Self::get_id`].
     ///
     /// What counts as a change is up to the implementation. `nami`'s
-    /// `List::replace` and `SignalCollection` align the old and new
+    /// `StateList::replace` and `SignalCollection` align the old and new
     /// snapshots by id, so a change that comes out empty is not notified;
-    /// `List::set` and `List::update` instead always report their index
-    /// because `List` does not require `PartialEq` on its items.
+    /// `StateList::set` and `StateList::update` instead always report their index
+    /// because `StateList` does not require `PartialEq` on its items.
     ///
     /// Do not mutate the same collection from inside the watcher (for
     /// example through a cloned handle). Mutation APIs such as
-    /// `nami::collection::List`'s take `&mut self`, so an `Fn` watcher cannot
+    /// `nami::collection::StateList`'s take `&mut self`, so an `Fn` watcher cannot
     /// do it directly; through a clone it still works, via copy-on-write, but
     /// costs a full copy of the items. The new notification is queued behind
     /// the one in progress, so every watcher receives the changes in the

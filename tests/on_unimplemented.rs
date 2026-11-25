@@ -7,7 +7,7 @@ fn on_unimplemented_diagnostics() {
     cases.compile_fail("tests/ui/on_unimplemented/*.rs");
 }
 
-/// `List` mutators need `&mut self`: an `Fn` watcher cannot mutate a
+/// `StateList` mutators need `&mut self`: an `Fn` watcher cannot mutate a
 /// captured list.
 #[test]
 fn list_mutation_needs_mut() {

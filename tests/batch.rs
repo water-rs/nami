@@ -11,7 +11,7 @@ use std::{
 
 use nami::{
     Identifiable, SelfId, Signal,
-    collection::{Collection, CollectionChange, List, ListGuard},
+    collection::{Collection, CollectionChange, StateList, StateListGuard},
     watcher::Context,
 };
 
@@ -184,16 +184,16 @@ fn a_watcher_cancelled_mid_batch_is_not_notified() {
     );
 }
 
-fn self_id_list(values: &[i32]) -> List<SelfId<i32>> {
+fn self_id_list(values: &[i32]) -> StateList<SelfId<i32>> {
     values.iter().map(|v| SelfId::new(*v)).collect()
 }
 
-/// A watcher's view of a [`List`]: every change it received, and a mirror
+/// A watcher's view of a [`StateList`]: every change it received, and a mirror
 /// it keeps parallel to the list by applying them.
 struct Mirror<T: 'static> {
     changes: Rc<RefCell<Vec<CollectionChange>>>,
     items: Rc<RefCell<Vec<T>>>,
-    _guard: ListGuard<T>,
+    _guard: StateListGuard<T>,
 }
 
 /// Watches `list`, applying every change to a mirror and asserting it then
@@ -201,7 +201,7 @@ struct Mirror<T: 'static> {
 /// panics on a change computed against a state it never saw, so the mirror
 /// also proves the composed change is exact.
 fn mirror_list<T: Identifiable + Clone + PartialEq + core::fmt::Debug + 'static>(
-    list: &List<T>,
+    list: &StateList<T>,
 ) -> Mirror<T> {
     let changes = Rc::new(RefCell::new(Vec::new()));
     let items = Rc::new(RefCell::new(list.snapshot()));

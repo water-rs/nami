@@ -208,7 +208,7 @@ impl Metadata {
     /// Merges `other` into `self`, returning the union: a value already
     /// present under the same type is replaced by `other`'s.
     ///
-    /// Deferred notifications (such as a batched `List` change) compose
+    /// Deferred notifications (such as a batched `StateList` change) compose
     /// their metadata this way, so the single notification they finally
     /// send carries what the individual ones would have.
     #[must_use]
