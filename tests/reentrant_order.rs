@@ -8,7 +8,7 @@ use std::{
     rc::Rc,
 };
 
-use nami::collection::{Collection, CollectionChange, List, SignalCollection};
+use nami::collection::{Collection, CollectionChange, SignalCollection, StateList};
 use nami::watcher::{Context, WatcherGuard, WatcherManager};
 use nami::{SelfId, Signal, binding};
 
@@ -30,7 +30,7 @@ fn mirror_tracker<T: Clone + PartialEq + Debug + 'static>(
 /// the second must still receive the outer `inserted` before the inner one.
 #[test]
 fn list_watchers_get_reentrant_changes_in_order() {
-    let mut list: List<SelfId<i32>> = List::from(vec![SelfId::new(0)]);
+    let mut list: StateList<SelfId<i32>> = StateList::from(vec![SelfId::new(0)]);
     let mirror1 = Rc::new(RefCell::new(list.snapshot()));
     let mirror2 = Rc::new(RefCell::new(list.snapshot()));
     let changes = Rc::new(RefCell::new(Vec::new()));
@@ -205,7 +205,7 @@ fn a_panicking_watcher_drops_queued_notifications() {
 /// it: applying it would double-apply a change the mirror already contains.
 #[test]
 fn a_list_watcher_registered_mid_round_follows_from_registration() {
-    let mut list: List<SelfId<i32>> = List::from(vec![SelfId::new(0)]);
+    let mut list: StateList<SelfId<i32>> = StateList::from(vec![SelfId::new(0)]);
     let mirror1 = Rc::new(RefCell::new(list.snapshot()));
     let late_mirror = Rc::new(RefCell::new(Vec::new()));
     let late_changes = Rc::new(RefCell::new(Vec::new()));
