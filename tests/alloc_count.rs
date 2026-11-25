@@ -146,10 +146,10 @@ fn registering_during_notify_takes_effect_next_round() {
 }
 
 /// A watched 1000-item list whose watcher reads every item it is given.
-fn watched_list() -> (nami::collection::List<nami::SelfId<u64>>, impl Sized) {
-    use nami::collection::{Collection, List};
+fn watched_list() -> (nami::collection::StateList<nami::SelfId<u64>>, impl Sized) {
+    use nami::collection::{Collection, StateList};
 
-    let mut list = List::new();
+    let mut list = StateList::new();
     list.extend((0..1000).map(nami::SelfId::new));
     let guard = list.watch(.., move |items, change| {
         assert!(!change.is_empty());

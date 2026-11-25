@@ -39,7 +39,7 @@ use core::ops::Deref;
 #[diagnostic::on_unimplemented(
     message = "`{Self}` has no stable identity",
     label = "expected a type implementing `Identifiable`",
-    note = "collections such as `nami::collection::List` diff items by id, so each item needs `Identifiable`: implement it for your type, or, for a type you do not own, wrap the value with `SelfId::new(..)` / `.self_id()` (the value is its own id) or `UseId::new(..)` / `.use_id(..)`"
+    note = "collections such as `nami::collection::StateList` diff items by id, so each item needs `Identifiable`: implement it for your type, or, for a type you do not own, wrap the value with `SelfId::new(..)` / `.self_id()` (the value is its own id) or `UseId::new(..)` / `.use_id(..)`"
 )]
 pub trait Identifiable {
     /// The type of id to use. `Ord` is all alignment needs.
@@ -104,7 +104,7 @@ where
 /// A wrapper that uses the value itself as its own identifier.
 ///
 /// This is useful for types that are already suitable as identifiers, such
-/// as a list of tag strings: `List<SelfId<String>>`. Equal values are the
+/// as a list of tag strings: `StateList<SelfId<String>>`. Equal values are the
 /// same item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct SelfId<T>(T);

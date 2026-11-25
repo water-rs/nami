@@ -1,9 +1,9 @@
-//! Debug builds warn when a `List` is mutated from inside its own watcher
+//! Debug builds warn when a `StateList` is mutated from inside its own watcher
 //! or a `Binding` while a `with_ref` borrow of its value is live.
 
 use std::sync::Mutex;
 
-use nami::collection::{Collection, List};
+use nami::collection::{Collection, StateList};
 use nami::{Binding, SelfId, Signal, binding};
 
 static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -38,7 +38,7 @@ fn reentrant_mutation_warns_in_debug_builds_only() {
     let _ = log::set_logger(&Capture);
     log::set_max_level(log::LevelFilter::Warn);
 
-    let mut list: List<SelfId<i32>> = List::new();
+    let mut list: StateList<SelfId<i32>> = StateList::new();
     let _guard = list.watch(.., {
         let handle = list.clone();
         move |items: nami::watcher::Context<&[SelfId<i32>]>,
@@ -78,7 +78,7 @@ fn borrow_warnings() -> usize {
 
 #[test]
 fn mutation_during_with_ref_warns_in_debug_builds_only() {
-    // The logger may already be installed by the `List` test in this binary.
+    // The logger may already be installed by the `StateList` test in this binary.
     let _ = log::set_logger(&Capture);
     log::set_max_level(log::LevelFilter::Warn);
 

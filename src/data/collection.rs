@@ -4,21 +4,21 @@
 //!
 //! - [`Collection`]: the interface for observable collections, re-exported
 //!   from `nami-core`.
-//! - [`List<T>`]: an owned reactive list of [`Identifiable`] items.
+//! - [`StateList<T>`]: an owned reactive list of [`Identifiable`] items.
 //! - [`SignalCollection`]: adapts a signal of `Vec<T>` snapshots.
 //! - [`AnyCollection<T, Id>`](AnyCollection): a type-erased collection.
 //!
 //! # Identity
 //!
 //! Every item knows its own id through [`Identifiable`], the way `SwiftUI`'s
-//! `Identifiable` works, and a `List` reports every notification as a
+//! `Identifiable` works, and a `StateList` reports every notification as a
 //! [`CollectionChange`] aligned by id. Replacing the whole list with a
 //! reordered or front-inserted vector reports moves and insertions instead of
 //! rewriting every row, so a consumer never diffs snapshots itself.
 //!
 //! ```rust
 //! use nami::Identifiable;
-//! use nami::collection::{Collection, CollectionChange, Edit, List};
+//! use nami::collection::{Collection, CollectionChange, Edit, StateList};
 //!
 //! #[derive(Clone, PartialEq)]
 //! struct Message {
@@ -35,7 +35,7 @@
 //! }
 //!
 //! let message = |id: u64, text: &str| Message { id, text: text.into() };
-//! let mut list = List::new();
+//! let mut list = StateList::new();
 //! list.extend([message(1, "hi"), message(2, "there")]);
 //!
 //! let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -58,9 +58,9 @@
 //!
 //! ```rust
 //! use nami::SelfId;
-//! use nami::collection::List;
+//! use nami::collection::StateList;
 //!
-//! let tags: List<SelfId<String>> = ["rust", "ui"].map(|t| SelfId::new(t.to_string())).into_iter().collect();
+//! let tags: StateList<SelfId<String>> = ["rust", "ui"].map(|t| SelfId::new(t.to_string())).into_iter().collect();
 //! assert_eq!(tags.id(1).as_deref(), Some("ui"));
 //! ```
 //!
@@ -90,18 +90,18 @@ use nami_core::{
 
 use crate::Signal;
 
-/// The callback a [`List`] stores per watcher: the whole snapshot plus the
+/// The callback a [`StateList`] stores per watcher: the whole snapshot plus the
 /// change. Each registration slices the snapshot to its own range.
-type ListWatcher<T> = dyn Fn(Context<Rc<Vec<T>>>, &CollectionChange);
+type StateListWatcher<T> = dyn Fn(Context<Rc<Vec<T>>>, &CollectionChange);
 
 /// A reactive list of [`Identifiable`] items.
 ///
 /// Each item's id is [`Identifiable::id`]; wrap plain values in [`SelfId`]
-/// (`List<SelfId<String>>`) when the value is its own identity. Build one
-/// with [`List::new`], [`Default`], `From<Vec<T>>` or [`FromIterator`].
+/// (`StateList<SelfId<String>>`) when the value is its own identity. Build one
+/// with [`StateList::new`], [`Default`], `From<Vec<T>>` or [`FromIterator`].
 ///
 /// Mutators take `&mut self`, so a watcher (an `Fn` closure) cannot mutate a
-/// `List` it captured. Cloning a `List` still shares it, though, and storage
+/// `StateList` it captured. Cloning a `StateList` still shares it, though, and storage
 /// is copy-on-write as a safety net: a mutation copies the items only while a
 /// notification is handing them out.
 ///
@@ -127,24 +127,24 @@ type ListWatcher<T> = dyn Fn(Context<Rc<Vec<T>>>, &CollectionChange);
 /// Changes made after the registration are composed again and delivered
 /// to every watcher at the end of the batch; if there are none, the end of
 /// the batch sends nothing for this list.
-pub struct List<T> {
-    state: Rc<ListState<T>>,
+pub struct StateList<T> {
+    state: Rc<StateListInner<T>>,
 }
 
-struct ListState<T> {
+struct StateListInner<T> {
     items: RefCell<Rc<Vec<T>>>,
-    watchers: WatcherRegistry<ListWatcher<T>>,
+    watchers: WatcherRegistry<StateListWatcher<T>>,
     /// `Some` while a batch holds back this list's notifications — also
     /// the mark that the list already sits in the batch's pending list.
     #[cfg(feature = "batch")]
     batched: RefCell<Option<Batched>>,
-    /// How many notifications or [`List::with_range`] loans are running;
+    /// How many notifications or [`StateList::with_range`] loans are running;
     /// debug builds only, to warn about mutations made from inside them.
     #[cfg(debug_assertions)]
     notifying: Cell<usize>,
 }
 
-/// What a [`List`] holds back while a batch is open: the composition of
+/// What a [`StateList`] holds back while a batch is open: the composition of
 /// every change it made inside the batch and the union of the metadata
 /// they carried.
 #[cfg(feature = "batch")]
@@ -155,15 +155,15 @@ struct Batched {
     metadata: Metadata,
 }
 
-impl<T: fmt::Debug> fmt::Debug for List<T> {
+impl<T: fmt::Debug> fmt::Debug for StateList<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("List")
+        f.debug_tuple("StateList")
             .field(&self.state.items.borrow().as_slice())
             .finish()
     }
 }
 
-impl<T> Clone for List<T> {
+impl<T> Clone for StateList<T> {
     fn clone(&self) -> Self {
         Self {
             state: Rc::clone(&self.state),
@@ -171,12 +171,12 @@ impl<T> Clone for List<T> {
     }
 }
 
-impl<T: Identifiable + 'static> List<T> {
+impl<T: Identifiable + 'static> StateList<T> {
     /// Creates an empty list.
     ///
     /// ```rust
     /// use nami::Identifiable;
-    /// use nami::collection::List;
+    /// use nami::collection::StateList;
     ///
     /// #[derive(Clone)]
     /// struct Todo {
@@ -193,10 +193,10 @@ impl<T: Identifiable + 'static> List<T> {
     /// }
     ///
     /// struct App {
-    ///     todos: List<Todo>,
+    ///     todos: StateList<Todo>,
     /// }
     ///
-    /// let mut app = App { todos: List::new() };
+    /// let mut app = App { todos: StateList::new() };
     /// app.todos.push(Todo { id: 1, title: "write docs".into() });
     /// assert_eq!(app.todos.id(0), Some(1));
     /// ```
@@ -214,7 +214,7 @@ impl<T: Identifiable + 'static> List<T> {
         Self {
             state: Rc::new_cyclic(|state| {
                 let origin = Origin::capture::<Self>(SignalIdentity::from_ptr(state.as_ptr()));
-                ListState {
+                StateListInner {
                     items: RefCell::new(Rc::new(items)),
                     watchers: WatcherRegistry::with_origin(origin),
                     #[cfg(feature = "batch")]
@@ -266,7 +266,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// [`Collection::with_range`]). Only the storage's reference count is
     /// bumped, and the list is not borrowed while `f` runs, so mutating it
     /// inside `f` through a clone works (via copy-on-write); it is the same
-    /// anti-pattern as [reentrant mutation](List#reentrant-mutation) and
+    /// anti-pattern as [reentrant mutation](StateList#reentrant-mutation) and
     /// debug builds warn about it.
     pub fn with_range<R>(&self, range: impl RangeBounds<usize>, f: impl FnOnce(&[T]) -> R) -> R {
         let items = Rc::clone(&self.state.items.borrow());
@@ -298,7 +298,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Adds an element to the end of the list.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn push(&mut self, value: T)
     where
         T: Clone,
@@ -313,7 +313,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Appends every item of `values`.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn extend(&mut self, values: impl IntoIterator<Item = T>)
     where
         T: Clone,
@@ -329,7 +329,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Removes and returns the last element of the list.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     #[must_use]
     pub fn pop(&mut self) -> Option<T>
     where
@@ -349,7 +349,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Panics if `index > len`.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn insert(&mut self, index: usize, value: T)
     where
         T: Clone,
@@ -365,7 +365,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Panics if `index` is out of bounds.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     #[must_use]
     pub fn remove(&mut self, index: usize) -> T
     where
@@ -380,7 +380,7 @@ impl<T: Identifiable + 'static> List<T> {
     ///
     /// Always reports the index as changed: an update when the new item has
     /// the same id as the old one, a removal plus an insertion when the id
-    /// changed. `List` does not require `PartialEq`, so whether the new
+    /// changed. `StateList` does not require `PartialEq`, so whether the new
     /// value actually differs is never checked — unlike [`Self::replace`],
     /// a no-op write still notifies.
     ///
@@ -389,7 +389,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Panics if `index` is out of bounds.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn set(&mut self, index: usize, value: T) -> T
     where
         T: Clone,
@@ -418,7 +418,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Panics if `index` is out of bounds.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn update(&mut self, index: usize, f: impl FnOnce(&mut T))
     where
         T: Clone,
@@ -444,7 +444,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Keeps only the items for which `keep` returns `true`.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn retain(&mut self, mut keep: impl FnMut(&T) -> bool)
     where
         T: Clone,
@@ -469,7 +469,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Clears all elements from the list.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn clear(&mut self) {
         let len = self.len();
         if len == 0 {
@@ -486,7 +486,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// moves.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn sort(&mut self)
     where
         T: Ord + Clone,
@@ -497,7 +497,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// Sorts the list with a key extraction function; see [`Self::sort`].
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn sort_by_key<K: Ord>(&mut self, mut key: impl FnMut(&T) -> K)
     where
         T: Clone,
@@ -509,7 +509,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// [`Self::sort`].
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     pub fn sort_by(&mut self, mut compare: impl FnMut(&T, &T) -> core::cmp::Ordering)
     where
         T: Clone,
@@ -539,7 +539,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// items whose content differs (`!=`).
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     #[must_use]
     pub fn replace(&mut self, items: Vec<T>) -> Vec<T>
     where
@@ -552,7 +552,7 @@ impl<T: Identifiable + 'static> List<T> {
     /// watchers.
     ///
     /// Do not call this from inside a watcher of the same list (through a
-    /// clone): see [the note on reentrancy](List#reentrant-mutation).
+    /// clone): see [the note on reentrancy](StateList#reentrant-mutation).
     #[must_use]
     pub fn replace_with_metadata(&mut self, items: Vec<T>, metadata: Metadata) -> Vec<T>
     where
@@ -617,7 +617,7 @@ impl<T: Identifiable + 'static> List<T> {
     fn warn_if_reentrant(&self) {
         if self.state.notifying.get() > 0 {
             log::warn!(
-                "nami: a List was mutated from inside one of its own watchers or a \
+                "nami: a StateList was mutated from inside one of its own watchers or a \
                  `with_range` callback; this copies every item and queues its \
                  notification behind the running one. Mutate it outside the \
                  callback instead"
@@ -670,7 +670,7 @@ impl<T: Identifiable + 'static> List<T> {
     }
 }
 
-impl<T: 'static> ListState<T> {
+impl<T: 'static> StateListInner<T> {
     /// Hands watchers the current snapshot (a refcount, not a copy) and
     /// `change`; the caller has already checked the change is not empty
     /// and watchers are registered.
@@ -690,7 +690,7 @@ impl<T: 'static> ListState<T> {
 }
 
 #[cfg(feature = "batch")]
-impl<T: 'static> ListState<T> {
+impl<T: 'static> StateListInner<T> {
     /// Before a watcher registers mid-batch: delivers the change held back
     /// so far to the watchers already registered and restarts the log at
     /// the current length. The list keeps its mark, and with it its entry
@@ -717,7 +717,7 @@ impl<T: 'static> ListState<T> {
 }
 
 #[cfg(feature = "batch")]
-impl<T: 'static> crate::batch::Flush for ListState<T> {
+impl<T: 'static> crate::batch::Flush for StateListInner<T> {
     /// Drops the composed change — a discarded batch never notifies.
     fn unmark(&self) {
         self.batched.borrow_mut().take();
@@ -793,40 +793,40 @@ impl RangeCell {
     }
 }
 
-/// One [`List`] watch: its range and the user callback.
-struct ListWatch<W> {
+/// One [`StateList`] watch: its range and the user callback.
+struct StateListWatch<W> {
     range: Rc<RangeCell>,
     watcher: W,
 }
 
-/// Guard of a [`List`] watcher; dropping it unregisters the watcher, and
+/// Guard of a [`StateList`] watcher; dropping it unregisters the watcher, and
 /// [`CollectionWatcherGuard::set_range`] moves its range.
 #[must_use]
-pub struct ListGuard<T: 'static> {
-    registration: RegistryGuard<ListWatcher<T>>,
+pub struct StateListGuard<T: 'static> {
+    registration: RegistryGuard<StateListWatcher<T>>,
     range: Rc<RangeCell>,
 }
 
-impl<T> fmt::Debug for ListGuard<T> {
+impl<T> fmt::Debug for StateListGuard<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ListGuard")
+        f.debug_tuple("StateListGuard")
             .field(&self.registration)
             .finish()
     }
 }
 
-impl<T: 'static> WatcherGuard for ListGuard<T> {}
+impl<T: 'static> WatcherGuard for StateListGuard<T> {}
 
-impl<T: 'static> CollectionWatcherGuard for ListGuard<T> {
+impl<T: 'static> CollectionWatcherGuard for StateListGuard<T> {
     fn set_bounds(&self, start: Bound<usize>, end: Bound<usize>) {
         self.range.set(start, end);
     }
 }
 
-impl<T: Identifiable + Clone + 'static> Collection for List<T> {
+impl<T: Identifiable + Clone + 'static> Collection for StateList<T> {
     type Item = T;
     type Id = T::Id;
-    type Guard = ListGuard<T>;
+    type Guard = StateListGuard<T>;
 
     fn get_item(&self, index: usize) -> Option<T> {
         Self::get(self, index)
@@ -848,13 +848,13 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
         &self,
         range: impl RangeBounds<usize>,
         watcher: impl Fn(Context<&[T]>, &CollectionChange) + 'static,
-    ) -> ListGuard<T> {
+    ) -> StateListGuard<T> {
         let range = Rc::new(RangeCell::new(&range));
-        let watch = ListWatch {
+        let watch = StateListWatch {
             range: Rc::clone(&range),
             watcher,
         };
-        let callback: Rc<ListWatcher<T>> = Rc::new({
+        let callback: Rc<StateListWatcher<T>> = Rc::new({
             move |context: Context<Rc<Vec<T>>>, change: &CollectionChange| {
                 let range = watch.range.resolve(context.value().len());
                 let (items, metadata) = context.into_parts();
@@ -863,28 +863,28 @@ impl<T: Identifiable + Clone + 'static> Collection for List<T> {
         });
         #[cfg(feature = "batch")]
         self.state.deliver_held_back();
-        ListGuard {
+        StateListGuard {
             registration: self.state.watchers.insert_as_guard(callback),
             range,
         }
     }
 }
 
-impl<T: Identifiable + 'static> Default for List<T> {
+impl<T: Identifiable + 'static> Default for StateList<T> {
     #[track_caller]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Identifiable + 'static> From<Vec<T>> for List<T> {
+impl<T: Identifiable + 'static> From<Vec<T>> for StateList<T> {
     #[track_caller]
     fn from(items: Vec<T>) -> Self {
         Self::from_vec(items)
     }
 }
 
-impl<T: Identifiable + 'static> FromIterator<T> for List<T> {
+impl<T: Identifiable + 'static> FromIterator<T> for StateList<T> {
     #[track_caller]
     fn from_iter<It: IntoIterator<Item = T>>(iter: It) -> Self {
         Self::from_vec(iter.into_iter().collect())
@@ -893,7 +893,7 @@ impl<T: Identifiable + 'static> FromIterator<T> for List<T> {
 
 /// Iterates the items, without cloning them when this is the last handle to
 /// the list.
-impl<T: Clone + 'static> IntoIterator for List<T> {
+impl<T: Clone + 'static> IntoIterator for StateList<T> {
     type Item = T;
     type IntoIter = alloc::vec::IntoIter<T>;
 
@@ -905,8 +905,8 @@ impl<T: Clone + 'static> IntoIterator for List<T> {
     }
 }
 
-/// Iterates a snapshot of the items; see [`List::iter`].
-impl<T: Identifiable + Clone + 'static> IntoIterator for &List<T> {
+/// Iterates a snapshot of the items; see [`StateList::iter`].
+impl<T: Identifiable + Clone + 'static> IntoIterator for &StateList<T> {
     type Item = T;
     type IntoIter = alloc::vec::IntoIter<T>;
 
@@ -918,8 +918,8 @@ impl<T: Identifiable + Clone + 'static> IntoIterator for &List<T> {
 /// Adapts a signal of vector snapshots into a reactive collection.
 ///
 /// Every new snapshot is aligned with the previous one by id, so watchers
-/// receive the same insertions, removals, moves and updates a [`List`]
-/// reports for [`List::replace`].
+/// receive the same insertions, removals, moves and updates a [`StateList`]
+/// reports for [`StateList::replace`].
 #[derive(Debug, Clone)]
 pub struct SignalCollection<S> {
     signal: S,
@@ -1071,8 +1071,8 @@ mod tests {
         Row { id, text }
     }
 
-    fn rows(items: Vec<Row>) -> List<Row> {
-        List::from(items)
+    fn rows(items: Vec<Row>) -> StateList<Row> {
+        StateList::from(items)
     }
 
     /// Value-identified items.
@@ -1080,7 +1080,7 @@ mod tests {
         values.into_iter().map(SelfId::new).collect()
     }
 
-    fn values(list: &List<SelfId<i32>>) -> Vec<i32> {
+    fn values(list: &StateList<SelfId<i32>>) -> Vec<i32> {
         list.iter().map(SelfId::into_inner).collect()
     }
 
@@ -1090,10 +1090,10 @@ mod tests {
         // inherent methods through a module that does not import it.
         mod reads {
             use crate::SelfId;
-            use crate::collection::List;
+            use crate::collection::StateList;
 
             pub fn check() {
-                let list: List<SelfId<i32>> = [1, 2, 3].into_iter().map(SelfId::new).collect();
+                let list: StateList<SelfId<i32>> = [1, 2, 3].into_iter().map(SelfId::new).collect();
                 assert_eq!(list.len(), 3);
                 assert!(!list.is_empty());
                 assert_eq!(list.get(1), Some(SelfId::new(2)));
@@ -1138,7 +1138,7 @@ mod tests {
 
     #[test]
     fn clear_and_retain_report_removals() {
-        let mut list = List::from(vals([1, 2, 3, 4, 5]));
+        let mut list = StateList::from(vals([1, 2, 3, 4, 5]));
         let (changes, _guard) = record(&list);
 
         list.retain(|value| **value % 2 == 1);
@@ -1157,7 +1157,7 @@ mod tests {
 
     #[test]
     fn sort_reports_moves() {
-        let mut list = List::from(vals([1, 2, 3, 0]));
+        let mut list = StateList::from(vals([1, 2, 3, 0]));
         let (changes, _guard) = record(&list);
 
         list.sort();
@@ -1192,7 +1192,7 @@ mod tests {
 
     #[test]
     fn duplicate_ids_never_panic() {
-        let mut list: List<SelfId<String>> = List::new();
+        let mut list: StateList<SelfId<String>> = StateList::new();
         list.extend(["buy milk", "buy milk"].map(|s| SelfId::new(s.to_string())));
         let (changes, _guard) = record(&list);
 
@@ -1208,7 +1208,7 @@ mod tests {
 
     #[test]
     fn self_id_lists_align_by_value() {
-        let mut list: List<SelfId<String>> = ["a", "b", "c"]
+        let mut list: StateList<SelfId<String>> = ["a", "b", "c"]
             .map(|s| s.to_string().self_id())
             .into_iter()
             .collect();
@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn use_id_lists_align_by_key() {
         let key: fn(&(u32, &'static str)) -> u32 = |pair| pair.0;
-        let mut list: List<UseId<(u32, &'static str), _>> = [(1, "a"), (2, "b")]
+        let mut list: StateList<UseId<(u32, &'static str), _>> = [(1, "a"), (2, "b")]
             .map(|pair| pair.use_id(key))
             .into_iter()
             .collect();
@@ -1269,7 +1269,7 @@ mod tests {
 
     #[test]
     fn watchers_see_each_state_and_clone_what_they_keep() {
-        let mut list = List::from(vals([1, 2]));
+        let mut list = StateList::from(vals([1, 2]));
         let retained = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(.., {
             let retained = retained.clone();
@@ -1287,7 +1287,7 @@ mod tests {
 
     #[test]
     fn ranged_watchers_get_their_slice_and_collection_wide_changes() {
-        let mut list = List::from(vals([0, 1, 2, 3, 4]));
+        let mut list = StateList::from(vals([0, 1, 2, 3, 4]));
         let seen = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(2..4, {
             let seen = seen.clone();
@@ -1313,7 +1313,7 @@ mod tests {
 
         // Watches `range` of a fresh `0..5` list, then appends `5`.
         let first = |range: (Bound<usize>, Bound<usize>)| {
-            let mut list = List::from(vals([0, 1, 2, 3, 4]));
+            let mut list = StateList::from(vals([0, 1, 2, 3, 4]));
             let seen = Rc::new(RefCell::new(Vec::new()));
             let _guard = list.watch(range, {
                 let seen = seen.clone();
@@ -1335,7 +1335,7 @@ mod tests {
 
     #[test]
     fn dropping_the_guard_stops_notifications() {
-        let mut list: List<SelfId<i32>> = List::new();
+        let mut list: StateList<SelfId<i32>> = StateList::new();
         let (changes, guard) = record(&list);
         list.push(SelfId::new(1));
         drop(guard);
@@ -1345,7 +1345,7 @@ mod tests {
 
     #[test]
     fn clones_share_the_list() {
-        let mut a = List::from(vals([1, 2, 3]));
+        let mut a = StateList::from(vals([1, 2, 3]));
         let b = a.clone();
         a.push(SelfId::new(4));
         assert_eq!(b.len(), 4);
@@ -1411,23 +1411,25 @@ mod tests {
     #[test]
     fn conversions_infer_the_item_type() {
         struct Holder {
-            list: List<SelfId<String>>,
+            list: StateList<SelfId<String>>,
         }
 
-        let from = List::from(vec![row(5, "a"), row(6, "b")]);
+        let from = StateList::from(vec![row(5, "a"), row(6, "b")]);
         assert_eq!(from.id(1), Some(6));
 
-        let collected: List<_> = (0..3).map(SelfId::new).collect();
+        let collected: StateList<_> = (0..3).map(SelfId::new).collect();
         assert_eq!(collected.id(2), Some(2));
         assert_eq!(values(&collected), vec![0, 1, 2]);
 
-        let collected = core::iter::once(row(1, "a")).collect::<List<_>>();
+        let collected = core::iter::once(row(1, "a")).collect::<StateList<_>>();
         assert_eq!(collected.id(0), Some(1));
 
-        let default: List<Row> = List::default();
+        let default: StateList<Row> = StateList::default();
         assert!(default.is_empty());
 
-        let mut holder = Holder { list: List::new() };
+        let mut holder = Holder {
+            list: StateList::new(),
+        };
         holder.list.push(SelfId::new("a".into()));
         assert_eq!(holder.list.id(0).as_deref(), Some("a"));
     }
@@ -1467,9 +1469,9 @@ mod tests {
 
         let make = || vec![Counted(1), Counted(2)];
         // Item ids.
-        check(&List::from(make()), 2);
+        check(&StateList::from(make()), 2);
         check(&make(), 2);
-        check(&AnyCollection::new(List::from(make())), 2);
+        check(&AnyCollection::new(StateList::from(make())), 2);
         check(&Box::new(make()), 2);
         // Index ids.
         check(&[Counted(1), Counted(2)], 1);
@@ -1512,7 +1514,7 @@ mod tests {
 
     #[test]
     fn list_set_range() {
-        let mut list = List::from(vals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+        let mut list = StateList::from(vals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
         check_set_range(&list);
 
         // Later mutations are sliced to the new range.
@@ -1542,7 +1544,7 @@ mod tests {
 
     #[test]
     fn any_collection_set_range() {
-        let mut list = List::from(vals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+        let mut list = StateList::from(vals([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
         let any = AnyCollection::new(list.clone());
         check_set_range(&any);
 
@@ -1560,7 +1562,7 @@ mod tests {
 
     #[test]
     fn reentrant_mutation_still_works() {
-        let mut list = List::from(vals([1, 2]));
+        let mut list = StateList::from(vals([1, 2]));
         let seen: Seen = Rc::new(RefCell::new(Vec::new()));
         let _guard = list.watch(.., {
             let seen = seen.clone();
@@ -1597,7 +1599,7 @@ mod tests {
 
     #[test]
     fn with_range_lends_a_clamped_slice() {
-        let list = List::from(vals([0, 1, 2, 3, 4]));
+        let list = StateList::from(vals([0, 1, 2, 3, 4]));
         let ids = |items: &[SelfId<i32>]| items.iter().map(|v| **v).collect::<Vec<_>>();
         assert_eq!(list.with_range(1..3, ids), vec![1, 2]);
         assert_eq!(list.with_range(3.., ids), vec![3, 4]);
@@ -1619,7 +1621,7 @@ mod tests {
 
     #[test]
     fn reentrant_mutation_in_with_range_copies_instead_of_panicking() {
-        let list = List::from(vals([1, 2, 3]));
+        let list = StateList::from(vals([1, 2, 3]));
         let (changes, _guard) = record(&list);
         let seen = list.with_range(.., |items| {
             let mut handle = list.clone();
@@ -1637,7 +1639,7 @@ mod tests {
     fn importing_collection_does_not_shadow_slice_methods() {
         // `Collection` is in scope here and implemented for `&'static [T]`;
         // the slice's own `len`/`is_empty`/`get` must still be picked.
-        let list = List::from(vals([1, 2]));
+        let list = StateList::from(vals([1, 2]));
         let lens = Rc::new(RefCell::new(Vec::new()));
         let mut handle = list.clone();
         let _guard = list.watch(.., {
@@ -1659,7 +1661,7 @@ mod tests {
 
     #[test]
     fn watch_delivers_nothing_until_a_change() {
-        let list = List::from(vals([1, 2]));
+        let list = StateList::from(vals([1, 2]));
         let (changes, _guard) = record(&list);
         assert!(changes.borrow().is_empty());
 
