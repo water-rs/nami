@@ -42,11 +42,10 @@ impl<T> Debug for Binding<T> {
 }
 
 impl<T: 'static + Clone> Binding<T> {
-    /// Creates a new binding from a value by wrapping it in a container.
-    ///
-    /// The container provides the reactive capabilities for the value.
+    /// Creates a new binding initialized with `value`.
+    #[must_use]
     #[track_caller]
-    pub fn container(value: T) -> Self {
+    pub fn new(value: T) -> Self {
         Self(ErasedBinding::container(ContainerNode::new(value)))
     }
 }
@@ -55,46 +54,36 @@ impl<T: Default + Clone + 'static> Default for Binding<T> {
     /// Creates a binding with the default value for type T.
     #[track_caller]
     fn default() -> Self {
-        Self::container(T::default())
+        Self::new(T::default())
     }
 }
 
-/// Creates a new binding from a value with automatic type conversion.
+/// Creates a new [`Binding`] initialized with `value`.
 ///
-/// This function accepts any value that implements `Into<T>`, providing ergonomic
-/// initialization without manual conversion. Common use cases include:
-///
-/// - `binding("text")` creates a `Binding<String>` from `&str`
-/// - `binding(vec![1, 2, 3])` creates a `Binding<Vec<i32>>`
-/// - `binding(42)` creates a `Binding<i32>`
-///
-/// # Warning
-///
-/// This function rely on Rust's type inference to determine the target type `T`.
-/// If the type cannot be inferred, you may need to provide an explicit type annotation.
+/// Takes `T` directly so Rust infers the binding's type from `value` without
+/// requiring explicit type annotations (e.g. `binding(0)` produces
+/// `Binding<i32>`).
 ///
 /// # Examples
 ///
 /// ```
 /// use nami::{binding, Binding, Signal};
 ///
-/// // Automatic conversion from &str to String
-/// let text: Binding<String> = binding("hello");
+/// let count = binding(0);
+/// assert_eq!(count.snapshot(), 0);
+///
+/// let text = binding(String::from("hello"));
 /// assert_eq!(text.snapshot(), "hello");
 ///
-/// // Direct initialization with owned types
-/// let numbers: Binding<Vec<i32>> = binding(vec![1, 2, 3]);
+/// let numbers = binding(vec![1, 2, 3]);
 /// assert_eq!(numbers.snapshot(), vec![1, 2, 3]);
-///
-/// // Works with any type implementing Into
-/// let count: Binding<i64> = binding(42i32); // i32 -> i64
-/// assert_eq!(count.snapshot(), 42i64);
 /// ```
 ///
-/// This is equivalent to `Binding::container(value.into())`.
+/// This is equivalent to [`Binding::new`].
+#[must_use]
 #[track_caller]
-pub fn binding<T: 'static + Clone>(value: impl Into<T>) -> Binding<T> {
-    Binding::container(value.into())
+pub fn binding<T: 'static + Clone>(value: T) -> Binding<T> {
+    Binding::new(value)
 }
 
 impl_signal_binary_ops!(Binding<T>, [T], T);
@@ -163,7 +152,7 @@ impl<T: 'static> Binding<T> {
     /// # Example
     /// ```
     /// use nami::Binding;
-    /// let n = Binding::i32(10);
+    /// let n = Binding::new(10);
     /// *n.get_mut() += 5; // do not bind the guard to a let pattern...even it is `_`
     /// ```
     ///
@@ -183,8 +172,8 @@ impl<T: 'static> Binding<T> {
     ///
     /// # Example
     /// ```
-    /// use nami::{binding, Binding, Signal};
-    /// let mut text: Binding<String> = binding("hello");
+    /// use nami::{binding, Signal};
+    /// let text = binding(String::from("hello"));
     /// let taken = text.take();
     /// assert_eq!(taken, "hello");
     /// assert_eq!(text.snapshot(), String::new());
@@ -199,21 +188,20 @@ impl<T: 'static> Binding<T> {
 
     /// Sets the binding to a new value with automatic type conversion.
     ///
-    /// Accepts any value that implements `Into<T>`, providing the same ergonomic
-    /// benefits as the `binding()` constructor.
+    /// Accepts any value that implements `Into<T>`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use nami::{binding, Binding, Signal};
+    /// use nami::{binding, Signal};
     ///
-    /// let mut text: Binding<String> = binding("initial");
+    /// let text = binding(String::from("initial"));
     ///
     /// // Direct &str usage - no .into() or .to_string() needed
     /// text.set_from("updated");
     /// assert_eq!(text.snapshot(), "updated");
     ///
-    /// let mut count: Binding<i64> = binding(0);
+    /// let count = binding(0i64);
     /// count.set(42);
     /// assert_eq!(count.snapshot(), 42i64);
     /// ```
@@ -382,7 +370,7 @@ impl<T: 'static> BindingMailbox<T> {
     /// // Convert Str binding to String for cross-thread usage
     /// use nami::{binding, Binding};
     /// use waterui_str::Str;
-    /// let text_binding:Binding<Str> = nami::binding("hello world");
+    /// let text_binding = nami::binding(Str::from("hello world"));
     /// let mailbox = text_binding.mailbox();
     /// let owned_string: String = mailbox.snapshot_as().await;
     /// assert_eq!(owned_string, "hello world");
@@ -519,7 +507,7 @@ impl<T: Signed> Binding<T> {
     /// # Example
     /// ```
     /// use nami::{Binding, Signal};
-    /// let number = Binding::i32(-10i32);
+    /// let number = Binding::new(-10i32);
     /// let sign = number.sign();
     /// assert_eq!(sign.snapshot(), false);
     /// ```
@@ -536,127 +524,6 @@ impl<T: Signed> Binding<T> {
     }
 }
 
-macro_rules! impl_binding {
-    ( $( #[$meta:meta] )* $ty:ident ) => {
-        impl Binding<$ty> {
-            $( #[$meta] )*
-            #[must_use]
-            #[track_caller]
-            pub fn $ty(value: $ty) -> Self {
-                Self::container(value)
-            }
-        }
-    };
-}
-
-impl_binding!(
-    /// Creates a new u32 binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let counter = nami::Binding::u32(42);
-    /// assert_eq!(counter.snapshot(), 42);
-    /// ```
-    u32
-);
-
-impl_binding!(
-    /// Creates a new u64 binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let counter = nami::Binding::u64(42);
-    /// assert_eq!(counter.snapshot(), 42);
-    /// ```
-    u64
-);
-
-impl_binding!(
-    /// Creates a new usize binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let index = nami::Binding::usize(10);
-    /// assert_eq!(index.snapshot(), 10);
-    /// ```
-    ///
-    usize
-);
-
-impl_binding!(
-    /// Creates a new i32 binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let counter = nami::Binding::i32(42);
-    /// assert_eq!(counter.snapshot(), 42);
-    /// ```
-    i32
-);
-
-impl_binding!(
-    /// Creates a new i64 binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let counter = nami::Binding::i64(42);
-    /// assert_eq!(counter.snapshot(), 42);
-    /// ```
-    i64
-);
-
-impl_binding!(
-    /// Create a new isize binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let index = nami::Binding::isize(10);
-    /// assert_eq!(index.snapshot(), 10);
-    /// ```
-    ///
-    isize
-);
-
-impl_binding!(
-    /// Creates a new f32 binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let ratio = nami::Binding::f32(3.14);
-    /// assert_eq!(ratio.snapshot(), 3.14);
-    /// ```
-    f32
-);
-
-impl_binding!(
-    /// Creates a new f64 binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let ratio = nami::Binding::f64(3.14);
-    /// assert_eq!(ratio.snapshot(), 3.14);
-    /// ```
-    f64
-);
-impl_binding!(
-    /// Creates a new bool binding with the given value.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let flag = nami::Binding::bool(true);
-    /// assert_eq!(flag.snapshot(), true);
-    /// ```
-    bool
-);
 impl<T: Clone> Binding<T> {
     /// Appends an element to the binding's value and notifies watchers.
     ///
@@ -1060,31 +927,31 @@ mod tests {
     use alloc::{string::String, vec, vec::Vec};
 
     #[test]
-    fn test_binding_into_conversion() {
-        // Test &str -> String conversion
-        let text: Binding<String> = binding("hello");
+    fn test_binding_new_and_type_inference() {
+        // Bare integer literal infers Binding<i32> without type annotations.
+        let inferred = binding(0);
+        assert_eq!(inferred.snapshot(), 0);
+
+        let via_new = Binding::new(42);
+        assert_eq!(via_new.snapshot(), 42);
+
+        let text = binding(String::from("hello"));
         assert_eq!(text.snapshot(), "hello");
 
-        // Test direct initialization
-        let number: Binding<i32> = binding(42);
-        assert_eq!(number.snapshot(), 42);
-
-        // Test Vec initialization
-        let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);
+        let items = binding(vec![1, 2, 3]);
         assert_eq!(items.snapshot(), vec![1, 2, 3]);
 
-        // Test i32 -> i64 conversion
-        let count: Binding<i64> = binding(100i32);
+        let count = binding(100i64);
         assert_eq!(count.snapshot(), 100i64);
     }
 
     #[test]
     fn test_binding_operations() {
-        let text: Binding<String> = binding("initial");
+        let text = binding(String::from("initial"));
         text.set_from("updated"); // Now works directly with &str!
         assert_eq!(text.snapshot(), "updated");
 
-        let counter: Binding<i32> = binding(0);
+        let counter = binding(0);
         counter.add_assign(5);
         assert_eq!(counter.snapshot(), 5);
         counter.sub_assign(2);

@@ -1,4 +1,4 @@
-error[E0277]: `Binding<_>` is not a reactive collection
+error[E0277]: `Binding<Vec<{integer}>>` is not a reactive collection
  --> tests/ui/on_unimplemented/collection.rs:8:11
   |
 8 |     takes(values);
@@ -6,7 +6,7 @@ error[E0277]: `Binding<_>` is not a reactive collection
   |     |
   |     required by a bound introduced by this call
   |
-  = help: the trait `Collection` is not implemented for `Binding<_>`
+  = help: the trait `Collection` is not implemented for `Binding<Vec<{integer}>>`
   = note: use `nami::collection::StateList<T>` for an owned reactive sequence; for a sequence derived from a signal such as a `Binding<Vec<T>>`, wrap it in `nami::collection::SignalCollection`
   = help: the following other types implement trait `Collection`:
             &'static [T]

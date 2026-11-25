@@ -71,7 +71,7 @@ fn combinators_are_edges_and_only_state_owners_are_nodes() {
     let recorder = Rc::new(Recorder::default());
     let _scope = ObserverScope::install(recorder.clone());
 
-    let count = Binding::i32(0); // node
+    let count = Binding::new(0); // node
     // `map` owns no watchers of its own, so it must not appear as a node.
     let doubled = count.map(|n| n * 2);
     let guard = doubled.watch(|_| {});
@@ -115,7 +115,7 @@ fn a_dropped_binding_reports_its_node() {
     let _scope = ObserverScope::install(recorder.clone());
 
     let created_at = {
-        let text = Binding::container(String::from("hello"));
+        let text = Binding::new(String::from("hello"));
         let created = recorder.events();
         drop(text);
         match created.first() {
@@ -158,7 +158,7 @@ fn observer_traffic_is_not_itself_observed() {
         fn on_drop(&self, _node: SignalNode) {}
     }
 
-    let scratch = Binding::i32(0);
+    let scratch = Binding::new(0);
     let _scratch_guard = scratch.watch(|_| {});
     let observer = Rc::new(ReentrantObserver {
         scratch: scratch.clone(),
@@ -166,7 +166,7 @@ fn observer_traffic_is_not_itself_observed() {
     });
     let _scope = ObserverScope::install(observer.clone());
 
-    let subject = Binding::i32(0);
+    let subject = Binding::new(0);
     let _guard = subject.watch(|_| {});
     subject.set(1);
 
@@ -184,7 +184,7 @@ fn observer_traffic_is_not_itself_observed() {
 fn nothing_is_reported_without_an_installed_observer() {
     let recorder = Rc::new(Recorder::default());
     {
-        let value = Binding::i32(0);
+        let value = Binding::new(0);
         let _guard = value.watch(|_| {});
         value.set(1);
     }
@@ -207,7 +207,7 @@ fn a_signal_dropped_during_thread_teardown_reports_nothing() {
         PARKED.with(|slot| {
             // Registers this thread-local's destructor first, then — inside the
             // closure, so strictly afterwards — observability's own.
-            *slot.borrow_mut() = Some(Binding::i32(0));
+            *slot.borrow_mut() = Some(Binding::new(0));
         });
         let recorder = Rc::new(Recorder::default());
         let scope = ObserverScope::install(recorder);

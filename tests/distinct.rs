@@ -18,7 +18,7 @@ where
 
 #[test]
 fn every_watcher_of_a_distinct_signal_sees_each_transition() {
-    let source = Binding::container(0);
+    let source = Binding::new(0);
     let distinct = source.distinct();
     let (first, _first_guard) = record(&distinct);
     let (second, _second_guard) = record(&distinct);
@@ -33,7 +33,7 @@ fn every_watcher_of_a_distinct_signal_sees_each_transition() {
 
 #[test]
 fn clones_of_a_distinct_signal_deduplicate_independently() {
-    let source = Binding::container(0);
+    let source = Binding::new(0);
     let distinct = source.distinct();
     let clone = distinct.clone();
     let (original, _original_guard) = record(&distinct);
@@ -48,7 +48,7 @@ fn clones_of_a_distinct_signal_deduplicate_independently() {
 
 #[test]
 fn a_notification_repeating_the_subscribed_value_is_not_a_change() {
-    let source = Binding::container(5);
+    let source = Binding::new(5);
     let distinct = source.distinct();
     let (seen, _guard) = record(&distinct);
 
