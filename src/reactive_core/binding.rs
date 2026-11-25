@@ -285,40 +285,37 @@ impl<T: 'static> Binding<T> {
         )
     }
 
-    /// Creates a binding that maps this binding's value to a boolean condition.
+    /// Creates a binding that tracks whether this binding's value equals `other`.
     ///
-    /// The resulting binding is read-only and reflects whether the condition is met.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let number = nami::binding(5i32);
-    /// let is_positive = number.condition(|&n: &i32| n > 0);
-    /// assert_eq!(is_positive.snapshot(), true);
-    /// ```
-    pub fn condition(&self, condition: impl 'static + Clone + Fn(&T) -> bool) -> Binding<bool>
-    where
-        T: 'static,
-    {
-        Self::mapping(self, move |value| condition(&value), move |_, _| {})
-    }
-
-    /// Creates a binding that tracks whether this binding's value equals a specific value.
-    ///
-    /// The resulting binding is read-only.
+    /// Setting `true` stores `other` into this binding (matching
+    /// [`Binding::some_equal_to`]); setting `false` leaves this binding unchanged.
     ///
     /// # Example
     /// ```
     /// use nami::Signal;
-    /// let text = nami::binding("hello".to_string());
-    /// let is_hello = text.equal_to("hello".to_string());
-    /// assert_eq!(is_hello.snapshot(), true);
+    /// let mode = nami::binding("light".to_string());
+    /// let is_dark = mode.equal_to("dark".to_string());
+    /// assert_eq!(is_dark.snapshot(), false);
+    /// is_dark.set(true);
+    /// assert_eq!(mode.snapshot(), "dark");
+    /// assert_eq!(is_dark.snapshot(), true);
     /// ```
     pub fn equal_to(&self, other: T) -> Binding<bool>
     where
         T: Clone + PartialEq + 'static,
     {
-        Self::mapping(self, move |value| value == other, move |_, _| {})
+        Self::mapping(
+            self,
+            {
+                let other = other.clone();
+                move |value| value == other
+            },
+            move |binding, value| {
+                if value {
+                    binding.set(other.clone());
+                }
+            },
+        )
     }
 }
 
@@ -820,34 +817,8 @@ impl Binding<bool> {
 
     /// Creates a conditional binding that returns `Some(value)` when true, `None` when false.
     ///
-    /// Setting `Some(value)` on the result sets this binding to `true`.
-    /// Setting `None` sets this binding to `false`.
-    ///
-    /// # Example
-    /// ```
-    /// use nami::Signal;
-    /// let is_logged_in = nami::binding(true);
-    /// let username = is_logged_in.then("alice".to_string());
-    /// assert_eq!(username.snapshot(), Some("alice".to_string()));
-    /// ```
-    pub fn then<T>(&self, if_true: T) -> Binding<Option<T>>
-    where
-        T: Clone + 'static,
-    {
-        Self::mapping(
-            self,
-            move |value| {
-                if value { Some(if_true.clone()) } else { None }
-            },
-            move |binding, value| {
-                binding.set(value.is_some());
-            },
-        )
-    }
-
-    /// Creates a conditional binding that returns `Some(value)` when true, `None` when false.
-    ///
-    /// This is identical to `then()` but follows Rust's `Option::then_some()` naming convention.
+    /// Setting `Some(_)` on the result sets this binding to `true`; setting `None` sets it to
+    /// `false`.
     ///
     /// # Example
     /// ```
@@ -1515,5 +1486,20 @@ mod tests {
 
         drop(binding);
         assert_eq!(drops.get(), 1, "drop ran exactly once, after the panic");
+    }
+
+    #[test]
+    fn equal_to_writes_through_on_true_and_ignores_false() {
+        let mode: Binding<&'static str> = binding("light");
+        let is_dark = mode.equal_to("dark");
+        assert!(!is_dark.snapshot());
+
+        is_dark.set(true);
+        assert_eq!(mode.snapshot(), "dark");
+        assert!(is_dark.snapshot());
+
+        is_dark.set(false);
+        assert_eq!(mode.snapshot(), "dark");
+        assert!(is_dark.snapshot());
     }
 }
