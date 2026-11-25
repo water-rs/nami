@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/water-rs/nami/compare/core-v0.5.0...core-v0.6.0) - 2026-11-25
+
+### Added
+
+- *(core)* implement constant Signal for core::ops range types
+
+### Other
+
+- *(binding)* [**breaking**] replace container and typed constructors with Binding::new and typed binding()
+- *(collection)* [**breaking**] rename List to StateList
+- implement constant Signal for NonZero and 128-bit integers
+- require rustc 1.100 for core::mem::DropGuard
+- [**breaking**] remove OnDrop in favor of core::mem::DropGuard
+
 ## [0.5.0](https://github.com/water-rs/nami/compare/core-v0.4.0...core-v0.5.0) - 2026-10-15
 
 ### Added

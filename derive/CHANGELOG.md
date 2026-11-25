@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/water-rs/nami/compare/derive-v0.5.0...derive-v0.6.0) - 2026-11-25
+
+### Fixed
+
+- *(derive)* [**breaking**] preserve field visibility and resolve crate path in Project derive
+
+### Other
+
+- require rustc 1.100 for core::mem::DropGuard
+
 ## [0.5.0](https://github.com/water-rs/nami/compare/derive-v0.4.0...derive-v0.5.0) - 2026-10-15
 
 ### Fixed
