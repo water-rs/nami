@@ -17,9 +17,9 @@ A powerful, lightweight reactive framework for Rust.
 ```rust
 use nami::{binding, Binding, Signal};
 
-// Create mutable reactive state with automatic type conversion
-let mut counter: Binding<i32> = binding(0);
-let mut message: Binding<String> = binding("hello");  // &str -> String conversion
+// Create mutable reactive state with type inference
+let counter = binding(0);
+let message = binding(String::from("hello"));
 
 // Derive a new computation from it
 let doubled = nami::map::map(counter.clone(), |n: i32| n * 2);
@@ -59,25 +59,23 @@ pub trait Signal: Clone + 'static {
 
 ## Bindings
 
-`Binding<T>` is two-way reactive state with ergonomic helpers. Both `binding()` and `set_from()` accept any value implementing `Into<T>`, eliminating the need for manual conversions:
+`Binding<T>` is two-way reactive state with ergonomic helpers. `binding(value)` (equivalent to `Binding::new(value)`) takes `T` directly for clean type inference, while `set_from()` accepts any `Into<T>`:
 
 ```rust
 use nami::{binding, Binding, Signal};
 
-// Automatic type conversion with Into trait
-let mut text: Binding<String> = binding("hello");           // &str -> String
-let mut counter: Binding<i32> = binding(0);                 // Direct initialization
-let mut bignum: Binding<i64> = binding(0i64);
-let items: Binding<Vec<i32>> = binding(vec![1, 2, 3]);  // Vec<i32> binding
+let text = binding(String::from("hello"));
+let counter = binding(0);                  // inferred as Binding<i32>
+let bignum = binding(0i64);
+let items = binding(vec![1, 2, 3]);        // Binding<Vec<i32>>
 
-// set_from() also uses Into<T> for ergonomic updates
-text.set_from("world");                                // Direct &str, no .into() needed
+// set_from() accepts Into<T> for ergonomic updates
+text.set_from("world");                    // Direct &str, no .into() needed
 counter.set(5);
 counter.add_assign(1);
 assert_eq!(counter.snapshot(), 6);
 
-// Works with type conversions
-let mut bignum: Binding<i64> = binding(0);
+let bignum: Binding<i64> = binding(0);
 bignum.set(42);
 ```
 
@@ -86,9 +84,9 @@ bignum.set(42);
 React to changes via `watch`. Keep the returned guard alive to stay subscribed.
 
 ```rust,no_run
-use nami::{binding, Binding, Signal, watcher::Context};
+use nami::{binding, Signal, watcher::Context};
 
-let mut name: Binding<String> = binding("World");
+let name = binding(String::from("World"));
 
 let _guard = name.watch(|ctx: Context<String>| {
     // metadata is available via ctx.metadata
@@ -135,7 +133,7 @@ Control the rate of updates with debounce and throttle utilities:
 use nami::{binding, debounce::Debounce, throttle::Throttle, Binding};
 use core::time::Duration;
 
-let mut input: Binding<String> = binding("");
+let input = binding(String::new());
 
 // Debounce: delay updates until 300ms of quiet time
 let debounced = Debounce::new(input.clone(), Duration::from_millis(300));
@@ -198,7 +196,7 @@ use nami::{binding, Binding};
 use waterui_str::Str; // Example non-Send type
 
 // Create binding with non-Send type
-let text_binding:Binding<Str> = binding("hello");
+let text_binding = binding(Str::from("hello"));
 let mailbox = text_binding.mailbox();
 
 // Convert to Send type for cross-thread usage

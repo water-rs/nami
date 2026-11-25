@@ -1,17 +1,15 @@
 //! An example of how to use Nami.
 
-use nami::{Binding, Signal, binding};
+use nami::{Signal, binding};
 
 fn main() {
-    // Demonstrates automatic type conversion with Into trait
-    let text: Binding<String> = binding("hello world"); // &str -> String
+    let text = binding(String::from("hello world"));
     println!("Text value: {}", text.snapshot());
 
-    // Direct initialization
-    let counter: Binding<f64> = binding(42);
+    let counter = binding(42.0_f64);
     println!("Counter: {}", counter.snapshot());
 
-    // Update values - set() also accepts Into<T> for ergonomic usage
+    // Update values - set_from() accepts Into<T> for ergonomic usage
     text.set_from("updated text"); // No .into() needed!
     counter.add_assign(8.0);
 

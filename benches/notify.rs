@@ -28,7 +28,7 @@ fn manager_notify(bencher: divan::Bencher, n: usize) {
 
 #[divan::bench(args = [1, 10, 100])]
 fn binding_set(bencher: divan::Bencher, n: usize) {
-    let binding = Binding::container(0_i32);
+    let binding = Binding::new(0_i32);
     let guards: Vec<_> = (0..n)
         .map(|_| {
             binding.watch(|ctx| {
@@ -43,7 +43,7 @@ fn binding_set(bencher: divan::Bencher, n: usize) {
 /// `set` on a container binding with no watchers (water-rs/nami#49).
 #[divan::bench]
 fn binding_set_container(bencher: divan::Bencher) {
-    let binding = Binding::container(0_i32);
+    let binding = Binding::new(0_i32);
     bencher.bench_local(|| binding.set(divan::black_box(1)));
 }
 
@@ -51,14 +51,14 @@ fn binding_set_container(bencher: divan::Bencher) {
 /// (water-rs/nami#49).
 #[divan::bench]
 fn binding_clone_container(bencher: divan::Bencher) {
-    let binding = Binding::container(0_i32);
+    let binding = Binding::new(0_i32);
     bencher.bench_local(|| divan::black_box(&binding).clone());
 }
 
 /// Cloning a custom binding allocates one fresh node (water-rs/nami#49).
 #[divan::bench]
 fn binding_clone_custom(bencher: divan::Bencher) {
-    let binding = Binding::container(0_i32).filter(|_| true);
+    let binding = Binding::new(0_i32).filter(|_| true);
     bencher.bench_local(|| divan::black_box(&binding).clone());
 }
 
