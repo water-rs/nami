@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0](https://github.com/water-rs/nami/compare/v0.13.0...v0.14.0) - 2026-11-25
+
+### Added
+
+- *(core)* implement constant Signal for core::ops range types
+- add the scan combinator for stateful once-per-change steps
+
+### Fixed
+
+- *(binding)* [**breaking**] make equal_to write through and remove condition and then
+- *(derive)* [**breaking**] preserve field visibility and resolve crate path in Project derive
+- [**breaking**] str_contains borrows its pattern instead of capturing its type
+- [**breaking**] derived signals no longer capture the receiver's lifetime
+- *(signal)* keep a Scan's upstream watch alive for as long as any watch
+
+### Other
+
+- *(binding)* [**breaking**] replace container and typed constructors with Binding::new and typed binding()
+- Merge remote-tracking branch 'origin/main' into fix/69-binding-equal-to-writable
+- Merge remote-tracking branch 'origin/main' into feat/4370-project-visibility
+- *(collection)* [**breaking**] rename List to StateList
+- implement constant Signal for NonZero and 128-bit integers
+- Merge branch 'main' into drop-machete-unused-deps
+- replace the cargo-machete job with cargo::unused_dependencies
+- require rustc 1.100 for core::mem::DropGuard
+- [**breaking**] remove OnDrop in favor of core::mem::DropGuard
+- release from main and retire dev
+- drop the typos check
+
 ## [0.13.0](https://github.com/water-rs/nami/compare/v0.12.0...v0.13.0) - 2026-10-15
 
 ### Added
